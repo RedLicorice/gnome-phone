@@ -20,6 +20,12 @@ export class Home {
         this._destroyed = false;
 
         global.display.connectObject('window-created', (_d, win) => this._windowCreated(win), this);
+        // the launcher taking the focus (home, back to home, recents closed) closes a keyboard an app left open: its
+        // text field is minimized, but the input method's focus-out does not always follow
+        global.display.connectObject('notify::focus-window', () => {
+            if (this.isHome(global.display.focus_window) && Main.keyboard.visible)
+                Main.keyboard.close();
+        }, this);
         this._spawn();
         this._takeOverview();
         this._stack = new SingleStack(this);
