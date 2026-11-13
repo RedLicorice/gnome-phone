@@ -24,8 +24,10 @@ stage=/home/$PHONE_USER/.cache/gnome-phone-deploy
 echo "== uploading extension/ to $PHONE_HOST"
 tar -C "$root/extension" --exclude=meson.build -cf - . | remote "rm -rf $stage && mkdir -p $stage && tar -C $stage -xf -"
 
-echo "== installing into $PHONE_EXT_DIR (backup: $PHONE_EXT_DIR.bak-$stamp)"
-remote "sudo -S -p '' sh -ec 'cp -a $PHONE_EXT_DIR $PHONE_EXT_DIR.bak-$stamp && cp -a $stage/. $PHONE_EXT_DIR/ && chown -R root:root $PHONE_EXT_DIR'; rm -rf $stage" <<<"$PHONE_PASSWORD"
+# the backup must stay out of the extensions directory: the shell would try to load it as a second extension
+backup=/home/$PHONE_USER/.cache/gnome-phone-backup-$stamp
+echo "== installing into $PHONE_EXT_DIR (backup: $backup)"
+remote "sudo -S -p '' sh -ec 'cp -a $PHONE_EXT_DIR $backup && cp -a $stage/. $PHONE_EXT_DIR/ && chown -R root:root $PHONE_EXT_DIR'; rm -rf $stage" <<<"$PHONE_PASSWORD"
 
 if [ "${1:-}" = --no-restart ]; then echo "== files in place, not restarting"; exit 0; fi
 
