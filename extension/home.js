@@ -9,7 +9,8 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {SingleStack} from './stack.js';
 
-const LAUNCHER = ['/usr/local/bin/neo-launcher'];
+// a hand-built launcher in /usr/local comes before the packaged one, as keyguard.js's gp-auth does
+const LAUNCHERS = ['/usr/local/bin/neo-launcher', '/usr/bin/neo-launcher'];
 const RESPAWN_MS = 1000;
 
 export class Home {
@@ -77,8 +78,13 @@ export class Home {
         // PAN_I_WANT_A_BROKEN_VULKAN_DRIVER on a Mali) has it set for the session, in environment.d, by its device
         // package; the launcher picks a GPU over a software rasterizer itself
         const launcher = new Gio.SubprocessLauncher({flags: Gio.SubprocessFlags.NONE});
+        const exe = LAUNCHERS.find(p => GLib.file_test(p, GLib.FileTest.IS_EXECUTABLE));
+        if (!exe) {
+            console.warn('gnome-phone: no neo-launcher to start');
+            return;
+        }
         try {
-            this._client = Meta.WaylandClient.new_subprocess(global.context, launcher, LAUNCHER);
+            this._client = Meta.WaylandClient.new_subprocess(global.context, launcher, [exe]);
         } catch (e) {
             logError(e, 'gnome-phone: cannot start the launcher');
             return;
