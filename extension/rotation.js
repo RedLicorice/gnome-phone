@@ -249,8 +249,9 @@ export class Rotation {
                     this._letGo();
                 } else {
                     this._forced = wanted !== NORMAL;
-                    if (wanted !== NORMAL || !this.upright)
-                        await this._turnTo(wanted);
+                    // always: a panel upside down (180) is portrait-sized, so `upright` would call it done;
+                    // _turnTo compares the real transform
+                    await this._turnTo(wanted);
                 }
             } while (this._again && !this._destroyed);
         } catch (e) {
