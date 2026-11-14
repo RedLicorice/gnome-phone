@@ -32,7 +32,13 @@ remote "sudo -S -p '' sh -ec 'cp -a $PHONE_EXT_DIR $backup && cp -a $stage/. $PH
 if [ "${1:-}" = --no-restart ]; then echo "== files in place, not restarting"; exit 0; fi
 
 echo "== restarting $PHONE_SESSION_SERVICE (the screen goes black for about 30 s)"
-remote "sudo -S -p '' systemctl restart $PHONE_SESSION_SERVICE" <<<"$PHONE_PASSWORD" || true
+# stop, end every graphical session left on the seat, start: a plain restart can leave the old session holding the
+# display, and the new shell then attaches to it, gets no DRM master and the panel keeps its last picture
+remote "sudo -S -p '' sh -c 'systemctl stop $PHONE_SESSION_SERVICE
+  for s in \$(loginctl list-sessions --no-legend | awk \"{print \\\$1}\"); do
+    case \$(loginctl show-session \$s -p Type --value) in wayland|x11) loginctl terminate-session \$s ;; esac
+  done
+  sleep 2; systemctl start $PHONE_SESSION_SERVICE'" <<<"$PHONE_PASSWORD" || true
 for _ in $(seq 40); do
     sleep 3
     state=$(remote "gnome-extensions info gnome-phone@yesman.de 2>/dev/null | grep State" 2>/dev/null) && [ -n "$state" ] && break
