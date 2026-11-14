@@ -36,6 +36,7 @@ import {
     TaskView, animate, appGicon, clamp, clampToProgress, lerp, scaleRect, springCurve,
 } from './task.js';
 import {AndroidText} from './text.js';
+import {USER} from './stacks-model.js';
 import {screenPixels} from './units.js';
 
 Object.assign(ICONS, L3_ICONS);
@@ -606,6 +607,63 @@ class Button {
 let taskIds = 0;
 
 // Loads the fonts the chips and the buttons are set in, so the first swipe up does not wait ~25 ms for them
+// ---- the stacks' tabs ---------------------------------------------------------------------------------------------
+
+const TABS = {top: STATUS_BAR_H + 24, h: 96, inset: 36, gap: 18, padX: 42};
+
+// One pill per owner in a row above the cards; the selected one in the accent. A tap on a pill is recents' to take
+// (itemAt).
+class StackTabs {
+    constructor(scale, parent) {
+        this._scale = scale;
+        this.alpha = 0;
+        this.root = new Clutter.Actor({opacity: 0});
+        parent.add_child(this.root);
+        this._items = [];
+    }
+
+    // items: [{owner, count}], selected: an owner
+    set(items, selected) {
+        const u = v => v / this._scale;
+        for (const old of this.root.get_children())
+            old.destroy();
+        let x = TABS.inset;
+        this._items = items.map(({owner, count}) => {
+            const on = owner === selected;
+            const name = owner === USER ? 'You' : owner.charAt(0).toUpperCase() + owner.slice(1);
+            const label = new AndroidText(`${name}  ${count}`, 14, 500, {
+                colour: on ? Color.onPrimary : Color.onSurface, embolden: true, letterSpacing: 0.025});
+            const w = Math.round(label.textWidth + 2 * TABS.padX);
+            const pill = new St.Widget({
+                style: `background-color: rgb(${on ? Color.primary : CHIP_COLOUR}); border-radius: ${u(TABS.h / 2)}px;`,
+            });
+            pill.set_position(u(x), 0);
+            pill.set_size(u(w), u(TABS.h));
+            label.set_position(u(x + TABS.padX - label.inset), u((TABS.h - label.textHeight) / 2 - label.inset));
+            this.root.add_child(pill);
+            this.root.add_child(label);
+            const item = {owner, rect: [x, TABS.top, x + w, TABS.top + TABS.h]};
+            x += w + TABS.gap;
+            return item;
+        });
+        this.root.set_position(0, u(TABS.top));
+    }
+
+    place(alpha) {
+        this.alpha = alpha;
+        this.root.visible = alpha > 0;
+        this.root.opacity = Math.round(255 * alpha);
+    }
+
+    itemAt(x, y) {
+        return this._items.find(i => x >= i.rect[0] && x < i.rect[2] && y >= i.rect[1] && y < i.rect[3])?.owner ?? null;
+    }
+
+    destroy() {
+        this.root.destroy();
+    }
+}
+
 export function warmUp() {
     new AndroidText('Recents', 14, 500, {colour: Color.onSurface, embolden: true, letterSpacing: 0.025}).destroy();
     new AndroidText('Clear all', 14, 700, {colour: Color.onSurface, embolden: true}).destroy();
@@ -619,7 +677,7 @@ export function warmUp() {
 const KILL_MS = 5000;
 const closing = new Map();      // window -> the kill's timeout
 
-function closeApp(win) {
+export function closeApp(win) {
     if (closing.has(win))
         return;
     const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, KILL_MS, () => {
@@ -664,23 +722,13 @@ export class Recents {
         this._scrim = new Clutter.Actor({width: m.width, height: m.height, background_color: cogl(SCRIM), opacity: 0});
         this.layer.add_child(this._scrim);
 
-        // the running task first, then the others, most recent first (from every workspace: the mobile shell gives
-        // each app its own)
-        const tracker = Shell.WindowTracker.get_default();
-        const others = global.display.get_tab_list(Meta.TabList.NORMAL, null)
-            .filter(w => w !== running && nav.isTask(w));
-        this._fromHome = !running;
-        this._tasks = (running ? [running, ...others] : others).map(win => {
-            const app = tracker.get_window_app(win);
-            const path = app ? nav.icons.get(app.get_id())?.path : null;
-            const view = new TaskView(win, this._scale, this.layer);
-            const chip = new Chip(app, path || null, this._scale, this.layer);
-            const task = {id: ++taskIds, win, app, view, chip, dx: 0, dy: 0, alpha: 1, radius: null};
-            win.connectObject('unmanaged', () => this._lost(task), this);
-            return task;
-        });
-        if (!this._tasks.length)
-            this._empty = this._emptyMessage();
+        // the cards of one stack (stacks.js): the running app's, when there are owners besides the user
+        this._stacks = nav.stacks ?? null;
+        this._running = running;
+        this._stack = running && this._stacks ? this._stacks.ownerOf(running) : USER;
+        this._tasks = [];
+        this._buildTasks();
+        this._syncEmpty();
         this._clearAll = new Button('Clear all', null, this._scale, this.layer);
         this._screenshot = new Button('Screenshot', 'ic_screenshot', this._scale, this.layer);
 
@@ -690,20 +738,11 @@ export class Recents {
         const down = this._ramTop + this._ram.height + MAP_MARGIN - ACTIONS[1];
         this._actions = [ACTIONS[0], ACTIONS[1] + down, ACTIONS[2], ACTIONS[3] + down];
 
-        // each app's memory beside its name, measured once per opening
-        const keys = this._tasks.map(task => (task.memoryKey = memoryKey(task.win, task.app)));
-        if (keys.length) {
-            measureApps([...new Set(keys)], memory => {
-                if (this._destroyed)
-                    return;
-                for (const task of this._tasks) {
-                    if (memory[task.memoryKey])
-                        task.chip.setMemory(memory[task.memoryKey]);
-                }
-            });
-        }
+        this._measureMemory();
 
-        this._runningTask = running ? this._tasks[0] : null;
+        // the stacks as tabs over the cards: only when an agent has a window
+        this._tabs = null;
+        this._syncTabs();
         // where the running card is (TaskViewSimulator); from home, where card 0 rests
         this._frame = running ? [0, 0, SCREEN_W, SCREEN_H] : TASK.slice();
         this._frameR = running ? 0 : TASK_CORNER_R;
@@ -736,6 +775,102 @@ export class Recents {
             if (win.get_window_type() === Meta.WindowType.NORMAL)
                 this._interrupted();
         }, this);
+        this.layout();
+    }
+
+    // The selected stack's cards: the running task first (when it is this stack's), then the others, most recent
+    // first (from every workspace: the mobile shell gives each app its own)
+    _buildTasks() {
+        const nav = this._nav, running = this._running;
+        const inStack = win => !this._stacks || this._stacks.ownerOf(win) === this._stack;
+        const first = running && inStack(running) ? running : null;
+        const tracker = Shell.WindowTracker.get_default();
+        const others = global.display.get_tab_list(Meta.TabList.NORMAL, null)
+            .filter(w => w !== running && nav.isTask(w) && inStack(w));
+        this._fromHome = !first;
+        this._tasks = (first ? [first, ...others] : others).map(win => {
+            const app = tracker.get_window_app(win);
+            const path = app ? nav.icons.get(app.get_id())?.path : null;
+            const view = new TaskView(win, this._scale, this.layer);
+            const chip = new Chip(app, path || null, this._scale, this.layer);
+            const task = {id: ++taskIds, win, app, view, chip, dx: 0, dy: 0, alpha: 1, radius: null};
+            win.connectObject('unmanaged', () => this._lost(task), this);
+            return task;
+        });
+        this._runningTask = first ? this._tasks[0] : null;
+    }
+
+    _syncEmpty() {
+        this._empty?.destroy();
+        this._empty = this._tasks.length ? null : this._emptyMessage();
+    }
+
+    // each app's memory beside its name, measured once per opening (and again for another stack)
+    _measureMemory() {
+        const keys = this._tasks.map(task => (task.memoryKey = memoryKey(task.win, task.app)));
+        if (!keys.length)
+            return;
+        measureApps([...new Set(keys)], memory => {
+            if (this._destroyed)
+                return;
+            for (const task of this._tasks) {
+                if (memory[task.memoryKey])
+                    task.chip.setMemory(memory[task.memoryKey]);
+            }
+        });
+    }
+
+    _syncTabs() {
+        const owners = this._stacks?.owners() ?? [USER];
+        if (owners.length < 2) {
+            this._tabs?.destroy();
+            this._tabs = null;
+            return;
+        }
+        this._tabs ??= new StackTabs(this._scale, this.layer);
+        this._tabs.set(owners.map(owner => ({owner, count: this._stacks.count(owner)})), this._stack);
+    }
+
+    // A tab: the cards of another stack. The app the swipe started over is not in it, so it goes to recents like
+    // the others, with the launcher behind.
+    _switchStack(owner) {
+        if (owner === this._stack || this._busy || this._menu || this._reflowing)
+            return;
+        // every app that was on screen or under it goes to recents, as at home: their cards are about to go, and a
+        // window that was only hidden by its card would show through the scrim
+        const wins = new Set(this._tasks.filter(t => !t.dismissed).map(t => t.win));
+        if (this._running)
+            wins.add(this._running);
+        let moved = false;
+        for (const win of wins) {
+            const actor = win.get_compositor_private();
+            if (win.minimized || !actor)
+                continue;
+            Main.wm.skipNextEffect(actor);
+            win.minimize();
+            moved = true;
+        }
+        if (moved)
+            this._nav.home.window?.activate(global.get_current_time());
+        this._running = null;
+        for (const name of [...this._motions.keys()]) {
+            if (name === 'scroll' || name === 'edge' || name.startsWith('dy'))
+                this._stop(name);
+        }
+        for (const task of this._tasks) {
+            task.win.disconnectObject(this);
+            task.view.destroy();
+            task.chip.destroy();
+        }
+        this._stack = owner;
+        this._scroll = 0;
+        this._pull = 0;
+        this._scrolling = false;
+        this._buildTasks();
+        this._syncEmpty();
+        this._measureMemory();
+        this._syncTabs();
+        this._overPage = this._nearestPage();
         this.layout();
     }
 
@@ -906,6 +1041,7 @@ export class Recents {
         // the actions hide with no tasks
         this._screenshot.place(this._actions, this._tasks.length ? this._actionsAlpha * (1 - ca) : 0, !this._scrolling);
         this._ram.place(this._ramTop, this._actionsAlpha);
+        this._tabs?.place(this._actionsAlpha * this._content);
         if (this._empty)
             this._empty.opacity = Math.round(255 * this._content);
         if (this._menu)
@@ -1027,6 +1163,9 @@ export class Recents {
             return {kind: 'clear-all'};
         if (this._screenshot.root.visible && this._clearAllAlpha() < 1 && inside(this._actions))
             return {kind: 'screenshot'};
+        const tab = this._tabs && this._tabs.alpha >= 1 ? this._tabs.itemAt(x, y) : null;
+        if (tab)
+            return {kind: 'tab', owner: tab};
         // the chip opens the menu once the chips are in (a card's own touch otherwise)
         const chip = this._chipAlpha >= 1 && this._tasks.find(t => !t.dismissed && inside(t.chip.rect));
         if (chip)
@@ -1099,6 +1238,8 @@ export class Recents {
                     touch.hit.task.chip.pressed(false);
                 if (touch.hit.kind === 'bar')
                     touch.mode = ty < 0 ? 'home' : 'none';
+                else if (touch.hit.kind === 'tab')
+                    touch.mode = 'none';
                 else if (Math.abs(tx) > Math.abs(ty))
                     touch.mode = 'scroll';
                 else if (touch.hit.kind === 'card' || touch.hit.kind === 'chip')
@@ -1194,6 +1335,9 @@ export class Recents {
             break;
         case 'screenshot':
             this._takeScreenshot();
+            break;
+        case 'tab':
+            this._switchStack(hit.owner);
             break;
         case 'empty':
             this.goHome();
@@ -1843,6 +1987,8 @@ export class Recents {
             task.chip.destroy();
         }
         this._tasks = [];
+        this._tabs?.destroy();
+        this._tabs = null;
         this.layer.destroy();
         this._nav.recentsClosed(this);
     }
