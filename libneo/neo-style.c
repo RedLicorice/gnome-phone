@@ -44,7 +44,7 @@ static const struct {
 
 /* "Cyberpunk meets Italian Renaissance", the optional look (setting de.yesman.GnomePhone.Theme name=renaissance):
  * an OLED night of lapis-tinted black, gold leaf as the accent, terracotta for the second one, parchment text and
- * neon cyan as the electric edge. Same roles, other values, so every widget follows; neo-renaissance.css adds the
+ * amber (the camera eye) as the only warm edge light. Same roles, other values, so every widget follows; neo-renaissance.css adds the
  * ornament. Michelangelus (not shipped) is named in that file with fallbacks. */
 static const guint32 renaissance_rgb[NEO_N_COLORS] = {
   [NEO_PRIMARY]                   = 0xd9b26a,
@@ -56,7 +56,7 @@ static const guint32 renaissance_rgb[NEO_N_COLORS] = {
   [NEO_ON_SECONDARY]              = 0x3d1a0b,
   [NEO_SECONDARY_CONTAINER]       = 0x4a2a1c,
   [NEO_ON_SECONDARY_CONTAINER]    = 0xf6cdb8,
-  [NEO_TERTIARY]                  = 0x38e8ff,
+  [NEO_TERTIARY]                  = 0xff9f2e,
   [NEO_ON_TERTIARY]               = 0x00343c,
   [NEO_TERTIARY_CONTAINER]        = 0x0a4650,
   [NEO_ON_TERTIARY_CONTAINER]     = 0xb2f5ff,

@@ -3,13 +3,12 @@
  *
  * Michelangelus has no distribution licence: it is installed on the device from the owner's own copy, never shipped
  * here. Where it is absent the chain falls to Cinzel, then to the stock face, so the theme still reads. Nothing in
- * this file animates: idle costs no CPU or GPU. Silver hairlines (1px) are the ornament; gold is for focus and accents only; cyan is only an
+ * this file animates: idle costs no CPU or GPU. Silver hairlines (1px) are the ornament; gold is for focus and accents only; amber is only an
  * edge light on focus. */
 
 @define-color neo_gold #d9b26a;
 @define-color neo_gold_hi #f3dc9f;
-@define-color neo_cyan #38e8ff;
-@define-color neo_magenta #ff3bd4;
+@define-color neo_amber #ff9f2e;   /* the Kiroshi eye: the only warm light */
 @define-color neo_lapis #23418f;
 @define-color neo_silver #b0b5c2;       /* tools/theme/palette.json is canonical */
 @define-color neo_silver_dim #6e7280;
@@ -79,7 +78,7 @@
 .neo-entry { border-bottom-color: alpha(@neo_gold, 0.55); }
 .neo-entry:focus-within {
   border-bottom-color: @neo_gold_hi;
-  box-shadow: 0 2px 8px -2px alpha(@neo_cyan, 0.7);
+  box-shadow: 0 2px 8px -2px alpha(@neo_amber, 0.7);
 }
 
 *:focus-visible {
