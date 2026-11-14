@@ -78,7 +78,7 @@ static const guint32 renaissance_rgb[NEO_N_COLORS] = {
 };
 
 static gboolean       renaissance;       /* the theme in force */
-static GtkCssProvider *provider;
+static GtkCssProvider *provider, *theme_provider;
 static GSettings      *theme_settings;
 
 static guint32
@@ -117,24 +117,44 @@ neo_rgba_mix (const GdkRGBA *a, const GdkRGBA *b, float t)
   };
 }
 
-/* the palette as @define-color lines, then neo.css, then (the Renaissance theme) its ornament */
 static void
-load_css (void)
+add_sheet (GString *css, const char *resource)
+{
+  GBytes *sheet = g_resources_lookup_data (resource, 0, NULL);
+  if (!sheet)
+    return;
+  g_string_append_len (css, g_bytes_get_data (sheet, NULL), g_bytes_get_size (sheet));
+  g_string_append_c (css, '\n');
+  g_bytes_unref (sheet);
+}
+
+static GString *
+palette_css (void)
 {
   GString *css = g_string_new (NULL);
   for (int i = 0; i < NEO_N_COLORS; i++)
     g_string_append_printf (css, "@define-color %s #%06x;\n", palette[i].css, rgb_of (i));
-  const char *sheets[] = { "/de/yesman/neo/neo.css", "/de/yesman/neo/neo-renaissance.css" };
-  for (int i = 0; i < (renaissance ? 2 : 1); i++)
-    {
-      GBytes *sheet = g_resources_lookup_data (sheets[i], 0, NULL);
-      if (!sheet)
-        continue;
-      g_string_append_len (css, g_bytes_get_data (sheet, NULL), g_bytes_get_size (sheet));
-      g_string_append_c (css, '\n');
-      g_bytes_unref (sheet);
-    }
+  return css;
+}
+
+/* the palette as @define-color lines, then neo.css. The Renaissance theme is a second sheet above the apps' own (USER
+ * priority, with the palette again: colour names are per sheet): the ornament, and the recoloured palettes of the
+ * apps that carry their own (neo-renaissance-apps.css, generated) */
+static void
+load_css (void)
+{
+  GString *css = palette_css ();
+  add_sheet (css, "/de/yesman/neo/neo.css");
   gtk_css_provider_load_from_string (provider, css->str);
+  g_string_free (css, TRUE);
+
+  css = palette_css ();
+  if (renaissance)
+    {
+      add_sheet (css, "/de/yesman/neo/neo-renaissance-apps.css");
+      add_sheet (css, "/de/yesman/neo/neo-renaissance.css");
+    }
+  gtk_css_provider_load_from_string (theme_provider, css->str);
   g_string_free (css, TRUE);
 }
 
@@ -185,10 +205,13 @@ neo_init (void)
     }
 
   provider = gtk_css_provider_new ();
+  theme_provider = gtk_css_provider_new ();
   load_css ();
   /* above the theme (APPLICATION), so GTK's own look never shows through a libneo widget */
   gtk_style_context_add_provider_for_display (gdk_display_get_default (), GTK_STYLE_PROVIDER (provider),
                                               GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+  gtk_style_context_add_provider_for_display (gdk_display_get_default (), GTK_STYLE_PROVIDER (theme_provider),
+                                              GTK_STYLE_PROVIDER_PRIORITY_USER);
 
   /* the apps are always dark, whatever the system's preference (Theme.DeskClock's parent is a Dark theme) */
 #if GTK_CHECK_VERSION (4, 20, 0)
