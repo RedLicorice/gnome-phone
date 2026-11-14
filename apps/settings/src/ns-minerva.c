@@ -1,23 +1,37 @@
 /* The Minerva page: which model the phone's agent thinks with, its fallbacks, per-role models, voice, budgets, and
  * whether the keys are there. Everything is read and written through `minerva-config` (Minerva's repository,
  * config/): `status --json` to read, `set key=value --apply --json` to write. The page keeps no state of its own,
- * and only shows whether a key is present: keys are not entered here. */
+ * and never shows a key: it takes one in a password dialog, hands it to `minerva-config key set` on stdin (never in
+ * argv) and shows only "set, …last4" or "missing". */
 #include "ns-pages.h"
 #include "ns-ui.h"
 
 #include <json-glib/json-glib.h>
 
+typedef struct Mn Mn;
+
+/* an API key: the name `minerva-config key` knows, the row that shows "set, …last4" and the Remove button */
 typedef struct {
+  Mn         *m;
+  const char *name, *label, *file;
+  GtkWidget  *row, *remove;
+} KeyRow;
+
+struct Mn {
   AdwNavigationPage *page;
   GtkWidget *msg;                       /* the last result: saved, restarted, or the error */
   GtkWidget *brain_g, *roles_g, *voice_g; /* filled once, with the first status (the pickers need the model list) */
   GtkWidget *chain, *notes;             /* rebuilt on every refresh (no pickers inside) */
-  GtkWidget *voice_id, *voice_cap, *or_cap, *el_cap, *spent, *key_or, *key_pw; /* rows updated in place */
+  GtkWidget *voice_id, *voice_cap, *or_cap, *el_cap, *spent, *key_pw; /* rows updated in place */
+  KeyRow     keys[2];                   /* OpenRouter, ElevenLabs */
+  GtkWidget *bat_val, *bat_scale, *bat_state; /* Max charge: the value row, the slider, the charge service's state */
+  guint      bat_timer;                 /* a drag is saved 600 ms after the last move */
+  gboolean   bat_syncing;               /* the slider is being set from the status */
   JsonObject *st;                       /* the last status */
   GStrv      chain_ids;                 /* the configured fallbacks, in order */
   gboolean   picks_built;               /* the pickers are built once: a refresh must not free what a picker page points to */
   gboolean   busy;
-} Mn;
+};
 
 static char *
 mn_bin (void)
@@ -72,8 +86,9 @@ job_done (GObject *src, GAsyncResult *res, gpointer data)
   g_free (j);
 }
 
+/* `stdin_text` (or NULL) goes to the program's standard input: how a key travels, so it is in no process list */
 static void
-mn_run (Mn *m, const char *const *args, MnDone done, gpointer data)
+mn_run_in (Mn *m, const char *const *args, const char *stdin_text, MnDone done, gpointer data)
 {
   g_autofree char *bin = mn_bin ();
   g_autoptr (GPtrArray) argv = g_ptr_array_new ();
@@ -83,7 +98,8 @@ mn_run (Mn *m, const char *const *args, MnDone done, gpointer data)
   g_ptr_array_add (argv, NULL);
   g_autoptr (GError) err = NULL;
   GSubprocess *p = g_subprocess_newv ((const char *const *) argv->pdata,
-                                      G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE, &err);
+                                      G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE |
+                                      (stdin_text ? G_SUBPROCESS_FLAGS_STDIN_PIPE : G_SUBPROCESS_FLAGS_NONE), &err);
   if (!p) {
     done (m, NULL, err->message, data);
     return;
@@ -93,8 +109,14 @@ mn_run (Mn *m, const char *const *args, MnDone done, gpointer data)
   j->page = g_object_ref (G_OBJECT (m->page));
   j->done = done;
   j->data = data;
-  g_subprocess_communicate_utf8_async (p, NULL, NULL, job_done, j);
+  g_subprocess_communicate_utf8_async (p, stdin_text, NULL, job_done, j);
   g_object_unref (p);
+}
+
+static void
+mn_run (Mn *m, const char *const *args, MnDone done, gpointer data)
+{
+  mn_run_in (m, args, NULL, done, data);
 }
 
 static void
@@ -185,7 +207,7 @@ set_done (Mn *m, JsonObject *root, const char *err, gpointer data)
     say (m, t, TRUE);
   } else {
     JsonArray *restarted = arr_of (root, "restarted");
-    g_autoptr (GString) s = g_string_new ("Saved and applied.");
+    g_autoptr (GString) s = g_string_new (data ? "Saved." : "Saved and applied.");
     for (guint i = 0; restarted && i < json_array_get_length (restarted); i++)
       g_string_append_printf (s, "%s%s", i ? ", " : " Restarted: ", json_array_get_string_element (restarted, i));
     say (m, s->str, FALSE);
@@ -194,7 +216,7 @@ set_done (Mn *m, JsonObject *root, const char *err, gpointer data)
 }
 
 static void
-mn_set (Mn *m, const char *key, const char *value)
+mn_set_ex (Mn *m, const char *key, const char *value, gboolean apply)
 {
   if (m->busy) {
     say (m, "Still applying the last change…", FALSE);
@@ -203,8 +225,15 @@ mn_set (Mn *m, const char *key, const char *value)
   m->busy = TRUE;
   say (m, "Applying…", FALSE);
   g_autofree char *pair = g_strdup_printf ("%s=%s", key, value);
-  const char *const args[] = { "set", "--apply", "--json", "--quiet", pair, NULL };
-  mn_run (m, args, set_done, NULL);
+  const char *const with[] = { "set", "--apply", "--json", "--quiet", pair, NULL };
+  const char *const without[] = { "set", "--json", "--quiet", pair, NULL };
+  mn_run (m, apply ? with : without, set_done, apply ? NULL : GINT_TO_POINTER (1));
+}
+
+static void
+mn_set (Mn *m, const char *key, const char *value)
+{
+  mn_set_ex (m, key, value, TRUE);
 }
 
 /* ---- pickers (built once) ---- */
@@ -452,6 +481,153 @@ chain_fill (Mn *m)
   (void) add;
 }
 
+/* ---- API keys ---- */
+
+/* `key set|remove NAME --apply`: apply restarts the agent server when the OpenRouter key came or went */
+static void
+key_run (KeyRow *k, const char *action, const char *secret)
+{
+  Mn *m = k->m;
+  if (m->busy) {
+    say (m, "Still applying the last change…", FALSE);
+    return;
+  }
+  m->busy = TRUE;
+  say (m, "Applying…", FALSE);
+  const char *const args[] = { "key", action, k->name, "--apply", "--json", NULL };
+  mn_run_in (m, args, secret, set_done, NULL);
+}
+
+static void
+key_entered (const char *text, gpointer data)
+{
+  KeyRow *k = data;
+  if (!text || !*text)
+    return;
+  key_run (k, "set", text);   /* the dialog's string is not kept; minerva-config strips and checks it */
+}
+
+static void
+key_activated (GtkWidget *row, gpointer data)
+{
+  KeyRow *k = data;
+  g_autofree char *heading = g_strdup_printf ("%s key", k->label);
+  g_autofree char *body = g_strdup_printf ("Paste the key. It is saved in ~/.config/minerva/%s, readable by you only, "
+                                           "and never shown again.", k->file);
+  ns_ask (row, heading, body, "", TRUE, "Save", key_entered, k);
+}
+
+static void
+key_removed (gboolean yes, gpointer data)
+{
+  if (yes)
+    key_run (data, "remove", NULL);
+}
+
+static void
+key_remove_clicked (GtkButton *b, gpointer data)
+{
+  KeyRow *k = data;
+  g_autofree char *heading = g_strdup_printf ("Remove the %s key?", k->label);
+  ns_confirm (GTK_WIDGET (b), heading, "The file is deleted. You can enter a key again at any time.", "Remove", TRUE,
+              key_removed, k);
+}
+
+static void
+key_row_build (Mn *m, GtkWidget *group, KeyRow *k, const char *name, const char *label, const char *file)
+{
+  k->m = m;
+  k->name = name;
+  k->label = label;
+  k->file = file;
+  g_autofree char *title = g_strdup_printf ("%s key", label);
+  k->row = ns_row (group, NULL, NULL, title, "…");
+  ns_row_on_activate (k->row, key_activated, k);
+  k->remove = icon_button ("user-trash-symbolic", "Remove the key", G_CALLBACK (key_remove_clicked), k, 0, FALSE);
+  ns_row_suffix (k->row, k->remove);
+}
+
+static void
+keys_update (Mn *m)
+{
+  JsonObject *hints = obj_of (m->st, "key_hints");
+  for (guint i = 0; i < G_N_ELEMENTS (m->keys); i++) {
+    const char *h = str_of (hints, m->keys[i].name);
+    if (!*h)
+      h = "missing";
+    ns_row_set_subtitle (m->keys[i].row, h);
+    gtk_widget_set_sensitive (m->keys[i].remove, g_str_has_prefix (h, "set"));
+  }
+}
+
+/* ---- battery: Max charge ---- */
+
+static int
+bat_value (Mn *m)
+{
+  int v = (int) g_ascii_strtoll (setting (m, "battery.max_charge"), NULL, 10);
+  return v < 50 || v > 100 ? 100 : v;
+}
+
+static void
+bat_show (Mn *m, int v)
+{
+  g_autofree char *t = v >= 100 ? g_strdup ("Off (100 %)") : g_strdup_printf ("%d %%", v);
+  ns_row_set_subtitle (m->bat_val, t);
+}
+
+static gboolean
+bat_save (gpointer data)
+{
+  Mn *m = data;
+  m->bat_timer = 0;
+  g_autofree char *v = g_strdup_printf ("%d", (int) gtk_range_get_value (GTK_RANGE (m->bat_scale)));
+  mn_set_ex (m, "battery.max_charge", v, FALSE);   /* nothing to render: the charge service polls brain.conf */
+  return G_SOURCE_REMOVE;
+}
+
+static void
+bat_moved (GtkRange *range, gpointer data)
+{
+  Mn *m = data;
+  if (m->bat_syncing)
+    return;
+  double raw = gtk_range_get_value (range), v = 5 * (int) (raw / 5 + 0.5);   /* steps of 5 */
+  if (v != raw) {
+    m->bat_syncing = TRUE;
+    gtk_range_set_value (range, v);
+    m->bat_syncing = FALSE;
+  }
+  bat_show (m, (int) v);
+  if (m->bat_timer)
+    g_source_remove (m->bat_timer);
+  m->bat_timer = g_timeout_add (600, bat_save, m);
+}
+
+static void
+bat_update (Mn *m)
+{
+  if (!m->bat_timer) {   /* a drag in progress is not overwritten */
+    int v = bat_value (m);
+    m->bat_syncing = TRUE;
+    gtk_range_set_value (GTK_RANGE (m->bat_scale), v);
+    m->bat_syncing = FALSE;
+    bat_show (m, v);
+  }
+  JsonObject *b = obj_of (m->st, "battery");   /* the charge service's state file; absent: nothing shown */
+  const char *state = str_of (b, "state"), *soc = str_of (b, "soc_estimate"), *why = str_of (b, "reason");
+  gtk_widget_set_visible (m->bat_state, *state != 0);
+  if (*state) {
+    g_autoptr (GString) t = g_string_new (state);
+    t->str[0] = g_ascii_toupper (t->str[0]);
+    if (*soc)
+      g_string_append_printf (t, " • about %s %%", soc);
+    if (*why)
+      g_string_append_printf (t, " • %s", why);
+    ns_row_set_subtitle (m->bat_state, t->str);
+  }
+}
+
 /* ---- refresh ---- */
 
 static void
@@ -494,7 +670,8 @@ update_fields (Mn *m)
   fill_value (m->or_cap, setting (m, "budgets.openrouter_monthly_eur"));
   fill_value (m->el_cap, setting (m, "budgets.elevenlabs_chars_month"));
   JsonObject *keys = obj_of (m->st, "keys");
-  ns_row_set_subtitle (m->key_or, keys && json_object_get_boolean_member (keys, "openrouter") ? "Present" : "Missing");
+  keys_update (m);
+  bat_update (m);
   ns_row_set_subtitle (m->key_pw, keys && json_object_get_boolean_member (keys, "opencode_password") ? "Present" : "Missing");
   JsonObject *b = obj_of (m->st, "budget");
   const char *cap = setting (m, "budgets.openrouter_monthly_eur");
@@ -504,7 +681,7 @@ update_fields (Mn *m)
                                           json_object_get_boolean_member (b, "over") ? " • over the cap" : "");
     ns_row_set_subtitle (m->spent, t);
   } else {
-    ns_row_set_subtitle (m->spent, *cap ? "Not checked yet" : "No cap set");
+    ns_row_set_subtitle (m->spent, *cap && g_ascii_strtod (cap, NULL) > 0 ? "Not checked yet" : "No cap set: no paid use");
   }
 }
 
@@ -538,6 +715,8 @@ mn_refresh (Mn *m)
 static void
 mn_free (Mn *m)
 {
+  if (m->bat_timer)
+    g_source_remove (m->bat_timer);
   if (m->st)
     json_object_unref (m->st);
   g_strfreev (m->chain_ids);
@@ -574,13 +753,25 @@ ns_page_minerva (GtkWidget *row, gpointer data)
   m->or_cap = field_row (m, bg, "OpenRouter per month (EUR)", "budgets.openrouter_monthly_eur");
   m->el_cap = field_row (m, bg, "ElevenLabs per month (characters)", "budgets.elevenlabs_chars_month");
   m->spent = ns_row_info (bg, "Spent on OpenRouter this month", "");
-  ns_note (c, "Over the OpenRouter cap, Minerva falls back to the free models until the month turns. Checked hourly.");
+  ns_note (c, "Empty or 0 means no paid use: OpenRouter stays off, and only the free models answer, until you set a "
+              "cap. Over the cap, Minerva falls back to the free models until the month turns. Checked hourly.");
+
+  GtkWidget *tg = ns_group (c, "Battery");
+  m->bat_val = ns_row_info (tg, "Max charge", "");
+  ns_row_scale (tg, NULL, "battery-level-80-symbolic", 50, 100, 5, &m->bat_scale);
+  gtk_range_set_round_digits (GTK_RANGE (m->bat_scale), 0);
+  g_signal_connect (m->bat_scale, "value-changed", G_CALLBACK (bat_moved), m);
+  m->bat_state = ns_row_info (tg, "Charging", "");
+  gtk_widget_set_visible (m->bat_state, FALSE);
+  ns_note (c, "Holds the battery near this level while plugged in; the phone reads the level from the battery voltage. "
+              "100 % switches it off.");
 
   GtkWidget *kg = ns_group (c, "Keys");
-  m->key_or = ns_row_info (kg, "OpenRouter key", "");
+  key_row_build (m, kg, &m->keys[0], "openrouter", "OpenRouter", "openrouter.env");
+  key_row_build (m, kg, &m->keys[1], "elevenlabs", "ElevenLabs", "elevenlabs.env");
   m->key_pw = ns_row_info (kg, "Agent server password", "");
-  ns_note (c, "Without the OpenRouter key only the free opencode models are used. Keys are not entered here; this only "
-              "shows whether they are in place.");
+  ns_note (c, "Tap a key to enter it; it is never shown again, only its last four characters. Without the OpenRouter key "
+              "only the free opencode models are used. ElevenLabs is stored for the voice service.");
 
   say (m, "", FALSE);
   mn_refresh (m);
