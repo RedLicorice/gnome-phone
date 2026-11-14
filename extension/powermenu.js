@@ -20,7 +20,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {VectorIcon} from './icons.js';
 import {animate, bezier, LINEAR} from './motion.js';
-import {Color, cogl, rgba} from './palette.js';
+import {Color, cogl, gild, rgba} from './palette.js';
 import {AndroidText} from './text.js';
 import {px, SCREEN_H, SCREEN_W} from './units.js';
 
@@ -47,7 +47,7 @@ const PRESS_MS = 50;
 const RELEASE_MS = 250;
 
 function shapeStyle(color, radius) {
-    return `background-color: ${rgba(color)}; border-radius: ${px(radius).toFixed(2)}px;`;
+    return `background-color: ${rgba(color)}; border-radius: ${px(radius).toFixed(2)}px;${gild(0.5)}`;
 }
 
 function login1(method, params) {
