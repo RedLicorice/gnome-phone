@@ -207,7 +207,10 @@ neo_pressable_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
   if (self->fill.alpha > 0 || ripple) {
     gtk_snapshot_push_rounded_clip (snapshot, &shape);
     if (self->fill.alpha > 0)
-      gtk_snapshot_append_color (snapshot, &self->fill, &shape.bounds);
+    {
+      GdkRGBA fill = neo_theme_map_rgba (&self->fill);   /* an app's own colour, in the Renaissance look */
+      gtk_snapshot_append_color (snapshot, &fill, &shape.bounds);
+    }
     if (ripple)
       /* the wave grows over the widget's box, from where the finger is, whatever its clip */
       neo_ripple_snapshot (&self->ripple, snapshot, &GRAPHENE_RECT_INIT (0, 0, w, h), &self->color);
