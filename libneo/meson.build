@@ -47,4 +47,3 @@ import('pkgconfig').generate(neo_lib, name: 'neo-1', subdirs: 'neo-1', requires:
 # Roboto as Android ships it (variable: weight 100-900, width 75-100), under its own family name so that the
 # system's static Roboto cut can never stand in for it
 install_data('fonts/NeoRoboto.ttf', install_dir: get_option('datadir') / 'fonts' / 'neo')
-install_data('data/de.yesman.GnomePhone.Theme.gschema.xml', install_dir: get_option('datadir') / 'glib-2.0' / 'schemas')
