@@ -3,10 +3,11 @@
 // font families.
 import Cogl from 'gi://Cogl';
 
+import {isRenaissance} from './theme.js';
 import {sp} from './units.js';
 
 // [r, g, b] 0..255; roles are the dark scheme
-export const Color = {
+const STOCK = {
     primary: [156, 207, 215],               // #9CCFD7, slider, active tiles, actions
     onPrimary: [13, 71, 78],                // #0D474E
     surface: [10, 15, 16],                  // #0A0F10, volume pill
@@ -25,6 +26,30 @@ export const Color = {
     white: [255, 255, 255],
     black: [0, 0, 0],
 };
+
+// The optional Renaissance look ("Cyberpunk meets Italian Renaissance", theme.js): the same roles, OLED black with a
+// lapis cast, gold leaf for primary, parchment text, neon cyan as the electric edge. Mirrors libneo's palette.
+const RENAISSANCE = {
+    primary: [217, 178, 106],               // gold leaf #D9B26A
+    onPrimary: [42, 29, 4],
+    surface: [8, 7, 13],
+    surfaceContainerLow: [13, 12, 21],
+    surfaceContainer: [19, 18, 30],
+    surfaceContainerHigh: [26, 25, 39],
+    surfaceContainerHighest: [33, 31, 49],
+    onSurface: [240, 230, 208],             // parchment
+    onSurfaceVariant: [189, 178, 153],
+    tertiary: [56, 232, 255],               // neon cyan
+    accent1_100: [243, 220, 159],           // light gold
+    accent1_800: [18, 26, 66],              // lapis night
+    neutral1_500_l4: [9, 8, 14],
+    neutral1_500_l6: [16, 15, 26],
+    notificationScrim: [10, 8, 28],
+    white: [255, 255, 255],
+    black: [0, 0, 0],
+};
+
+export const Color = isRenaissance() ? RENAISSANCE : STOCK;
 
 // surface_effect_N (dark): translucent fills drawn over the blurred shade
 export const SurfaceEffect = {
@@ -65,9 +90,17 @@ export const SHADE_PANEL = over([Color.accent1_800, 0.32],
 
 const FAMILY = 'Google Sans Flex';
 
+// The Renaissance theme sets big text (clocks) in Michelangelus; where it is not installed Pango falls to the stock face
+const DISPLAY_FROM_SP = 24;
+export function displayFont(sizeSp, wght) {
+    return `Michelangelus, ${FAMILY} ${wght >= 600 ? 'Bold ' : ''}${sp(sizeSp).toFixed(3)}px`;
+}
+
 // A Pango font description for a Clutter.Text: size in sp, the variable axes as Android's variable-* families set
 // them (rounded terminals)
 export function font(sizeSp, wght, {wdth = 100, rond = 100, opsz = sizeSp} = {}) {
+    if (isRenaissance() && sizeSp >= DISPLAY_FROM_SP)
+        return displayFont(sizeSp, wght);
     return `${FAMILY} ${sp(sizeSp).toFixed(3)}px @wght=${wght},wdth=${wdth},ROND=${rond},opsz=${opsz}`;
 }
 

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="de.yesman.GnomePhone.Theme" path="/de/yesman/gnome-phone/theme/">
+    <key name="name" type="s">
+      <choices>
+        <choice value="default"/>
+        <choice value="renaissance"/>
+      </choices>
+      <default>'default'</default>
+      <summary>Look of the phone</summary>
+      <description>'default' is the stock Android 16 look. 'renaissance' is Cyberpunk meets Italian Renaissance: gold
+      leaf, lapis and parchment on OLED black, neon cyan edges, Michelangelus capitals where the font is installed.
+      The shell and the Neo apps follow it live; the kiosk picks it up on its next start.</description>
+    </key>
+  </schema>
+</schemalist>
