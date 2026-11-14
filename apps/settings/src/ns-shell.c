@@ -151,6 +151,8 @@ ns_page_lock_screen (GtkWidget *row, gpointer data)
   ns_note (c, "Swipe unlocks without a password. Pattern and PIN unlock with your password: a pattern or PIN set "
               "here becomes your password (also for sudo, SSH and the console).");
 
+  ns_fprint_lock_group (page, c);
+
   g = ns_group (c, "On the lock screen");
   GSettings *n = ns_page_settings (page, "org.gnome.desktop.notifications");
   ns_row_switch (g, "Notifications", "Their apps' icons below the clock", n, "show-in-lock-screen");
