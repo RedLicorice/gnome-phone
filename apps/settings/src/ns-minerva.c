@@ -432,8 +432,11 @@ chain_fill (Mn *m)
   guint n = g_strv_length (m->chain_ids);
   for (guint i = 0; i < n; i++) {
     JsonObject *o = model_of (m, m->chain_ids[i]);
-    g_autofree char *title = o ? model_label (o) : g_strdup_printf ("%s • not listed", m->chain_ids[i]);
-    g_autofree char *sub = g_strdup_printf ("%u. %s", i + 1, m->chain_ids[i]);
+    const char *name = o ? str_of (o, "name") : "";
+    g_autofree char *title = g_strdup (*name ? name : m->chain_ids[i]);
+    gboolean vision = o && json_object_has_member (o, "vision") && json_object_get_boolean_member (o, "vision");
+    g_autofree char *sub = g_strdup_printf ("%s%s%s", m->chain_ids[i], vision ? " • sees images" : "",
+                                            o ? "" : " • not listed");
     GtkWidget *row = ns_row (m->chain, NULL, NULL, title, sub);
     ChainOp *op = g_new0 (ChainOp, 1);
     op->m = m;
@@ -576,7 +579,8 @@ ns_page_minerva (GtkWidget *row, gpointer data)
   GtkWidget *kg = ns_group (c, "Keys");
   m->key_or = ns_row_info (kg, "OpenRouter key", "");
   m->key_pw = ns_row_info (kg, "Agent server password", "");
-  ns_note (c, "Keys are not entered here; this only shows whether they are in place.");
+  ns_note (c, "Without the OpenRouter key only the free opencode models are used. Keys are not entered here; this only "
+              "shows whether they are in place.");
 
   say (m, "", FALSE);
   mn_refresh (m);
