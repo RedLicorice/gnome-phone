@@ -24,7 +24,7 @@ import {overWindows} from './scanout.js';
 import {Power} from './power.js';
 import {PowerMenu} from './powermenu.js';
 import {Rotation} from './rotation.js';
-import {closeApp} from './recents.js';
+import {closeApp, measureApps} from './recents.js';
 import {Service} from './service.js';
 import {Shade} from './shade.js';
 import {Stacks} from './stacks.js';
@@ -108,7 +108,7 @@ export default class GnomePhoneExtension extends Extension {
         this._home = new Home(this);
         this._service = new Service(this._home, this._boost);
         // whose each window is (agents' windows stay in recents), and the API agents open them through
-        this._stacks = new Stacks(this._home, closeApp);
+        this._stacks = new Stacks(this._home, closeApp, measureApps);
         this._service.setStacks(this._stacks);
 
         // Android's SystemUI: the status bar in place of the shell's top panel
@@ -136,7 +136,8 @@ export default class GnomePhoneExtension extends Extension {
         overWindows(this._keyguard.actor);
         this._service.setKeyguard(this._keyguard);
         // an app's window over the lock screen: the ringing alarm, a call coming in
-        this._whenLocked = new WhenLocked(this._keyguard);
+        this._stacks.setKeyguard(this._keyguard);
+        this._whenLocked = new WhenLocked(this._keyguard, this._stacks);
         this._rotation.follow(this._keyguard, this._home);
         // the volume keys show the volume dialog, over the shade and the lock screen too
         this._volume = new VolumeDialog();

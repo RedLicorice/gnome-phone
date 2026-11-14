@@ -20,9 +20,11 @@ export function showsWhenLocked(win) {
 }
 
 export class WhenLocked {
-    // @keyguard: keyguard.js's Keyguard (showing, setOccluded, 'changed')
-    constructor(keyguard) {
+    // @keyguard: keyguard.js's Keyguard (showing, setOccluded, 'changed'); @stacks: stacks.js, which says whether a
+    // window may go over the lock screen (an agent's does not, unless its grant says so)
+    constructor(keyguard, stacks) {
         this._keyguard = keyguard;
+        this._stacks = stacks;
         keyguard.connectObject('changed', () => this._sync(), this);
         global.display.connectObject(
             'window-created', (_display, win) => this._watch(win),
@@ -53,7 +55,7 @@ export class WhenLocked {
 
     _sync() {
         const top = this._keyguard.showing ? this._topWindow() : null;
-        this._keyguard.setOccluded(top && showsWhenLocked(top) ? top : null);
+        this._keyguard.setOccluded(top && showsWhenLocked(top) && this._stacks.mayShowWhenLocked(top) ? top : null);
     }
 
     destroy() {
