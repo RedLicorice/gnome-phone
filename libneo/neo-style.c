@@ -49,8 +49,8 @@ static const struct {
 static const guint32 renaissance_rgb[NEO_N_COLORS] = {
   [NEO_PRIMARY]                   = 0xd9b26a,
   [NEO_ON_PRIMARY]                = 0x2a1d04,
-  [NEO_PRIMARY_CONTAINER]         = 0x23418f,
-  [NEO_ON_PRIMARY_CONTAINER]      = 0xdfe6ff,
+  [NEO_PRIMARY_CONTAINER]         = 0x26242f,   /* lapis only as a small accent (neo_lapis), fills stay dark */
+  [NEO_ON_PRIMARY_CONTAINER]      = 0xf3dc9f,
   [NEO_INVERSE_PRIMARY]           = 0x8a6a2c,
   [NEO_SECONDARY]                 = 0xe0936f,
   [NEO_ON_SECONDARY]              = 0x3d1a0b,
@@ -71,8 +71,8 @@ static const guint32 renaissance_rgb[NEO_N_COLORS] = {
   [NEO_SURFACE_BRIGHT]            = 0x2a283d,
   [NEO_ON_SURFACE]                = 0xf0e6d0,
   [NEO_ON_SURFACE_VARIANT]        = 0xbdb299,
-  [NEO_OUTLINE]                   = 0x80755f,
-  [NEO_OUTLINE_VARIANT]           = 0x3f3a4d,
+  [NEO_OUTLINE]                   = 0x6e7280,   /* silver-dim: tools/theme/palette.json */
+  [NEO_OUTLINE_VARIANT]           = 0x3a3d4a,
   [NEO_INVERSE_SURFACE]           = 0xf3ead7,
   [NEO_WHITE]                     = 0xffffff,
 };
@@ -137,6 +137,48 @@ palette_css (void)
   return css;
 }
 
+/* "A, B, C" from the setting, as quoted CSS families, then the stock fallback; the stock fallback alone when empty */
+static void
+append_families (GString *css, const char *chain, const char *fallback)
+{
+  if (chain)
+    {
+      g_auto (GStrv) names = g_strsplit (chain, ",", -1);
+      for (int i = 0; names[i]; i++)
+        {
+          g_strstrip (names[i]);
+          g_strdelimit (names[i], "\"'\\;{}", ' ');
+          g_strstrip (names[i]);
+          if (*names[i])
+            g_string_append_printf (css, "\"%s\", ", names[i]);
+        }
+    }
+  g_string_append (css, fallback);
+}
+
+/* the Renaissance type: the families of the three roles (settings font-display, font-body, font-mono) */
+static void
+fonts_css (GString *css)
+{
+  struct { const char *key, *selectors, *fallback; } role[] = {
+    { "font-body", "window.neo", "\"Neo Roboto\", Roboto, sans-serif" },
+    { "font-display", ".neo-display-large, .neo-headline-large, .neo-title-large, .neo-app-bar-title, .neo-dialog-title",
+      "\"Neo Roboto\", serif" },
+    { "font-mono", ".neo-tabular", "monospace" },
+  };
+  GSettingsSchema *schema = NULL;
+  g_object_get (theme_settings, "settings-schema", &schema, NULL);
+  for (guint i = 0; i < G_N_ELEMENTS (role); i++)
+    {
+      g_autofree char *chain = schema && g_settings_schema_has_key (schema, role[i].key)
+                                 ? g_settings_get_string (theme_settings, role[i].key) : NULL;
+      g_string_append_printf (css, "%s { font-family: ", role[i].selectors);
+      append_families (css, chain, role[i].fallback);
+      g_string_append (css, "; }\n");
+    }
+  g_clear_pointer (&schema, g_settings_schema_unref);
+}
+
 /* the palette as @define-color lines, then neo.css. The Renaissance theme is a second sheet above the apps' own (USER
  * priority, with the palette again: colour names are per sheet): the ornament, and the recoloured palettes of the
  * apps that carry their own (neo-renaissance-apps.css, generated) */
@@ -153,6 +195,8 @@ load_css (void)
     {
       add_sheet (css, "/de/yesman/neo/neo-renaissance-apps.css");
       add_sheet (css, "/de/yesman/neo/neo-renaissance.css");
+      if (theme_settings)
+        fonts_css (css);
     }
   gtk_css_provider_load_from_string (theme_provider, css->str);
   g_string_free (css, TRUE);
@@ -172,7 +216,8 @@ static void
 on_theme_changed (GSettings *settings, const char *key, gpointer data)
 {
   gboolean want = theme_wanted ();
-  if (want == renaissance)
+  /* a font chain changed while the look is on: reload the sheet, the widgets re-lay out on their own */
+  if (want == renaissance && !(renaissance && g_str_has_prefix (key, "font-")))
     return;
   renaissance = want;
   load_css ();
@@ -280,6 +325,9 @@ neo_init (void)
       theme_settings = g_settings_new_full (schema, NULL, NULL);
       g_settings_schema_unref (schema);
       g_signal_connect (theme_settings, "changed::name", G_CALLBACK (on_theme_changed), NULL);
+      g_signal_connect (theme_settings, "changed::font-display", G_CALLBACK (on_theme_changed), NULL);
+      g_signal_connect (theme_settings, "changed::font-body", G_CALLBACK (on_theme_changed), NULL);
+      g_signal_connect (theme_settings, "changed::font-mono", G_CALLBACK (on_theme_changed), NULL);
       renaissance = theme_wanted ();
     }
 

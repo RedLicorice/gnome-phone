@@ -12,6 +12,24 @@
       leaf, lapis and parchment on OLED black, neon cyan edges, Michelangelus capitals where the font is installed.
       The shell and the Neo apps follow it live; the kiosk picks it up on its next start.</description>
     </key>
+    <key name="font-display" type="s">
+      <default>'Michelangelus, Cinzel'</default>
+      <summary>Display font chain</summary>
+      <description>Families (comma separated, first one installed wins) for clocks, titles and dialog titles while the
+      Renaissance look is on. The stock face is always appended, so a missing font never blanks text. Fonts are
+      installed on the phone with tools/phone/install-fonts.sh and are never part of the repository.</description>
+    </key>
+    <key name="font-body" type="s">
+      <default>''</default>
+      <summary>Body font chain</summary>
+      <description>Families for everything else while the Renaissance look is on; empty keeps the stock face.</description>
+    </key>
+    <key name="font-mono" type="s">
+      <default>'JetBrains Mono, Share Tech Mono'</default>
+      <summary>Mono font chain</summary>
+      <description>Families for data text (status bar clock, tabular numbers, HUD microtext) while the Renaissance
+      look is on.</description>
+    </key>
     <key name="previous-wallpaper" type="s">
       <default>''</default>
       <summary>Picture to put back</summary>

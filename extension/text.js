@@ -8,7 +8,7 @@ import Pango from 'gi://Pango';
 import PangoCairo from 'gi://PangoCairo';
 
 import {Canvas} from './icons.js';
-import {setSource} from './palette.js';
+import {bodyFamilies, chain, setSource} from './palette.js';
 import {SCALE, screenPixels, sp} from './units.js';
 import {isRenaissance} from './theme.js';
 
@@ -23,9 +23,9 @@ export function fakeBoldWidth(sizePx) {
 // The Renaissance theme sets big text (the clocks) in Michelangelus, with the stock face as Pango's fallback
 function description(sizePx, wght, {wdth = 100, rond = 100, opsz}, sizeSp) {
     if (isRenaissance() && sizeSp >= 24)
-        return Pango.FontDescription.from_string(`Michelangelus, ${FAMILY} ${wght >= 600 ? 'Bold ' : ''}${sizePx.toFixed(3)}px`);
+        return Pango.FontDescription.from_string(`${chain('display', 'Michelangelus')}, ${FAMILY} ${wght >= 600 ? 'Bold ' : ''}${sizePx.toFixed(3)}px`);
     return Pango.FontDescription.from_string(
-        `${FAMILY} ${sizePx.toFixed(3)}px @wght=${wght},wdth=${wdth},ROND=${rond},opsz=${opsz}`);
+        `${isRenaissance() ? bodyFamilies() : ''}${FAMILY} ${sizePx.toFixed(3)}px @wght=${wght},wdth=${wdth},ROND=${rond},opsz=${opsz}`);
 }
 
 let measureContext = null;
