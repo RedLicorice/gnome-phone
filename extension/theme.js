@@ -24,18 +24,21 @@ export function isRenaissance() {
     return themeName() === 'renaissance';
 }
 
-// The theme's wallpaper (a Neo parallax set, if installed) takes the place of the picture in use while the look is on;
-// the old one is kept in the setting previous-wallpaper and put back when the look goes. Follows the setting live.
-export class ThemeWallpaper {
+// The theme's wallpaper (a Neo parallax set) and icon pack (both if installed) take the place of the ones in use while
+// the look is on; the old ones are kept in previous-wallpaper / previous-icon-pack and put back when the look goes.
+// Follows the setting live.
+export class ThemeSwaps {
     constructor() {
         this._bg = null;
+        this._neo = null;
         if (!settings)
             return;
-        try {
-            this._bg = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
-        } catch (e) {
-            return;
-        }
+        const open = id => {
+            const schema = Gio.SettingsSchemaSource.get_default()?.lookup(id, true);
+            return schema ? new Gio.Settings({settings_schema: schema}) : null;
+        };
+        this._bg = open('org.gnome.desktop.background');
+        this._neo = open('de.yesman.neo');
         settings.connectObject('changed::name', () => this._apply(isRenaissance()), this);
     }
 
@@ -55,6 +58,27 @@ export class ThemeWallpaper {
     }
 
     _apply(on) {
+        this._wallpaper(on);
+        this._iconPack(on);
+    }
+
+    _iconPack(on) {
+        const dirs = [GLib.get_user_data_dir(), ...GLib.get_system_data_dirs()];
+        const have = dirs.some(d => GLib.file_test(GLib.build_filenamev([d, 'neo-launcher', 'iconpacks', 'renaissance', 'pack.json']),
+            GLib.FileTest.EXISTS));
+        if (!this._neo || !have)
+            return;
+        const now = this._neo.get_string('icon-pack');
+        if (on && now !== 'renaissance') {
+            settings.set_string('previous-icon-pack', now);
+            this._neo.set_string('icon-pack', 'renaissance');
+        } else if (!on && now === 'renaissance') {
+            this._neo.set_string('icon-pack', settings.get_string('previous-icon-pack'));
+            settings.set_string('previous-icon-pack', '');
+        }
+    }
+
+    _wallpaper(on) {
         const mine = this._mine();
         if (!this._bg || !mine)
             return;
