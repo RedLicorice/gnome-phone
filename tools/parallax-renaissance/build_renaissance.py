@@ -302,7 +302,14 @@ def flatten(layers, w, h, scale=SCALE):
 def main():
     os.makedirs(OUT, exist_ok=True)
     l0 = layer0()
-    layers = [l0, layer1(), layer2(), layer3(), layer4()]
+    # the home screen's icons sit on the emblem and the arcade: keep them a backdrop, the lock screen still shows them
+    def dim(im, k):
+        a = im.getchannel("A").point(lambda v: int(v * k))
+        out = im.copy()
+        out.putalpha(a)
+        return out
+
+    layers = [l0, dim(layer1(), 0.8), dim(layer2(), 0.65), dim(layer3(), 0.6), layer4()]
     l0.save(os.path.join(OUT, "layer0.jpg"), quality=90)
     for i in range(1, 5):
         layers[i].save(os.path.join(OUT, f"layer{i}.png"), optimize=True)
