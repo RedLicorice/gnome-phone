@@ -10,3 +10,9 @@
 typedef void (*NsPatternDone) (gboolean ok, gpointer user_data);
 
 void ns_pattern_dialog_present (GtkWidget *parent, gboolean pin, NsPatternDone callback, gpointer user_data);
+
+/* "Is it you?": the current pattern, PIN or password, checked through the lock screen's PAM service, or one of the
+ * user's enrolled fingers (fprintd) when there is a sensor; ok when either matched. `reason` (or NULL) says what it
+ * is for, above the prompt. */
+void ns_pattern_verify_present (GtkWidget *parent, const char *title, const char *reason, NsPatternDone callback,
+                                gpointer user_data);

@@ -91,6 +91,16 @@ typedef struct {
   gboolean        done;
   NsPatternDone   callback;
   gpointer        user_data;
+  /* ns_pattern_verify_present: the current secret only, or a finger on the sensor (fprintd) */
+  gboolean        verify;
+  char           *reason;
+  GDBusConnection *fp_bus;
+  char           *fp_device;
+  GCancellable   *fp_cancel;
+  guint           fp_signal;
+  gboolean        fp_claimed;
+  gboolean        fp_listening;
+  int             fp_misses;
 } PatternDialog;
 
 
@@ -237,6 +247,24 @@ clear_typed (PatternDialog *pd)
 static void update_next (PatternDialog *pd);
 
 
+/* the line asking for the current secret; in a verify dialog the reason comes first, then `note` (what the
+ * sensor just said, or NULL), and the fingerprint sensor is offered while fprintd listens */
+static char *
+current_prompt (PatternDialog *pd, const char *note)
+{
+  const char *what = pd->current_is_pattern ? "pattern" : pd->text_mode ? "password" : "PIN";
+  const char *verb = pd->current_is_pattern ? "Draw" : "Enter";
+
+  if (!pd->verify)
+    return g_strdup_printf ("%s your current %s.", verb, what);
+  g_autofree char *ask = pd->fp_listening
+                         ? g_strdup_printf ("%s your %s or touch the fingerprint sensor.", verb, what)
+                         : g_strdup_printf ("%s your %s.", verb, what);
+  return g_strjoin ("\n\n", pd->reason ? pd->reason : ask, pd->reason ? (note ? note : ask) : NULL,
+                    pd->reason && note ? ask : NULL, NULL);
+}
+
+
 static void
 set_stage (PatternDialog *pd, Stage stage)
 {
@@ -254,11 +282,9 @@ set_stage (PatternDialog *pd, Stage stage)
   gtk_button_set_label (GTK_BUTTON (pd->use_text), pd->text_mode ? "Use the PIN pad" : "Use password");
   clear_typed (pd);
   if (stage == STAGE_CURRENT) {
-    gtk_label_set_text (GTK_LABEL (pd->message),
-                        pd->current_is_pattern ? "Draw your current pattern."
-                        : pd->text_mode        ? "Enter your current password."
-                                               : "Enter your current PIN.");
-    gtk_button_set_label (GTK_BUTTON (pd->next), "Continue");
+    g_autofree char *prompt = current_prompt (pd, NULL);
+    gtk_label_set_text (GTK_LABEL (pd->message), prompt);
+    gtk_button_set_label (GTK_BUTTON (pd->next), pd->verify ? "Confirm" : "Continue");
     if (!pd->current_is_pattern && pd->text_mode)
       gtk_widget_grab_focus (pd->entry);
   } else if (stage == STAGE_DRAW) {
@@ -330,15 +356,185 @@ on_drag_end (GtkGestureDrag *drag, double dx, double dy, PatternDialog *pd)
 }
 
 
+static void fp_stop (PatternDialog *pd);
+
 static void
 finish (PatternDialog *pd, gboolean ok)
 {
   if (pd->done)
     return;
   pd->done = TRUE;
+  fp_stop (pd);
   if (pd->callback)
     pd->callback (ok, pd->user_data);
   adw_dialog_force_close (pd->dialog);
+}
+
+
+/* --- a finger instead of the secret (verify dialogs): fprintd, the way the lock screen's PAM asks it -------- */
+
+#define FP_BUS "net.reactivated.Fprint"
+#define FP_DEVICE "net.reactivated.Fprint.Device"
+#define FP_MAX_MISSES 5
+
+static void fp_listen (PatternDialog *pd);
+
+static void
+fp_say (PatternDialog *pd, const char *note)
+{
+  if (pd->done || pd->stage != STAGE_CURRENT)
+    return;
+  g_autofree char *prompt = current_prompt (pd, note);
+  gtk_label_set_text (GTK_LABEL (pd->message), prompt);
+}
+
+
+/* the sensor is let go: the verify stopped, the device released (fire and forget, the dialog may be gone) */
+static void
+fp_stop (PatternDialog *pd)
+{
+  g_cancellable_cancel (pd->fp_cancel);
+  g_clear_object (&pd->fp_cancel);
+  if (pd->fp_bus && pd->fp_signal)
+    g_dbus_connection_signal_unsubscribe (pd->fp_bus, pd->fp_signal);
+  pd->fp_signal = 0;
+  /* Release also when a Claim was still on its way: one that fprintd granted would otherwise hold the sensor
+   * until Settings quits (an unclaimed device just answers with an error) */
+  if (pd->fp_bus && pd->fp_device) {
+    if (pd->fp_listening)
+      g_dbus_connection_call (pd->fp_bus, FP_BUS, pd->fp_device, FP_DEVICE, "VerifyStop", NULL, NULL,
+                              G_DBUS_CALL_FLAGS_NONE, -1, NULL, NULL, NULL);
+    g_dbus_connection_call (pd->fp_bus, FP_BUS, pd->fp_device, FP_DEVICE, "Release", NULL, NULL,
+                            G_DBUS_CALL_FLAGS_NONE, -1, NULL, NULL, NULL);
+  }
+  pd->fp_claimed = pd->fp_listening = FALSE;
+  g_clear_pointer (&pd->fp_device, g_free);
+  g_clear_object (&pd->fp_bus);
+}
+
+
+/* a call's answer; NULL when it failed, or when the dialog went away meanwhile (then `pd` is not touched) */
+static GVariant *
+fp_finish (GObject *source, GAsyncResult *res, PatternDialog **pd, gpointer data)
+{
+  g_autoptr (GError) error = NULL;
+  GVariant *ret = g_dbus_connection_call_finish (G_DBUS_CONNECTION (source), res, &error);
+  if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+    *pd = NULL;
+    return NULL;
+  }
+  *pd = data;
+  if (!ret)
+    g_debug ("fprintd: %s", error->message);
+  return ret;
+}
+
+
+static void
+on_fp_restarted (GObject *source, GAsyncResult *res, gpointer data)
+{
+  PatternDialog *pd;
+  g_autoptr (GVariant) ret = fp_finish (source, res, &pd, data);
+  if (pd)
+    fp_listen (pd);
+}
+
+
+static void
+on_fp_status (GDBusConnection *bus, const char *sender, const char *path, const char *iface, const char *signal,
+              GVariant *params, gpointer data)
+{
+  PatternDialog *pd = data;
+  const char *result;
+  gboolean done;
+
+  if (pd->done)
+    return;
+  g_variant_get (params, "(&sb)", &result, &done);
+  if (g_str_equal (result, "verify-match")) {
+    finish (pd, TRUE);
+    return;
+  }
+  if (g_str_equal (result, "verify-no-match")) {
+    pd->fp_misses++;
+    fp_say (pd, pd->fp_misses < FP_MAX_MISSES ? "Fingerprint not recognised." : NULL);
+  } else if (g_str_has_prefix (result, "verify-retry") || g_str_has_prefix (result, "verify-swipe")
+             || g_str_equal (result, "verify-finger-not-centered") || g_str_equal (result, "verify-remove-and-retry")) {
+    fp_say (pd, "Try the finger again.");
+  }
+  if (!done)
+    return;
+  /* the verify is over (a miss, the sensor gone, its own timeout): listen again unless that was the last try */
+  pd->fp_listening = FALSE;
+  if (pd->fp_misses >= FP_MAX_MISSES || !g_str_equal (result, "verify-no-match")) {
+    fp_say (pd, pd->fp_misses >= FP_MAX_MISSES ? "Too many tries with the finger." : NULL);
+    return;
+  }
+  g_dbus_connection_call (pd->fp_bus, FP_BUS, pd->fp_device, FP_DEVICE, "VerifyStop", NULL, NULL,
+                          G_DBUS_CALL_FLAGS_NONE, -1, pd->fp_cancel, on_fp_restarted, pd);
+}
+
+
+static void
+on_fp_listening (GObject *source, GAsyncResult *res, gpointer data)
+{
+  PatternDialog *pd;
+  g_autoptr (GVariant) ret = fp_finish (source, res, &pd, data);
+  if (!pd)
+    return;
+  /* no prints enrolled, or the sensor busy: the secret alone */
+  pd->fp_listening = ret != NULL;
+  fp_say (pd, NULL);
+}
+
+
+static void
+fp_listen (PatternDialog *pd)
+{
+  g_dbus_connection_call (pd->fp_bus, FP_BUS, pd->fp_device, FP_DEVICE, "VerifyStart", g_variant_new ("(s)", "any"),
+                          NULL, G_DBUS_CALL_FLAGS_NONE, -1, pd->fp_cancel, on_fp_listening, pd);
+}
+
+
+static void
+on_fp_claimed (GObject *source, GAsyncResult *res, gpointer data)
+{
+  PatternDialog *pd;
+  g_autoptr (GVariant) ret = fp_finish (source, res, &pd, data);
+  if (!pd || !ret)
+    return;
+  pd->fp_claimed = TRUE;
+  pd->fp_signal = g_dbus_connection_signal_subscribe (pd->fp_bus, FP_BUS, FP_DEVICE, "VerifyStatus", pd->fp_device,
+                                                      NULL, G_DBUS_SIGNAL_FLAGS_NONE, on_fp_status, pd, NULL);
+  fp_listen (pd);
+}
+
+
+static void
+on_fp_device (GObject *source, GAsyncResult *res, gpointer data)
+{
+  PatternDialog *pd;
+  g_autoptr (GVariant) ret = fp_finish (source, res, &pd, data);
+  if (!pd || !ret)
+    return;
+  g_variant_get (ret, "(o)", &pd->fp_device);
+  /* "": the caller's own prints */
+  g_dbus_connection_call (pd->fp_bus, FP_BUS, pd->fp_device, FP_DEVICE, "Claim", g_variant_new ("(s)", ""), NULL,
+                          G_DBUS_CALL_FLAGS_NONE, -1, pd->fp_cancel, on_fp_claimed, pd);
+}
+
+
+/* no fprintd, no sensor, no prints: nothing is offered and the secret is asked for alone */
+static void
+fp_start (PatternDialog *pd)
+{
+  pd->fp_bus = g_bus_get_sync (G_BUS_TYPE_SYSTEM, NULL, NULL);
+  if (!pd->fp_bus)
+    return;
+  pd->fp_cancel = g_cancellable_new ();
+  g_dbus_connection_call (pd->fp_bus, FP_BUS, "/net/reactivated/Fprint/Manager", "net.reactivated.Fprint.Manager",
+                          "GetDefaultDevice", NULL, G_VARIANT_TYPE ("(o)"), G_DBUS_CALL_FLAGS_NONE, -1,
+                          pd->fp_cancel, on_fp_device, pd);
 }
 
 
@@ -473,7 +669,10 @@ on_checked (GObject *source, GAsyncResult *res, gpointer data)
   gtk_widget_set_sensitive (pd->cancel, TRUE);
   gtk_widget_set_sensitive (pd->pad, TRUE);
   if (g_task_propagate_boolean (G_TASK (res), NULL)) {
-    set_stage (pd, STAGE_DRAW);
+    if (pd->verify)
+      finish (pd, TRUE);
+    else
+      set_stage (pd, STAGE_DRAW);
     return;
   }
   memset (pd->current, 0, sizeof pd->current);
@@ -776,8 +975,10 @@ on_cancel (PatternDialog *pd)
 static void
 on_closed (PatternDialog *pd)
 {
+  fp_stop (pd);
   if (!pd->done && pd->callback)
     pd->callback (FALSE, pd->user_data);
+  g_free (pd->reason);
   memset (pd->current, 0, sizeof pd->current);
   memset (pd->first, 0, sizeof pd->first);
   memset (pd->typed, 0, sizeof pd->typed);
@@ -785,8 +986,9 @@ on_closed (PatternDialog *pd)
 }
 
 
-void
-ns_pattern_dialog_present (GtkWidget *parent, gboolean pin, NsPatternDone callback, gpointer user_data)
+static void
+present (GtkWidget *parent, gboolean pin, gboolean verify, const char *title, const char *reason,
+         NsPatternDone callback, gpointer user_data)
 {
   PatternDialog *pd = g_new0 (PatternDialog, 1);
   GtkWidget *box, *buttons, *toolbar, *header;
@@ -795,6 +997,8 @@ ns_pattern_dialog_present (GtkWidget *parent, gboolean pin, NsPatternDone callba
   pd->callback = callback;
   pd->user_data = user_data;
   pd->pin = pin;
+  pd->verify = verify;
+  pd->reason = g_strdup (reason);
   pd->pressed = -1;
   {
     /* what unlocks the phone now: the dot grid for a pattern, a text field for a PIN or a password */
@@ -812,7 +1016,7 @@ ns_pattern_dialog_present (GtkWidget *parent, gboolean pin, NsPatternDone callba
   pd->dialog = ADW_DIALOG (adw_dialog_new ());
   /* floating, not a bottom sheet: a sheet is dragged down to close, the same stroke that draws a pattern */
   adw_dialog_set_presentation_mode (pd->dialog, ADW_DIALOG_FLOATING);
-  adw_dialog_set_title (pd->dialog, pin ? "Set PIN" : "Set pattern");
+  adw_dialog_set_title (pd->dialog, verify ? title : pin ? "Set PIN" : "Set pattern");
   adw_dialog_set_content_width (pd->dialog, 360);
   adw_dialog_set_content_height (pd->dialog, 620);
 
@@ -897,5 +1101,22 @@ ns_pattern_dialog_present (GtkWidget *parent, gboolean pin, NsPatternDone callba
   }
 
   set_stage (pd, STAGE_CURRENT);
+  if (verify)
+    fp_start (pd);
   adw_dialog_present (pd->dialog, parent);
+}
+
+
+void
+ns_pattern_dialog_present (GtkWidget *parent, gboolean pin, NsPatternDone callback, gpointer user_data)
+{
+  present (parent, pin, FALSE, NULL, NULL, callback, user_data);
+}
+
+
+void
+ns_pattern_verify_present (GtkWidget *parent, const char *title, const char *reason, NsPatternDone callback,
+                           gpointer user_data)
+{
+  present (parent, FALSE, TRUE, title, reason, callback, user_data);
 }
