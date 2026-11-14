@@ -14,7 +14,7 @@ import * as SystemActions from 'resource:///org/gnome/shell/misc/systemActions.j
 import {addEndMark} from './endmark.js';
 import {Canvas, hasIcon, paintIcon, VectorIcon} from './icons.js';
 import {animate, animateSpring, clamp, lerp, Spring} from './motion.js';
-import {Color, cogl, font, mix, rgba, setSource, SurfaceEffect} from './palette.js';
+import {Color, cogl, font, gild, mix, rgba, setSource, SurfaceEffect} from './palette.js';
 import {openSettings} from './settings.js';
 import {inkBox, SystemIcons} from './statusbar.js';
 import {px, screenPixels, SCALE, SCREEN_H, SCREEN_W} from './units.js';
@@ -297,7 +297,7 @@ class Tile extends St.Button {
 
     _applyStyle() {
         const {bg, fg} = this._colors();
-        this.style = `background-color: ${colorStyle(bg)}; border-radius: ${px(TILE_RADIUS).toFixed(2)}px;`;
+        this.style = `background-color: ${colorStyle(bg)}; border-radius: ${px(TILE_RADIUS).toFixed(2)}px;${gild()}`;
         this._highlight.style = `background-color: ${rgba(Color.onSurface, 0.15)}; ` +
             `border-radius: ${px(TILE_RADIUS).toFixed(2)}px;`;
         this._icon.setColor(fg[0], fg[1]);
@@ -424,7 +424,7 @@ class BrightnessSlider extends St.Widget {
         const bg = mixColor(SurfaceEffect[1], [Color.primary, 1], t);
         const fg = mix(Color.onSurface, Color.onPrimary, t);
         const radius = lerp(67.5, TRACK_RADIUS, t);
-        this._auto.style = `background-color: ${colorStyle(bg)}; border-radius: ${px(radius).toFixed(2)}px;`;
+        this._auto.style = `background-color: ${colorStyle(bg)}; border-radius: ${px(radius).toFixed(2)}px;${gild()}`;
         this._autoIcon.setColor(fg);
         this._autoIcon.name = this._autoOn ? 'ic_qs_brightness_auto_on' : 'ic_qs_brightness_auto_off';
     }

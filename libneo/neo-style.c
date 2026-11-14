@@ -42,6 +42,57 @@ static const struct {
   [NEO_WHITE]                     = { "neo_white",                     0xffffff },
 };
 
+/* "Cyberpunk meets Italian Renaissance", the optional look (setting de.yesman.GnomePhone.Theme name=renaissance):
+ * an OLED night of lapis-tinted black, gold leaf as the accent, terracotta for the second one, parchment text and
+ * neon cyan as the electric edge. Same roles, other values, so every widget follows; neo-renaissance.css adds the
+ * ornament. Michelangelus (not shipped) is named in that file with fallbacks. */
+static const guint32 renaissance_rgb[NEO_N_COLORS] = {
+  [NEO_PRIMARY]                   = 0xd9b26a,
+  [NEO_ON_PRIMARY]                = 0x2a1d04,
+  [NEO_PRIMARY_CONTAINER]         = 0x23418f,
+  [NEO_ON_PRIMARY_CONTAINER]      = 0xdfe6ff,
+  [NEO_INVERSE_PRIMARY]           = 0x8a6a2c,
+  [NEO_SECONDARY]                 = 0xe0936f,
+  [NEO_ON_SECONDARY]              = 0x3d1a0b,
+  [NEO_SECONDARY_CONTAINER]       = 0x4a2a1c,
+  [NEO_ON_SECONDARY_CONTAINER]    = 0xf6cdb8,
+  [NEO_TERTIARY]                  = 0x38e8ff,
+  [NEO_ON_TERTIARY]               = 0x00343c,
+  [NEO_TERTIARY_CONTAINER]        = 0x0a4650,
+  [NEO_ON_TERTIARY_CONTAINER]     = 0xb2f5ff,
+  [NEO_ERROR]                     = 0xff6f9c,
+  [NEO_ERROR_CONTAINER]           = 0x6b1237,
+  [NEO_SURFACE]                   = 0x08070d,
+  [NEO_SURFACE_CONTAINER_LOWEST]  = 0x000000,
+  [NEO_SURFACE_CONTAINER_LOW]     = 0x0d0c15,
+  [NEO_SURFACE_CONTAINER]         = 0x13121e,
+  [NEO_SURFACE_CONTAINER_HIGH]    = 0x1a1927,
+  [NEO_SURFACE_CONTAINER_HIGHEST] = 0x211f31,
+  [NEO_SURFACE_BRIGHT]            = 0x2a283d,
+  [NEO_ON_SURFACE]                = 0xf0e6d0,
+  [NEO_ON_SURFACE_VARIANT]        = 0xbdb299,
+  [NEO_OUTLINE]                   = 0x80755f,
+  [NEO_OUTLINE_VARIANT]           = 0x3f3a4d,
+  [NEO_INVERSE_SURFACE]           = 0xf3ead7,
+  [NEO_WHITE]                     = 0xffffff,
+};
+
+static gboolean       renaissance;       /* the theme in force */
+static GtkCssProvider *provider, *theme_provider;
+static GSettings      *theme_settings;
+
+static guint32
+rgb_of (NeoColor color)
+{
+  return renaissance ? renaissance_rgb[color] : palette[color].rgb;
+}
+
+gboolean
+neo_theme_is_renaissance (void)
+{
+  return renaissance;
+}
+
 GdkRGBA
 neo_color (NeoColor color)
 {
@@ -51,7 +102,7 @@ neo_color (NeoColor color)
 GdkRGBA
 neo_color_alpha (NeoColor color, float alpha)
 {
-  guint32 rgb = palette[color].rgb;
+  guint32 rgb = rgb_of (color);
   return (GdkRGBA) { ((rgb >> 16) & 0xff) / 255.f, ((rgb >> 8) & 0xff) / 255.f, (rgb & 0xff) / 255.f, alpha };
 }
 
@@ -66,6 +117,154 @@ neo_rgba_mix (const GdkRGBA *a, const GdkRGBA *b, float t)
   };
 }
 
+static void
+add_sheet (GString *css, const char *resource)
+{
+  GBytes *sheet = g_resources_lookup_data (resource, 0, NULL);
+  if (!sheet)
+    return;
+  g_string_append_len (css, g_bytes_get_data (sheet, NULL), g_bytes_get_size (sheet));
+  g_string_append_c (css, '\n');
+  g_bytes_unref (sheet);
+}
+
+static GString *
+palette_css (void)
+{
+  GString *css = g_string_new (NULL);
+  for (int i = 0; i < NEO_N_COLORS; i++)
+    g_string_append_printf (css, "@define-color %s #%06x;\n", palette[i].css, rgb_of (i));
+  return css;
+}
+
+/* the palette as @define-color lines, then neo.css. The Renaissance theme is a second sheet above the apps' own (USER
+ * priority, with the palette again: colour names are per sheet): the ornament, and the recoloured palettes of the
+ * apps that carry their own (neo-renaissance-apps.css, generated) */
+static void
+load_css (void)
+{
+  GString *css = palette_css ();
+  add_sheet (css, "/de/yesman/neo/neo.css");
+  gtk_css_provider_load_from_string (provider, css->str);
+  g_string_free (css, TRUE);
+
+  css = palette_css ();
+  if (renaissance)
+    {
+      add_sheet (css, "/de/yesman/neo/neo-renaissance-apps.css");
+      add_sheet (css, "/de/yesman/neo/neo-renaissance.css");
+    }
+  gtk_css_provider_load_from_string (theme_provider, css->str);
+  g_string_free (css, TRUE);
+}
+
+/* the setting, when its schema is installed (a phone without the theme setting stays on the stock look) */
+static gboolean
+theme_wanted (void)
+{
+  if (!theme_settings)
+    return FALSE;
+  g_autofree char *name = g_settings_get_string (theme_settings, "name");
+  return g_strcmp0 (name, "renaissance") == 0;
+}
+
+static void
+on_theme_changed (GSettings *settings, const char *key, gpointer data)
+{
+  gboolean want = theme_wanted ();
+  if (want == renaissance)
+    return;
+  renaissance = want;
+  load_css ();
+  /* widgets that draw with neo_color () pick the new values on their next draw */
+  GListModel *windows = gtk_window_get_toplevels ();
+  for (guint i = 0; i < g_list_model_get_n_items (windows); i++)
+    {
+      GtkWidget *w = g_list_model_get_item (windows, i);
+      gtk_widget_queue_draw (w);
+      g_object_unref (w);
+    }
+}
+
+/* The Renaissance look for the apps that carry colours of their own (Messaging's #b8ebf3 FAB, Dialer's teal ...): the
+ * same mapping as tools/theme/gen_app_overrides.py does for their CSS. Teal and cyan pastels go gold, dark teal goes
+ * lapis, neutrals take the night's violet cast, white goes to parchment; other hues stay. Identity in the stock look. */
+static void
+rgb_to_hls (double r, double g, double b, double *h, double *l, double *s)
+{
+  double max = MAX (r, MAX (g, b)), min = MIN (r, MIN (g, b)), d = max - min;
+  *l = (max + min) / 2;
+  *h = 0;
+  *s = 0;
+  if (d == 0)
+    return;
+  *s = *l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  if (max == r)
+    *h = fmod ((g - b) / d + (g < b ? 6 : 0), 6) / 6;
+  else if (max == g)
+    *h = ((b - r) / d + 2) / 6;
+  else
+    *h = ((r - g) / d + 4) / 6;
+}
+
+static double
+hue_channel (double p, double q, double t)
+{
+  if (t < 0) t += 1;
+  if (t > 1) t -= 1;
+  if (t < 1. / 6) return p + (q - p) * 6 * t;
+  if (t < 1. / 2) return q;
+  if (t < 2. / 3) return p + (q - p) * (2. / 3 - t) * 6;
+  return p;
+}
+
+static void
+hls_to_rgb (double h, double l, double s, GdkRGBA *out)
+{
+  if (s == 0)
+    {
+      out->red = out->green = out->blue = l;
+      return;
+    }
+  double q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+  out->red = hue_channel (p, q, h + 1. / 3);
+  out->green = hue_channel (p, q, h);
+  out->blue = hue_channel (p, q, h - 1. / 3);
+}
+
+GdkRGBA
+neo_theme_map_rgba (const GdkRGBA *c)
+{
+  if (!renaissance)
+    return *c;
+  double h, l, s;
+  GdkRGBA out = { 0, 0, 0, c->alpha };
+  rgb_to_hls (c->red, c->green, c->blue, &h, &l, &s);
+  double deg = h * 360;
+  if (s < 0.14)
+    {
+      if (l > 0.93)
+        out = (GdkRGBA) { 0xf0 / 255., 0xe6 / 255., 0xd0 / 255., c->alpha };
+      else if (l > 0.75)
+        hls_to_rgb (41. / 360, l * 0.97, 0.22, &out);
+      else if (l < 0.45)
+        hls_to_rgb (250. / 360, l * 0.55, 0.28, &out);
+      else
+        hls_to_rgb (41. / 360, l * 0.9, 0.10, &out);
+    }
+  else if (deg >= 140 && deg <= 230 && s < 0.95)
+    {
+      if (l < 0.42)
+        hls_to_rgb (224. / 360, l * 0.85, 0.52, &out);
+      else
+        hls_to_rgb (41. / 360, MIN (l, 0.78), 0.55, &out);
+    }
+  else
+    return *c;
+  out.alpha = c->alpha;
+  return out;
+}
+
 void
 neo_init (void)
 {
@@ -74,21 +273,24 @@ neo_init (void)
     return;
   done = TRUE;
 
-  /* the palette first, as @define-color lines, then the stylesheet that uses it */
-  GString *css = g_string_new (NULL);
-  for (int i = 0; i < NEO_N_COLORS; i++)
-    g_string_append_printf (css, "@define-color %s #%06x;\n", palette[i].css, palette[i].rgb);
-  GBytes *sheet = g_resources_lookup_data ("/de/yesman/neo/neo.css", 0, NULL);
-  g_string_append_len (css, g_bytes_get_data (sheet, NULL), g_bytes_get_size (sheet));
-  g_bytes_unref (sheet);
+  GSettingsSchemaSource *source = g_settings_schema_source_get_default ();
+  GSettingsSchema *schema = source ? g_settings_schema_source_lookup (source, "de.yesman.GnomePhone.Theme", TRUE) : NULL;
+  if (schema)
+    {
+      theme_settings = g_settings_new_full (schema, NULL, NULL);
+      g_settings_schema_unref (schema);
+      g_signal_connect (theme_settings, "changed::name", G_CALLBACK (on_theme_changed), NULL);
+      renaissance = theme_wanted ();
+    }
 
-  GtkCssProvider *provider = gtk_css_provider_new ();
-  gtk_css_provider_load_from_string (provider, css->str);
+  provider = gtk_css_provider_new ();
+  theme_provider = gtk_css_provider_new ();
+  load_css ();
   /* above the theme (APPLICATION), so GTK's own look never shows through a libneo widget */
   gtk_style_context_add_provider_for_display (gdk_display_get_default (), GTK_STYLE_PROVIDER (provider),
                                               GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-  g_object_unref (provider);
-  g_string_free (css, TRUE);
+  gtk_style_context_add_provider_for_display (gdk_display_get_default (), GTK_STYLE_PROVIDER (theme_provider),
+                                              GTK_STYLE_PROVIDER_PRIORITY_USER);
 
   /* the apps are always dark, whatever the system's preference (Theme.DeskClock's parent is a Dark theme) */
 #if GTK_CHECK_VERSION (4, 20, 0)

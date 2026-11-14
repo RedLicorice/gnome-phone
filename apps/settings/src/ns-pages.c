@@ -625,6 +625,12 @@ ns_page_display (GtkWidget *row, gpointer data)
   GSettings *iface = ns_page_settings (page, "org.gnome.desktop.interface");
 
   GtkWidget *g = ns_group (c, NULL);
+  GSettings *look = ns_page_settings (page, "de.yesman.GnomePhone.Theme");
+  if (look) {
+    static const char *const looks[] = { "default", "renaissance", NULL };
+    static const char *const look_labels[] = { "Stock", "Cyberpunk Renaissance", NULL };
+    ns_row_choice (g, "Look", look, "name", looks, look_labels);
+  }
   dark_row (g, iface);
   GSettings *color = ns_page_settings (page, "org.gnome.settings-daemon.plugins.color");
   if (color && display_has_gamma ())

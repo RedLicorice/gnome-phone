@@ -2,5 +2,7 @@
 <gresources>
   <gresource prefix="/de/yesman/neo">
     <file>neo.css</file>
+    <file>neo-renaissance.css</file>
+    <file>neo-renaissance-apps.css</file>
   </gresource>
 </gresources>

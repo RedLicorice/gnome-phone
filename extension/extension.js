@@ -28,6 +28,7 @@ import {Service} from './service.js';
 import {Shade} from './shade.js';
 import {SystemState} from './state.js';
 import {StatusBar, hideShellPanel} from './statusbar.js';
+import {ThemeSwaps} from './theme.js';
 import {VolumeDialog} from './volume.js';
 import {WhenLocked} from './whenlocked.js';
 
@@ -149,6 +150,8 @@ export default class GnomePhoneExtension extends Extension {
         Main.layoutManager.addTopChrome(this._powerMenu.layer);
         overWindows(this._powerMenu.layer);
         // the screen off, the AOD or black, over everything: the power key, the double tap, the timeout
+        // the optional look's wallpaper and icon pack follow its setting
+        this._themeSwaps = new ThemeSwaps();
         this._power = new Power(this._keyguard, this._state, this._powerMenu, this._chord);
         Main.layoutManager.addTopChrome(this._power.layer);
         overWindows(this._power.layer);
@@ -200,6 +203,8 @@ export default class GnomePhoneExtension extends Extension {
         this._endMark = null;
         this._appSwitch?.destroy();
         this._appSwitch = null;
+        this._themeSwaps?.destroy();
+        this._themeSwaps = null;
         this._power?.destroy();
         this._power = null;
         this._powerMenu?.destroy();

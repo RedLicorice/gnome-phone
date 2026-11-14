@@ -27,7 +27,7 @@ import {Canvas, VectorIcon} from './icons.js';
 import {ICONS as L3_ICONS} from './l3icondata.js';
 import {PathInterpolator} from './launch.js';
 import {VelocityTracker} from './motion.js';
-import {Color, cogl, setSource} from './palette.js';
+import {Color, cogl, gild, setSource} from './palette.js';
 import {overWindows} from './scanout.js';
 import {openAppInfo, settingsApp} from './settings.js';
 import {
@@ -199,7 +199,7 @@ class Chip {
         });
         // St keeps the radius to half the height: a pill at either height
         this._pill = new St.Widget({
-            style: `background-color: rgb(${CHIP_COLOUR}); border-radius: ${u(CHIP_RADIUS)}px;`,
+            style: `background-color: rgb(${CHIP_COLOUR}); border-radius: ${u(CHIP_RADIUS)}px;${gild()}`,
         });
         this.root.add_child(this._pill);
         // app_chip_fg: pressed, onSurface at 0.15 over it
@@ -318,7 +318,7 @@ class TaskMenu {
         this.items = items;
         this.height = items.length * MENU.rowH;
         this.root = new St.Widget({
-            style: `background-color: rgb(${CHIP_COLOUR}); border-radius: ${u(MENU.r)}px;`,
+            style: `background-color: rgb(${CHIP_COLOUR}); border-radius: ${u(MENU.r)}px;${gild()}`,
             clip_to_allocation: true, opacity: 0,
             offscreen_redirect: Clutter.OffscreenRedirect.AUTOMATIC_FOR_OPACITY,
         });
@@ -560,7 +560,7 @@ class Button {
         this._scale = scale;
         this.root = new St.Widget({
             height: u(BUTTON_H), opacity: 0,
-            style: `background-color: rgb(${BUTTON_COLOUR}); border-radius: ${u(BUTTON_H / 2)}px;`,
+            style: `background-color: rgb(${BUTTON_COLOUR}); border-radius: ${u(BUTTON_H / 2)}px;${gild(0.5)}`,
             offscreen_redirect: Clutter.OffscreenRedirect.AUTOMATIC_FOR_OPACITY,
         });
         // OverviewActionButton: 14 sp at 600, which the phone draws as 700 made bold; the icon, then 8 dp, then

@@ -1,0 +1,26 @@
+{
+  "range": 60,
+  "tilt": 0.2,
+  "layers": [
+    {
+      "file": "layer0.jpg",
+      "depth": -0.6
+    },
+    {
+      "file": "layer1.png",
+      "depth": -0.25
+    },
+    {
+      "file": "layer2.png",
+      "depth": 0.1
+    },
+    {
+      "file": "layer3.png",
+      "depth": 0.55
+    },
+    {
+      "file": "layer4.png",
+      "depth": 1.0
+    }
+  ]
+}

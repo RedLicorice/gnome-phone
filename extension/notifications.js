@@ -18,7 +18,7 @@ import {animate, animateSpring, Animator, bezier, clamp, FAST_OUT_LINEAR_IN, FAS
     lerp, splineFling, Spring, VelocityTracker} from './motion.js';
 import {magnetic} from './magnetic.js';
 import {RoundRect} from './roundrect.js';
-import {Color, cogl, font, rgba, SurfaceEffect} from './palette.js';
+import {Color, cogl, font, gild, rgba, SurfaceEffect} from './palette.js';
 import {openSettings} from './settings.js';
 import {symbolicIcon} from './statusbar.js';
 import {px, SCALE, SCREEN_H, SCREEN_W} from './units.js';
@@ -316,7 +316,7 @@ class Row extends St.Widget {
         const pillBox = new St.Widget({width: px(PILL_W + 2 * PILL_TOUCH), height: px(PILL_H + 2 * PILL_TOUCH)});
         const pillBg = new St.Widget({
             x: px(PILL_TOUCH), y: px(PILL_TOUCH), width: px(PILL_W), height: px(PILL_H),
-            style: `background-color: ${rgba(PILL_FILL)}; border-radius: ${px(PILL_H / 2).toFixed(2)}px;`,
+            style: `background-color: ${rgba(PILL_FILL)}; border-radius: ${px(PILL_H / 2).toFixed(2)}px;${gild()}`,
         });
         this._chevron = new VectorIcon('ic_notification_2025_expand', px(PILL_ICON), Color.onSurface);
         this._chevron.set_position(px((PILL_W - PILL_ICON) / 2), px((PILL_H - PILL_ICON) / 2));
