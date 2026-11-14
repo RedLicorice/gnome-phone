@@ -1,7 +1,7 @@
 /* Neo Settings' own pages; each pushes itself onto the navigation. */
 #pragma once
 
-#include <gtk/gtk.h>
+#include <adwaita.h>
 
 /* ns-pages.c: the hubs and the small pages */
 void ns_page_connections (GtkWidget *row, gpointer data);
@@ -38,6 +38,10 @@ void ns_page_app (const char *id);
 void ns_page_lock_screen (GtkWidget *row, gpointer data);
 void ns_page_keyboard (GtkWidget *row, gpointer data);
 void ns_page_touch_keyboard (GtkWidget *row, gpointer data);
+
+/* ns-fprint.c: fingerprints (fprintd); the Lock screen page's Biometrics card, shown once fprintd names a sensor */
+void ns_page_fingerprint (GtkWidget *row, gpointer data);
+void ns_fprint_lock_group (AdwNavigationPage *page, GtkWidget *content);
 
 /* ns-privacy.c */
 void ns_page_privacy (GtkWidget *row, gpointer data);
