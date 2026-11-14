@@ -12,6 +12,7 @@ typedef struct {
   NsActivate  page;            /* our own page, or */
   const char *const *argv;     /* another app */
   const char *needs_schema;    /* shown only if this settings schema is installed */
+  gboolean  (*available) (void); /* shown only if this says so */
 } Entry;
 
 static const char *const software[] = { "gnome-software", "--mode=updates", NULL };
@@ -49,6 +50,10 @@ static const Entry entries[] = {
   { "avatar-default-symbolic", "blue", "Accounts", "Online accounts",
     "google nextcloud email", ns_page_accounts },
   { NULL },
+  { "face-smile-symbolic", "purple", "Minerva", "Model • Fallbacks • Voice • Budgets",
+    "ai agent brain llm openrouter opencode elevenlabs piper key budget cost", ns_page_minerva, NULL, NULL,
+    ns_minerva_available },
+  { NULL },
   { "view-grid-symbolic", "blue", "Apps", "Default apps • App settings",
     "permissions storage", ns_page_apps },
   { "preferences-system-symbolic", "violet", "General management", "Language and keyboard • Date and time",
@@ -78,6 +83,8 @@ activate_entry (GtkWidget *row, gpointer data)
 static gboolean
 installed (const Entry *e)
 {
+  if (e->available && !e->available ())
+    return FALSE;
   if (e->needs_schema) {
     g_autoptr (GSettings) s = ns_settings (e->needs_schema);
     if (!s)
@@ -304,6 +311,7 @@ static const struct {
   { "system", ns_page_general },
   { "universal-access", ns_page_accessibility }, { "accessibility", ns_page_accessibility },
   { "info-overview", ns_page_about }, { "about", ns_page_about },
+  { "minerva", ns_page_minerva }, { "brain", ns_page_minerva },
 };
 
 static void
