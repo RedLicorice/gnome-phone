@@ -68,6 +68,7 @@ export class Stacks {
         this._windows = new Map();              // window id -> Meta.Window
         this._tracker = Shell.WindowTracker.get_default();
         this._prevFocus = null;
+        this._idles = new Set();                // GLib idle sources of _tuckAway
 
         this._loadConfig();
         this._monitor = Gio.File.new_for_path(configPath()).monitor_file(Gio.FileMonitorFlags.NONE, null);
@@ -182,15 +183,25 @@ export class Stacks {
                 back?.activate(global.get_current_time());
             }
         };
+        // never inside the frame signal: minimizing there restacks the windows while mutter is painting and its
+        // compositor aborts (invalidate_top_window_actor_for_views: frame_in_progress), taking the session with it
+        const later = () => {
+            const id = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                this._idles.delete(id);
+                done();
+                return GLib.SOURCE_REMOVE;
+            });
+            this._idles.add(id);
+        };
         if (drawn) {
-            done();
+            later();
             return;
         }
         Main.wm.skipNextEffect(actor);
         actor.opacity = 0;
         actor.connectObject('first-frame', () => {
             actor.disconnectObject(this);
-            done();
+            later();
         }, this);
     }
 
@@ -281,6 +292,9 @@ export class Stacks {
     destroy() {
         this._monitor?.cancel();
         this._monitor?.disconnectObject(this);
+        for (const id of this._idles)
+            GLib.source_remove(id);
+        this._idles.clear();
         global.display.disconnectObject(this);
         for (const win of this._windows.values()) {
             win.disconnectObject(this);
