@@ -18,5 +18,10 @@
       <description>The wallpaper that was in use when the Renaissance look took over its own; Neo Settings puts it back
       when the look is switched off.</description>
     </key>
+    <key name="previous-icon-pack" type="s">
+      <default>''</default>
+      <summary>Icon pack to put back</summary>
+      <description>The icon pack in use when the Renaissance look took over its own.</description>
+    </key>
   </schema>
 </schemalist>
