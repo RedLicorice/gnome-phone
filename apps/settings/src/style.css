@@ -77,7 +77,7 @@ button.ns-uninstall { margin: 8px 16px 24px; min-height: 48px; border-radius: 14
  * Michelangelus is installed from the owner's copy, never shipped: the chain falls back. No animation. */
 window.ns-ren, window.ns-ren .ns-root, window.ns-ren.ns-dark, window.ns-ren.ns-dark .ns-root { background-color: #08070d; color: #f0e6d0; }
 window.ns-ren .ns-card, window.ns-ren.ns-dark .ns-card, window.ns-ren .ns-li, window.ns-ren.ns-dark .ns-li {
-  background-color: #13121e; border-radius: 14px; box-shadow: inset 0 0 0 1px alpha(#d9b26a, 0.30); }
+  background-color: #13121e; border-radius: 14px; box-shadow: inset 0 0 0 1px alpha(#b0b5c2, 0.28); }
 window.ns-ren .ns-li-first { border-top-left-radius: 14px; border-top-right-radius: 14px; }
 window.ns-ren .ns-li-last { border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
 window.ns-ren .ns-big, window.ns-ren .ns-huge, window.ns-ren .ns-head, window.ns-ren .ns-big-title {
@@ -85,14 +85,14 @@ window.ns-ren .ns-big, window.ns-ren .ns-huge, window.ns-ren .ns-head, window.ns
 window.ns-ren .ns-group-title { color: #d9b26a; font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 2px; }
 window.ns-ren .ns-title, window.ns-ren label.title, window.ns-ren row { color: #f0e6d0; }
 window.ns-ren .ns-sub, window.ns-ren .ns-note { color: alpha(#f0e6d0, 0.6); }
-window.ns-ren .ns-card separator, window.ns-ren .ns-li > separator { background-color: alpha(#d9b26a, 0.16); }
+window.ns-ren .ns-card separator, window.ns-ren .ns-li > separator { background-color: alpha(#b0b5c2, 0.18); }
 window.ns-ren .ns-accent { color: #d9b26a; }
 window.ns-ren .ns-blue, window.ns-ren .ns-violet, window.ns-ren .ns-purple { background-color: #23418f; color: #d9b26a; }
 window.ns-ren .ns-green, window.ns-ren .ns-lime { background-color: #4a2d0a; color: #ff9f2e; }
 window.ns-ren .ns-orange, window.ns-ren .ns-yellow { background-color: #4a2a1c; color: #e0936f; }
 window.ns-ren .ns-red, window.ns-ren .ns-pink { background-color: #6b1237; color: #ff6f9c; }
 window.ns-ren .ns-grey { background-color: #2a283d; color: #bdb299; }
-window.ns-ren .ns-icon { box-shadow: inset 0 0 0 1px alpha(#d9b26a, 0.55); }
+window.ns-ren .ns-icon { box-shadow: inset 0 0 0 1px alpha(#b0b5c2, 0.45); }
 window.ns-ren switch:checked { background-color: #23418f; }
 window.ns-ren switch:checked slider { background-color: #d9b26a; }
 window.ns-ren scale highlight { background-color: #d9b26a; }

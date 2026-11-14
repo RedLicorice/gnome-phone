@@ -15,6 +15,8 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {animate, Animator, clamp, FAST_OUT_SLOW_IN, fling, lerp, MIN_FLING_VELOCITY, Spring,
     VelocityTracker} from './motion.js';
 import {NotificationStack} from './notifications.js';
+import {TickScale} from './ornament.js';
+import {isRenaissance} from './theme.js';
 import {Color, rgba, SHADE_PANEL} from './palette.js';
 import {QQS_HEIGHT, QSPanel} from './qs.js';
 import {wholeFrames} from './redraws.js';
@@ -104,6 +106,12 @@ export const Shade = GObject.registerClass({
             opacity: 0,
         });
         this.add_child(this._scrim);
+        // the Renaissance look: a fine tick scale along the scrim's top edge, with a silver hairline above it
+        if (isRenaissance()) {
+            this._scrim.style += ` border-top: 1px solid ${rgba(Color.silverDim, 0.6)};`;
+            this._scrim.add_child(new TickScale(this.width));
+            this._scrim.get_last_child().set_position(0, px(6));
+        }
 
         this._stack = new NotificationStack(this);
         this.add_child(this._stack);
