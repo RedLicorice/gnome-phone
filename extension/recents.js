@@ -412,8 +412,9 @@ function memoryKey(win, app) {
     return id.startsWith('waydroid.') ? id.replace(/\.desktop$/, '') : `${win.get_pid()}`;
 }
 
-// Runs appmem.py for @keys in a process of its own, under a timeout (see its header); @done gets {key: bytes}
-function measureApps(keys, done) {
+// Runs appmem.py for @keys in a process of its own, under a timeout (see its header); @done gets {key: bytes};
+// @failed, when given, is called instead when there is no answer (the helper did not start, or died)
+export function measureApps(keys, done, failed = () => {}) {
     const helper = GLib.build_filenamev([GLib.path_get_dirname(import.meta.url.replace('file://', '')),
         'appmem.py']);
     let proc;
@@ -422,6 +423,7 @@ function measureApps(keys, done) {
             Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
     } catch (e) {
         logError(e, 'gnome-phone: appmem');
+        failed();
         return;
     }
     proc.communicate_utf8_async(null, null, (pr, res) => {
@@ -429,6 +431,7 @@ function measureApps(keys, done) {
             done(JSON.parse(pr.communicate_utf8_finish(res)[1] || '{}'));
         } catch {
             // killed by the timeout, or nothing printed: no figures this time
+            failed();
         }
     });
 }
@@ -724,6 +727,7 @@ export class Recents {
 
         // the cards of one stack (stacks.js): the running app's, when there are owners besides the user
         this._stacks = nav.stacks ?? null;
+        this._stacks?.setOverview(true);        // the agent chip steps aside while recents is up
         this._running = running;
         this._stack = running && this._stacks ? this._stacks.ownerOf(running) : USER;
         this._tasks = [];
@@ -1970,6 +1974,7 @@ export class Recents {
         if (this._destroyed)
             return;
         this._destroyed = true;
+        this._stacks?.setOverview(false);
         this._menu = null;
         this._ticker?.stop();
         this._ticker = null;

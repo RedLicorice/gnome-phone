@@ -21,7 +21,8 @@ struct Mn {
   AdwNavigationPage *page;
   GtkWidget *msg;                       /* the last result: saved, restarted, or the error */
   GtkWidget *brain_g, *roles_g, *voice_g; /* filled once, with the first status (the pickers need the model list) */
-  GtkWidget *chain, *notes;             /* rebuilt on every refresh (no pickers inside) */
+  GtkWidget *chain, *stt, *notes;       /* rebuilt on every refresh (no pickers inside) */
+  GtkWidget *stt_timeout;               /* the cloud recognizers' time limit row */
   GtkWidget *voice_id, *voice_cap, *or_cap, *el_cap, *spent, *key_pw; /* rows updated in place */
   KeyRow     keys[2];                   /* OpenRouter, ElevenLabs */
   GtkWidget *bat_val, *bat_scale, *bat_state; /* Max charge: the value row, the slider, the charge service's state */
@@ -29,6 +30,8 @@ struct Mn {
   gboolean   bat_syncing;               /* the slider is being set from the status */
   JsonObject *st;                       /* the last status */
   GStrv      chain_ids;                 /* the configured fallbacks, in order */
+  GStrv      stt_ids;                   /* the speech recognizers before Vosk, in order (Vosk is always last) */
+  char      *claude_hint;               /* "signed in"…: asked of the Claude CLI once, when the page opens */
   gboolean   picks_built;               /* the pickers are built once: a refresh must not free what a picker page points to */
   gboolean   busy;
 };
@@ -340,16 +343,33 @@ field_row (Mn *m, GtkWidget *group, const char *title, const char *key)
 
 /* ---- the fallback chain ---- */
 
+/* an ordered list in brain.conf (the fallback chain, the speech recognizers): `ids` is the list as shown, `key` where
+ * it is saved. A row's buttons carry the index of its entry. */
 typedef struct {
-  Mn   *m;
-  guint index;
+  Mn         *m;
+  guint       index;
+  const char *key;
+  GStrv      *ids;
 } ChainOp;
 
 static void
-chain_save (Mn *m, GStrv ids)
+chain_save (Mn *m, const char *key, GStrv ids)
 {
   g_autofree char *joined = g_strjoinv (", ", ids);
-  mn_set (m, "fallback.chain", joined);
+  mn_set (m, key, joined);
+}
+
+/* "a, b c" -> {"a", "b", "c"}; `skip` (or NULL) is left out */
+static GStrv
+split_ids (const char *text, const char *skip)
+{
+  g_auto (GStrv) raw = g_strsplit_set (text, ", ", -1);
+  GPtrArray *out = g_ptr_array_new ();
+  for (guint i = 0; raw[i]; i++)
+    if (*raw[i] && g_strcmp0 (raw[i], skip))
+      g_ptr_array_add (out, g_strdup (raw[i]));
+  g_ptr_array_add (out, NULL);
+  return (GStrv) g_ptr_array_free (out, FALSE);
 }
 
 static void
@@ -358,15 +378,15 @@ chain_move (GtkButton *b, gpointer data)
   ChainOp *op = data;
   Mn *m = op->m;
   int by = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (b), "mn-by"));
-  guint n = g_strv_length (m->chain_ids);
+  guint n = g_strv_length (*op->ids);
   int to = (int) op->index + by;
   if (to < 0 || to >= (int) n)
     return;
-  g_auto (GStrv) ids = g_strdupv (m->chain_ids);
+  g_auto (GStrv) ids = g_strdupv (*op->ids);
   char *t = ids[op->index];
   ids[op->index] = ids[to];
   ids[to] = t;
-  chain_save (m, ids);
+  chain_save (m, op->key, ids);
 }
 
 static void
@@ -375,11 +395,11 @@ chain_remove (GtkButton *b, gpointer data)
   ChainOp *op = data;
   Mn *m = op->m;
   g_autoptr (GPtrArray) keep = g_ptr_array_new ();
-  for (guint i = 0; m->chain_ids[i]; i++)
+  for (guint i = 0; (*op->ids)[i]; i++)
     if (i != op->index)
-      g_ptr_array_add (keep, m->chain_ids[i]);
+      g_ptr_array_add (keep, (*op->ids)[i]);
   g_ptr_array_add (keep, NULL);
-  chain_save (m, (GStrv) keep->pdata);
+  chain_save (m, op->key, (GStrv) keep->pdata);
 }
 
 static GtkWidget *
@@ -448,16 +468,7 @@ chain_fill (Mn *m)
 {
   ns_group_clear (m->chain);
   g_strfreev (m->chain_ids);
-  m->chain_ids = g_strsplit_set (setting (m, "fallback.chain"), ", ", -1);
-  /* g_strsplit_set leaves empty strings between a comma and a space: drop them */
-  guint w = 0;
-  for (guint r = 0; m->chain_ids[r]; r++) {
-    if (*m->chain_ids[r])
-      m->chain_ids[w++] = m->chain_ids[r];
-    else
-      g_free (m->chain_ids[r]);
-  }
-  m->chain_ids[w] = NULL;
+  m->chain_ids = split_ids (setting (m, "fallback.chain"), NULL);
   guint n = g_strv_length (m->chain_ids);
   for (guint i = 0; i < n; i++) {
     JsonObject *o = model_of (m, m->chain_ids[i]);
@@ -470,6 +481,8 @@ chain_fill (Mn *m)
     ChainOp *op = g_new0 (ChainOp, 1);
     op->m = m;
     op->index = i;
+    op->key = "fallback.chain";
+    op->ids = &m->chain_ids;
     g_object_set_data_full (G_OBJECT (row), "mn-op", op, (GDestroyNotify) chain_free_op);
     GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_box_append (GTK_BOX (box), icon_button ("go-up-symbolic", "Earlier", G_CALLBACK (chain_move), op, -1, i > 0));
@@ -479,6 +492,103 @@ chain_fill (Mn *m)
   }
   GtkWidget *add = ns_row_button (m->chain, "Add a model…", FALSE, chain_add, m);
   (void) add;
+}
+
+/* ---- speech recognition: the engines tried in order, Vosk (on the phone) always last ---- */
+
+static const struct {
+  const char *id, *label;
+} stt_engines[] = {
+  { "claude", "Claude" }, { "elevenlabs", "ElevenLabs" }, { "openrouter", "OpenRouter" },
+};
+
+static const char *
+stt_label (const char *id)
+{
+  for (guint i = 0; i < G_N_ELEMENTS (stt_engines); i++)
+    if (!g_strcmp0 (stt_engines[i].id, id))
+      return stt_engines[i].label;
+  return id;
+}
+
+/* what to say under an engine: Claude's login (asked of the CLI), a key present or missing, Vosk local */
+static const char *
+stt_hint (Mn *m, const char *id)
+{
+  if (!g_strcmp0 (id, "claude"))
+    return m->claude_hint ? m->claude_hint : "checking…";
+  const char *h = str_of (obj_of (m->st, "stt_hints"), id);
+  return *h ? h : "unknown";
+}
+
+static void
+stt_add_picked (GtkWidget *row, gpointer data)
+{
+  Mn *m = data;
+  const char *id = g_object_get_data (G_OBJECT (row), "mn-id");
+  g_autoptr (GPtrArray) a = g_ptr_array_new ();
+  for (guint i = 0; m->stt_ids && m->stt_ids[i]; i++)
+    g_ptr_array_add (a, m->stt_ids[i]);
+  g_ptr_array_add (a, (char *) id);
+  g_ptr_array_add (a, NULL);
+  chain_save (m, "voice.stt_chain", (GStrv) a->pdata);
+  gtk_widget_activate_action (row, "navigation.pop", NULL);   /* back to Minerva */
+}
+
+static void
+stt_add (GtkWidget *row, gpointer data)
+{
+  Mn *m = data;
+  GtkWidget *c;
+  AdwNavigationPage *page = ns_page_new ("Add a recognizer", &c);
+  GtkWidget *g = ns_group (c, NULL);
+  guint shown = 0;
+  for (guint i = 0; i < G_N_ELEMENTS (stt_engines); i++) {
+    if (g_strv_contains ((const char *const *) m->stt_ids, stt_engines[i].id))
+      continue;
+    GtkWidget *r = ns_row (g, NULL, NULL, stt_engines[i].label, stt_hint (m, stt_engines[i].id));
+    g_object_set_data_full (G_OBJECT (r), "mn-id", g_strdup (stt_engines[i].id), g_free);
+    ns_row_on_activate (r, stt_add_picked, m);
+    shown++;
+  }
+  if (!shown)
+    ns_note (c, "Every recognizer is already in the list.");
+  ns_push (page);
+}
+
+static void
+stt_fill (Mn *m)
+{
+  ns_group_clear (m->stt);
+  g_strfreev (m->stt_ids);
+  m->stt_ids = split_ids (setting (m, "voice.stt_chain"), "vosk");
+  guint n = g_strv_length (m->stt_ids);
+  for (guint i = 0; i < n; i++) {
+    GtkWidget *row = ns_row (m->stt, NULL, NULL, stt_label (m->stt_ids[i]), stt_hint (m, m->stt_ids[i]));
+    ChainOp *op = g_new0 (ChainOp, 1);
+    op->m = m;
+    op->index = i;
+    op->key = "voice.stt_chain";
+    op->ids = &m->stt_ids;
+    g_object_set_data_full (G_OBJECT (row), "mn-op", op, (GDestroyNotify) chain_free_op);
+    GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_box_append (GTK_BOX (box), icon_button ("go-up-symbolic", "Earlier", G_CALLBACK (chain_move), op, -1, i > 0));
+    gtk_box_append (GTK_BOX (box), icon_button ("go-down-symbolic", "Later", G_CALLBACK (chain_move), op, 1, i + 1 < n));
+    gtk_box_append (GTK_BOX (box), icon_button ("list-remove-symbolic", "Remove", G_CALLBACK (chain_remove), op, 0, TRUE));
+    ns_row_suffix (row, box);
+  }
+  ns_row (m->stt, NULL, NULL, "Vosk (on the phone)", "local, offline • always the last one");
+  if (n < G_N_ELEMENTS (stt_engines))
+    ns_row_button (m->stt, "Add a recognizer…", FALSE, stt_add, m);
+}
+
+static void
+stt_status_done (Mn *m, JsonObject *root, const char *err, gpointer data)
+{
+  g_free (m->claude_hint);
+  m->claude_hint = g_strdup (!err && root ? str_of (root, "claude") : "unknown");
+  if (m->st)
+    stt_fill (m);
 }
 
 /* ---- API keys ---- */
@@ -667,6 +777,7 @@ update_fields (Mn *m)
 {
   fill_value (m->voice_id, setting (m, "voice.voice"));
   fill_value (m->voice_cap, setting (m, "voice.daily_chars"));
+  fill_value (m->stt_timeout, setting (m, "voice.stt_timeout_s"));
   fill_value (m->or_cap, setting (m, "budgets.openrouter_monthly_eur"));
   fill_value (m->el_cap, setting (m, "budgets.elevenlabs_chars_month"));
   JsonObject *keys = obj_of (m->st, "keys");
@@ -699,6 +810,7 @@ status_done (Mn *m, JsonObject *root, const char *err, gpointer data)
   if (!m->picks_built)
     build_rows (m);
   chain_fill (m);
+  stt_fill (m);
   notes_fill (m);
   update_fields (m);
 }
@@ -720,6 +832,8 @@ mn_free (Mn *m)
   if (m->st)
     json_object_unref (m->st);
   g_strfreev (m->chain_ids);
+  g_strfreev (m->stt_ids);
+  g_free (m->claude_hint);
   g_free (m);
 }
 
@@ -749,6 +863,13 @@ ns_page_minerva (GtkWidget *row, gpointer data)
 
   m->voice_g = ns_group (c, "Voice");
 
+  m->stt = ns_group (c, "Speech recognition");
+  GtkWidget *sg = ns_group (c, NULL);
+  m->stt_timeout = field_row (m, sg, "Cloud time limit (seconds)", "voice.stt_timeout_s");
+  ns_note (c, "What you say after the wake word is sent to the first recognizer that is ready, in this order; one that "
+              "fails or takes longer than the time limit (1 to 10 s) passes it to the next. Vosk runs on the phone and "
+              "is always the last. The wake word itself is always recognized on the phone.");
+
   GtkWidget *bg = ns_group (c, "Budgets");
   m->or_cap = field_row (m, bg, "OpenRouter per month (EUR)", "budgets.openrouter_monthly_eur");
   m->el_cap = field_row (m, bg, "ElevenLabs per month (characters)", "budgets.elevenlabs_chars_month");
@@ -775,6 +896,8 @@ ns_page_minerva (GtkWidget *row, gpointer data)
 
   say (m, "", FALSE);
   mn_refresh (m);
+  const char *const stt_args[] = { "stt-status", "--json", NULL };
+  mn_run (m, stt_args, stt_status_done, NULL);   /* the Claude CLI's login, a second or so: shown when it comes */
   ns_push (page);
 }
 
