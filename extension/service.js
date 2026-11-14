@@ -45,10 +45,10 @@ const IFACE = `<node>
 </node>`;
 
 export class Service {
-    constructor(home) {
+    constructor(home, boost) {
         this._home = home;
-        this._launch = new LaunchTransition();
-        this._nav = new Navigation(home);
+        this._launch = new LaunchTransition(boost);
+        this._nav = new Navigation(home, boost);
         this._nav.onGestureBegin = () => this._launch.cancelSplash();
         this._nav.expectWindow = app => this._launch.expect(app);
         this._volumeKeys = new Map();   // app id -> {sender, watch}: who took the volume keys

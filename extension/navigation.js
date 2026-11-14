@@ -159,8 +159,9 @@ class MotionPause {
 // ---- the gesture --------------------------------------------------------------------------------------------------
 
 export class Navigation {
-    constructor(home) {
+    constructor(home, boost) {
         this.home = home;
+        this.boost = boost;
         this.icons = new Map();
         this.scale = global.display.get_monitor_scale(Main.layoutManager.primaryIndex);
         this._tracker = new VelocityTracker();

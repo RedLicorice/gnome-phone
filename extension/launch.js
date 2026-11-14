@@ -157,7 +157,8 @@ class CropEffect extends Clutter.ShaderEffect {
 // ---- the transition -----------------------------------------------------------------------------------------------
 
 export class LaunchTransition {
-    constructor() {
+    constructor(boost) {
+        this._boost = boost;
         this._running = null;
         this._launched = null;
         this._launchedAt = 0;
@@ -205,6 +206,7 @@ export class LaunchTransition {
     // app: Shell.App; from: the icon's box on screen in device pixels; icon: the launcher's own picture of the
     // icon (a file), or '' for the app's themed icon
     launch(app, from, icon) {
+        this._boost?.launch();
         this._finish();
         this._launched = app;
         this._launchedAt = GLib.get_monotonic_time();

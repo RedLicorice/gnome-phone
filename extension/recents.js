@@ -1572,6 +1572,8 @@ export class Recents {
     // Open a card's app: the whole strip scales by 1080/684 about the point that takes this card onto the screen,
     // the card's corners square off, the chips and actions fade at once
     _launch(task) {
+        // switching to a task is a launch on Android too (Mode::LAUNCH)
+        this._nav.boost?.launch();
         this._busy = true;
         this._stop('scroll');
         this._stop('chips');

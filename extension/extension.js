@@ -5,6 +5,7 @@ import GLib from 'gi://GLib';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
+import {Boost} from './boost.js';
 import {ScreenshotChord} from './chord.js';
 import {CollectWhenStill} from './gc.js';
 import {Cutout, CutoutBand} from './cutout.js';
@@ -89,10 +90,12 @@ export default class GnomePhoneExtension extends Extension {
     }
 
     _build() {
+        // touch and launch hints for minerva-boost, before the service that launches apps
+        this._boost = new Boost();
         this._gc = new CollectWhenStill();
         this._mipmaps = new NoWindowMipmaps();
         this._home = new Home(this);
-        this._service = new Service(this._home);
+        this._service = new Service(this._home, this._boost);
 
         // Android's SystemUI: the status bar in place of the shell's top panel
         this._state = new SystemState();
@@ -224,5 +227,7 @@ export default class GnomePhoneExtension extends Extension {
         this._gc = null;
         this._rotation?.destroy();
         this._rotation = null;
+        this._boost?.destroy();
+        this._boost = null;
     }
 }
