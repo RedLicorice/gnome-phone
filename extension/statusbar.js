@@ -39,7 +39,11 @@ const LAND_BAR_HEIGHT = 84;
 const LAND_RAISE = 16;
 const PAD_START = 25;
 const OPEN_END = 85;
-const SYSTEM_SPAN = 300;                // signal, Wi-Fi and the widest battery (228) end to end, and room
+const CHIP_W = 96;                      // the camera chip (camera.js): a green pill, in front of the signal bars
+const CHIP_H = 54;
+const CHIP_ICON = 38;
+const CHIP_COLOUR = [0x2e, 0x9e, 0x4f];
+const SYSTEM_SPAN = 300 + CHIP_W + 19;  // signal, Wi-Fi and the widest battery (228) end to end, the chip, and room
 const ICONS_TAIL = 2;                   // the battery's antialiased edge past its end
 const ICON_GAP = 19;                    // between signal, Wi-Fi and battery
 const ICON_H = 36;                      // signal and Wi-Fi are 12 sp tall
@@ -253,33 +257,67 @@ export function notificationIcon(source, size) {
     return icon;
 }
 
-// The right-hand system icons: mobile signal, Wi-Fi, battery, right-aligned at @end (screen px) and centred on
-// @centerY; the shade header draws the same cluster
-export function paintSystemIcons(cr, state, end, centerY) {
-    const {wifi, mobile, battery, powerSave} = state;
+// The camera chip: a camera in use, painted white on a green pill (Android's privacy chip), leftmost of the icons
+function paintCameraChip(cr, x, centerY) {
+    const top = centerY - CHIP_H / 2;
+    cr.newPath();
+    cr.arc(x + CHIP_H / 2, centerY, CHIP_H / 2, Math.PI / 2, Math.PI * 1.5);
+    cr.arc(x + CHIP_W - CHIP_H / 2, centerY, CHIP_H / 2, -Math.PI / 2, Math.PI / 2);
+    cr.closePath();
+    cr.setSourceRGBA(CHIP_COLOUR[0] / 255, CHIP_COLOUR[1] / 255, CHIP_COLOUR[2] / 255, 1);
+    cr.fill();
+    paintIcon(cr, 'qs_camera_access_icon_on', x + (CHIP_W - CHIP_ICON) / 2, top + (CHIP_H - CHIP_ICON) / 2, CHIP_ICON,
+        Color.white);
+}
+
+// Where each part of the right-hand cluster begins (screen px, its left edge), from the cluster's right edge @end
+function systemIconsLayout(state, end) {
+    const {wifi, mobile, battery} = state;
+    const at = {};
     let x = end;
     if (battery.present) {
         x -= BATTERY_WIDTH(battery);
-        paintBattery(cr, x, centerY - BATTERY_H / 2, battery, !!powerSave);
+        at.battery = x;
         x -= ICON_GAP;
     }
     if (wifi.connected) {
         x -= WIFI_W;
-        paintWifi(cr, x, centerY - ICON_H / 2, wifi.level, Color.white);
+        at.wifi = x;
         x -= ICON_GAP;
     }
     if (mobile.present) {
         x -= SIGNAL_W;
-        paintSignal(cr, x, centerY + ICON_H / 2, mobile.level, Color.white);
+        at.signal = x;
+        x -= ICON_GAP;
     }
+    if (state.camera?.inUse) {
+        x -= CHIP_W;
+        at.chip = x;
+    }
+    return at;
+}
+
+// The right-hand system icons: the camera chip while a camera is in use, mobile signal, Wi-Fi, battery, right-aligned
+// at @end (screen px) and centred on @centerY; the shade header draws the same cluster
+export function paintSystemIcons(cr, state, end, centerY) {
+    const {wifi, mobile, battery, powerSave} = state;
+    const at = systemIconsLayout(state, end);
+    if (battery.present)
+        paintBattery(cr, at.battery, centerY - BATTERY_H / 2, battery, !!powerSave);
+    if (wifi.connected)
+        paintWifi(cr, at.wifi, centerY - ICON_H / 2, wifi.level, Color.white);
+    if (mobile.present)
+        paintSignal(cr, at.signal, centerY + ICON_H / 2, mobile.level, Color.white);
+    if (at.chip !== undefined)
+        paintCameraChip(cr, at.chip, centerY);
 }
 
 // What paintSystemIcons draws. The state changes far more often than that (an access point's strength within a bar,
 // UPower's energy rate), and a repaint is a texture across the whole bar converted on the CPU on its way to the GPU:
 // 15 ms of the shell's frame, wherever it lands in an animation
-function systemIconsKey({wifi, mobile, battery, powerSave}) {
+function systemIconsKey({wifi, mobile, battery, powerSave, camera}) {
     return [battery.present, battery.level, battery.plugged, !!powerSave, wifi.connected, wifi.level, mobile.present,
-        mobile.level].join();
+        mobile.level, !!camera?.inUse].join();
 }
 
 export const SystemIcons = GObject.registerClass(
@@ -298,6 +336,34 @@ class SystemIcons extends Canvas {
             if (systemIconsKey(state) !== this._drawn)
                 this.queue_repaint();
         }, this);
+        // the camera chip (camera.js): painted while a camera is in use, and a tap on it opens the sheet. Only then is
+        // the canvas reactive: the rest of the time it takes no touch from what is under it
+        state.camera?.connectObject('changed', () => this._syncCamera(), this);
+        this._chipTap = new Clutter.ClickGesture();
+        this._chipTap.connect('recognize', g => {
+            const point = g.get_point_coords(0);
+            const chip = this._chipRect();
+            if (chip && point.x >= chip[0] && point.x <= chip[1] && point.y >= chip[2] && point.y <= chip[3])
+                state.camera.tap();
+        });
+        this.add_action(this._chipTap);
+        this._syncCamera();
+    }
+
+    _syncCamera() {
+        this.reactive = !!this._state.camera?.inUse;
+        if (systemIconsKey(this._state) !== this._drawn)
+            this.queue_repaint();
+    }
+
+    // the chip's box [x0, x1, y0, y1] in the canvas's own logical px, with a finger's margin; null without a chip
+    _chipRect() {
+        const x = systemIconsLayout(this._state, this._end).chip;
+        if (x === undefined)
+            return null;
+        const slop = 12;
+        return [px(x - this._left - slop), px(x - this._left + CHIP_W + slop), px(this._centerY - CHIP_H / 2 - slop),
+            px(this._centerY + CHIP_H / 2 + slop)];
     }
 
     // the icons' vertical centre, screen px of the area

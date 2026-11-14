@@ -16,6 +16,7 @@ install_subdir('.', install_dir: extdir, strip_directory: true,
 gjs = find_program('gjs', required: false)
 if gjs.found()
   test('predictor', gjs, args: ['-m', files('tests/predictor.test.js')])
+  test('camera-indicator', gjs, args: ['-m', files('tests/camera.test.js')])
 endif
 
 # appmem.py runs as a program of its own (recents.js)

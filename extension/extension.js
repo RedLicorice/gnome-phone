@@ -29,6 +29,7 @@ import {Service} from './service.js';
 import {Shade} from './shade.js';
 import {Stacks} from './stacks.js';
 import {SystemState} from './state.js';
+import {CameraSheet} from './camera.js';
 import {StatusBar, hideShellPanel} from './statusbar.js';
 import {ThemeSwaps} from './theme.js';
 import {VolumeDialog} from './volume.js';
@@ -155,6 +156,10 @@ export default class GnomePhoneExtension extends Extension {
         });
         Main.layoutManager.addTopChrome(this._powerMenu.layer);
         overWindows(this._powerMenu.layer);
+        // the sheet a tap on the status bar's camera chip opens, over the lock screen too
+        this._cameraSheet = new CameraSheet(this._state.camera);
+        Main.layoutManager.addTopChrome(this._cameraSheet.layer);
+        overWindows(this._cameraSheet.layer);
         // the screen off, the AOD or black, over everything: the power key, the double tap, the timeout
         // the optional look's wallpaper and icon pack follow its setting
         this._themeSwaps = new ThemeSwaps();
@@ -213,6 +218,8 @@ export default class GnomePhoneExtension extends Extension {
         this._themeSwaps = null;
         this._power?.destroy();
         this._power = null;
+        this._cameraSheet?.destroy();
+        this._cameraSheet = null;
         this._powerMenu?.destroy();
         this._powerMenu = null;
         this._volume?.destroy();

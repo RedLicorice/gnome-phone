@@ -16,6 +16,7 @@ import {BroadbandModem} from 'resource:///org/gnome/shell/misc/modemManager.js';
 import {getRfkillManager} from 'resource:///org/gnome/shell/ui/status/rfkill.js';
 
 import {Brightness} from './brightness.js';
+import {CameraWatch} from './camera.js';
 import {setUserOrientationLock, userOrientationLock} from './rotation.js';
 
 Gio._promisify(NM.Client, 'new_async');
@@ -174,6 +175,8 @@ export const SystemState = GObject.registerClass({
         this.airplane = false;
         this.torch = null;              // null: no torch LED
         this._torch = findTorch();
+        // the camera indicator's facts (minerva-camwatch): the chip in the status bar, the sheet a tap opens
+        this.camera = new CameraWatch();
 
         this._cancellable = new Gio.Cancellable();
         this._changedId = 0;
@@ -634,6 +637,7 @@ export const SystemState = GObject.registerClass({
         Main.brightnessManager.globalScale?.disconnectObject(this);
         delete Main.brightnessManager._showOSD;
         this._brightness.destroy();
+        this.camera.destroy();
         for (const obj of [this._notifications, this._interface, this._location, this._touchscreen, this._power,
             this._color, this._client, this._wifiDevice, this._accessPoint, this._modemDevice, this._modem, this._upower,
             this._upowerDaemon, this._ppd, this._bt, this._rfkill])
