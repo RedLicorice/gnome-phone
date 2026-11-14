@@ -20,6 +20,8 @@ bool        text_init          (void);
 TextFont   *text_font          (const char *family, int weight, float px);
 /* the same with a variable font's other axes set: "opsz=18,ROND=0" */
 TextFont   *text_font_axes     (const char *family, int weight, float px, const char *axes);
+/* whether fontconfig has a font of exactly this family (not just a fallback for it) */
+gboolean    text_family_installed (const char *family);
 float       text_ascent        (TextFont *f);     /* above the baseline, positive */
 float       text_descent       (TextFont *f);     /* below it, positive */
 float       text_line_height   (TextFont *f);
