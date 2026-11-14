@@ -45,6 +45,11 @@ void ns_page_location (GtkWidget *row, gpointer data);
 void ns_page_accounts (GtkWidget *row, gpointer data);
 void ns_page_accessibility (GtkWidget *row, gpointer data);
 
+/* ns-ssh.c: who may log in over SSH (authorized_keys), the user's own key pairs */
+void ns_page_ssh (GtkWidget *row, gpointer data);
+/* ssh-keygen's SSH_ASKPASS: this binary, run with NS_SSH_ASKPASS set, prints the passphrase it was given */
+void ns_ssh_askpass (void);
+
 /* ns-system.c */
 void ns_page_language (GtkWidget *row, gpointer data);
 void ns_page_datetime (GtkWidget *row, gpointer data);
@@ -59,3 +64,8 @@ void ns_wallpaper_ask (GtkWidget *w, const char *path, const char *dark);
 void ns_page_software (GtkWidget *row, gpointer data);
 /* the "Screen scale" row of Display: filled in once the compositor has answered */
 void ns_page_scale_row (GtkWidget *group);
+
+/* ns-minerva.c: Minerva's brain (models, fallbacks, voice, budgets), through minerva-config; shown only where it is
+ * installed */
+void     ns_page_minerva (GtkWidget *row, gpointer data);
+gboolean ns_minerva_available (void);

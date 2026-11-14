@@ -26,7 +26,7 @@ install_data('neo-dock', 'sim-apn', install_dir: sbindir, install_mode: 'rwxr-xr
 # desktop that did not ask for it. Linked into /etc/udev/rules.d by whoever wants it
 install_data('71-neo-dock.rules', install_dir: datadir / 'gnome-phone-session')
 # the lock screen's PAM service (gp-auth)
-install_data('pam.d/gnome-phone', install_dir: get_option('sysconfdir') / 'pam.d')
+install_data('pam.d/gnome-phone', 'pam.d/gnome-phone-fingerprint', install_dir: get_option('sysconfdir') / 'pam.d')
 # neo-wakeup's bus name
 install_data('de.yesman.Wakeup.conf', install_dir: datadir / 'dbus-1' / 'system.d')
 

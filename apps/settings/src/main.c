@@ -12,6 +12,7 @@ typedef struct {
   NsActivate  page;            /* our own page, or */
   const char *const *argv;     /* another app */
   const char *needs_schema;    /* shown only if this settings schema is installed */
+  gboolean  (*available) (void); /* shown only if this says so */
 } Entry;
 
 static const char *const software[] = { "gnome-software", "--mode=updates", NULL };
@@ -42,12 +43,16 @@ static const Entry entries[] = {
     "pattern pin swipe password unlock", ns_page_lock_screen, NULL, "de.yesman.neo" },
   { NULL },
   { "security-high-symbolic", "purple", "Security and privacy", "Screen lock • Permissions • Usage",
-    "password pin camera microphone history trash", ns_page_privacy },
+    "password pin camera microphone history trash ssh keys", ns_page_privacy },
   { "find-location-symbolic", "purple", "Location", "Location services • App access",
     "gps geoclue", ns_page_location, NULL, "org.gnome.system.location" },
   { NULL },
   { "avatar-default-symbolic", "blue", "Accounts", "Online accounts",
     "google nextcloud email", ns_page_accounts },
+  { NULL },
+  { "face-smile-symbolic", "purple", "Minerva", "Model • Fallbacks • Voice • Budgets",
+    "ai agent brain llm openrouter opencode elevenlabs piper key budget cost", ns_page_minerva, NULL, NULL,
+    ns_minerva_available },
   { NULL },
   { "view-grid-symbolic", "blue", "Apps", "Default apps • App settings",
     "permissions storage", ns_page_apps },
@@ -78,6 +83,8 @@ activate_entry (GtkWidget *row, gpointer data)
 static gboolean
 installed (const Entry *e)
 {
+  if (e->available && !e->available ())
+    return FALSE;
   if (e->needs_schema) {
     g_autoptr (GSettings) s = ns_settings (e->needs_schema);
     if (!s)
@@ -320,9 +327,11 @@ static const struct {
   { "region", ns_page_language }, { "language", ns_page_language },
   { "datetime", ns_page_datetime }, { "date-time", ns_page_datetime },
   { "users", ns_page_users }, { "user-accounts", ns_page_users },
+  { "ssh", ns_page_ssh },
   { "system", ns_page_general },
   { "universal-access", ns_page_accessibility }, { "accessibility", ns_page_accessibility },
   { "info-overview", ns_page_about }, { "about", ns_page_about },
+  { "minerva", ns_page_minerva }, { "brain", ns_page_minerva },
 };
 
 static void
@@ -377,6 +386,11 @@ command_line (GApplication *app, GApplicationCommandLine *cl, gpointer data)
 int
 main (int argc, char **argv)
 {
+  /* run by ssh-keygen as its SSH_ASKPASS (ns-ssh.c): print the passphrase, no app */
+  if (g_getenv ("NS_SSH_ASKPASS")) {
+    ns_ssh_askpass ();
+    return 0;
+  }
   g_autoptr (AdwApplication) app = adw_application_new ("de.yesman.NeoSettings", G_APPLICATION_HANDLES_COMMAND_LINE);
   const GOptionEntry options[] = {
     { "page", 0, 0, G_OPTION_ARG_STRING, NULL, "Open a page: home, wallpaper, wifi, hotspot, bluetooth, power…", "PAGE" },

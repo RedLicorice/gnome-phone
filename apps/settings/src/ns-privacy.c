@@ -67,6 +67,8 @@ ns_page_privacy (GtkWidget *row, gpointer data)
   }
   r = ns_row (g, "system-users-symbolic", "orange", "Your account", "Name • Password");
   ns_row_on_activate (r, ns_page_users, NULL);
+  r = ns_row (g, "network-server-symbolic", "violet", "SSH", "Who can log in • My keys");
+  ns_row_on_activate (r, ns_page_ssh, NULL);
 
   GSettings *p = ns_page_settings (page, "org.gnome.desktop.privacy");
   if (!p) {
