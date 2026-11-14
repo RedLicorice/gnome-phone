@@ -1,0 +1,13 @@
+# Cross build of the phone's C apps (arm64, Debian sid) on an amd64 host: meson with tools/cross/aarch64.cross.
+# Only the libraries the apps link are installed for arm64; the build tools run natively.
+#   podman build -t gnome-phone-cross -f tools/cross/Containerfile tools/cross
+FROM docker.io/library/debian:sid-slim
+RUN dpkg --add-architecture arm64 \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        meson ninja-build pkgconf gcc-aarch64-linux-gnu libc6-dev-arm64-cross libglib2.0-dev-bin \
+        libgtk-4-dev:arm64 libadwaita-1-dev:arm64 libjson-glib-dev:arm64 libgoa-backend-1.0-dev:arm64 \
+        libnm-dev:arm64 libdrm-dev:arm64 libpulse-dev:arm64 libpam0g-dev:arm64 \
+    && rm -rf /var/lib/apt/lists/*
+COPY aarch64.cross /etc/meson/aarch64.cross
+WORKDIR /src

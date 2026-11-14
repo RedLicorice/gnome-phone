@@ -129,7 +129,8 @@ export const KeyboardView = GObject.registerClass({
             return this._data.locale === 'it' ? 'Italiano' : 'English';
         if (code)
             return def.label ?? LABELS[code] ?? code;
-        return this._shifted() ? def.shift ?? def.label.toUpperCase() : def.label;
+        const label = def.label ?? '';
+        return this._shifted() ? def.shift ?? label.toUpperCase() : label;
     }
 
     // labels and modifier states after a shift, modifier or layer change

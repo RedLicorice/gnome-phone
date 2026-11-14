@@ -93,6 +93,12 @@ def convert_layout(path, strings):
                 key['repeat'] = True
             if k.get(A + 'isSticky') == 'true':
                 key['sticky'] = True
+            # a key the language leaves empty (US English has no ISO < > key) is not there, as in Hacker's
+            # Keyboard; the key before it takes its width (a wide left Shift, as on an ANSI keyboard)
+            if not code and not label:
+                if keys:
+                    keys[-1]['width'] += key['width']
+                continue
             keys.append(key)
         rows.append({'extension': row.get(A + 'extension') == 'true', 'keys': keys})
     return rows

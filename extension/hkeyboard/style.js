@@ -23,7 +23,11 @@ export class KeyboardStyle {
         this._file = null;
         this._css = null;
         this._context = St.ThemeContext.get_for_stage(global.stage);
+        // a load emits 'changed' itself (StTheme custom-stylesheets-changed): only a theme switch reloads it
+        this._loading = false;
         this._context.connectObject('changed', () => {
+            if (this._loading)
+                return;
             this._file = null;
             this.update(true);
         }, this);
@@ -65,9 +69,10 @@ export class KeyboardStyle {
             return;
         this._css = css;
         const theme = this._context.get_theme();
-        if (this._file)
-            theme.unload_stylesheet(this._file);
+        this._loading = true;
         try {
+            if (this._file)
+                theme.unload_stylesheet(this._file);
             GLib.mkdir_with_parents(this._dir, 0o700);
             // a new name per load: St keeps a stylesheet it read under its file
             const path = GLib.build_filenamev([this._dir, `hkeyboard-${this._serial++ % 2}.css`]);
@@ -77,6 +82,8 @@ export class KeyboardStyle {
         } catch (e) {
             this._file = null;
             logError(e, 'gnome-phone: touch keyboard stylesheet');
+        } finally {
+            this._loading = false;
         }
     }
 

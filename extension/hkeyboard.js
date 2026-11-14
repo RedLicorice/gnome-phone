@@ -6,6 +6,7 @@
 // settings (de.yesman.GnomePhone.Keyboard, Neo Settings' "Touch keyboard" page), which apply live.
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 
 import * as KeyboardUI from 'resource:///org/gnome/shell/ui/keyboard.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -74,12 +75,17 @@ export class TouchKeyboard {
         };
 
         this._settings.connectObject('changed', (_s, key) => this._changed(key), this);
-        try {
-            this._refresh();
-        } catch (e) {
-            this.destroy();
-            throw e;
-        }
+        // the keys are first built once the extension is up: a fault in them leaves the shell's keys, never the
+        // rest of the extension half enabled
+        this._refreshId = GLib.idle_add_once(GLib.PRIORITY_DEFAULT, () => {
+            this._refreshId = 0;
+            try {
+                this._refresh();
+            } catch (e) {
+                logError(e, 'gnome-phone: the touch keyboard, the shell\'s keys instead');
+                this.destroy();
+            }
+        });
     }
 
     get _keyboard() {
@@ -217,6 +223,9 @@ export class TouchKeyboard {
     }
 
     destroy() {
+        if (this._refreshId)
+            GLib.source_remove(this._refreshId);
+        this._refreshId = 0;
         if (!this._settings)
             return;
         this._settings.disconnectObject(this);
