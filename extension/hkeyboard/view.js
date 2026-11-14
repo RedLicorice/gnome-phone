@@ -5,10 +5,17 @@
 // swipe actions. Shift, Ctrl, Alt and Meta are sticky: a tap holds them for the next key, a second tap locks them, a
 // finger kept on one applies it to the keys typed meanwhile (a chord).
 //
-// Over the keys sits a bar: the layout switch (full or compact), and the input method's word suggestions while a word
-// is typed, Hacker's controls (Esc, Tab, Ctrl, Alt, the arrows, emoji, settings, hide) otherwise. Its keys are keys
-// like the others, so they tick, repeat and stick the same way. The compact layout has three pages: letters, digits
-// with the common punctuation, and the other symbols.
+// Over the keys sits a bar: the layout switch (full or compact), and word suggestions (predictor.js: the word being
+// typed completed, or after a space the next word) while there are some, Hacker's controls (Esc, Tab, Ctrl, Alt, the
+// arrows, emoji, settings, hide) otherwise, or after its ⋯ key. Its keys are keys like the others, so they tick,
+// repeat and stick the same way. A suggestion replaces the word and adds a space, which a punctuation mark typed next
+// moves after itself; a long press on one forgets it. An input method's own candidates (an IBus engine's) take the
+// suggestions' place. The compact layout has three pages: letters, digits with the common punctuation, and the other
+// symbols.
+//
+// The text before the cursor (for the suggestions and the learning) is followed as the keys type it, and taken from
+// the application (the input method's surrounding text) whenever it tells, unless a key just typed: its answer to
+// that key may still be on the way.
 //
 // What the keys type goes out through the shell keyboard's own controller (KeyboardController: the input method, or
 // the virtual keyboard while a modifier is held), one item after the other.
@@ -24,6 +31,19 @@ import {BAR_CONTROLS, CURSOR, ICONS, KEYVALS, LABELS, MODIFIERS} from './layout.
 
 const SWIPE_MAX_MS = 400; // a swipe is fast; a slower move is a finger sliding between keys
 const OFF = 0, ONCE = 1, LOCKED = 2;
+const CONTEXT_CHARS = 64; // of the text before the cursor, for the suggestions
+const SURROUNDING_GRACE_US = 250000; // the application's surrounding text this soon after a key may predate it
+// a punctuation mark typed after a suggestion's space goes before it
+const SPACE_SWAP = /^[.,;:!?)]$/;
+// no suggestions and no learning in these fields
+const PRIVATE_PURPOSES = new Set(['PASSWORD', 'PIN', 'TERMINAL', 'URL', 'EMAIL', 'DIGITS', 'NUMBER', 'PHONE']
+    .map(name => Clutter.InputContentPurpose[name]).filter(p => p !== undefined));
+const PRIVATE_HINTS = Clutter.InputContentHintFlags.SENSITIVE_DATA | Clutter.InputContentHintFlags.HIDDEN_TEXT;
+
+// the bar's order of three suggestions: the best in the middle
+function barOrder(list) {
+    return list.length === 3 ? [list[1], list[0], list[2]] : list;
+}
 
 export const KeyboardView = GObject.registerClass({
     Signals: {'action': {param_types: [GObject.TYPE_STRING]}},
@@ -35,10 +55,18 @@ export const KeyboardView = GObject.registerClass({
         this._data = data;
         this._compact = compact;
         this._page = 'letters';
-        this._suggestions = []; // {text, callback}, the input method's candidates in its order
-        this._suggestionsVisible = false;
+        this._imSuggestions = []; // {text, callback}, the input method's candidates in its order
+        this._imVisible = false;
+        this._predicted = []; // predictor.js's suggestions, best first
+        this._controlsShown = false; // the bar's ⋯: the controls instead of the suggestions, until the text changes
+        this._ctx = null; // the text before the cursor, as far as known (null: unknown)
+        this._ctxTime = 0;
+        this._autoSpace = false; // the last thing typed was a suggestion and its space
+        this._predictId = 0;
         this._barId = 0;
         this._barPending = false;
+        this._barSignature = '';
+        this.predictor = null; // predictor.js, set by the keyboard that shows this view
         this._units = 1;
         this._settings = settings;
         this.controller = null; // KeyboardController, set by the keyboard that shows this view
@@ -65,9 +93,12 @@ export const KeyboardView = GObject.registerClass({
         this.connect('button-press-event', (_a, event) => this._onEvent(event));
         this.connect('button-release-event', (_a, event) => this._onEvent(event));
         this.connect('motion-event', (_a, event) => this._onEvent(event));
+        Main.inputMethod.connectObject('surrounding-text-set', () => this._onSurrounding(false), this);
         this.connect('notify::mapped', () => {
-            if (this.mapped)
+            if (this.mapped) {
+                this._resetContext();
                 return;
+            }
             this._cancelAll();
             // the next field starts on the letters
             if (this._page !== 'letters') {
@@ -123,21 +154,47 @@ export const KeyboardView = GObject.registerClass({
         this._buildBar();
     }
 
-    // the bar's keys: the layout switch, then the suggestions (the best one in the middle) or the controls
+    // the bar's keys: the layout switch, then the suggestions (the best one in the middle) and ⋯, or the controls
+    _barDefs() {
+        const im = this._imVisible ? this._imSuggestions.slice(0, 3) : [];
+        if (im.length)
+            return barOrder(im).map(w => ({code: 'suggestion', label: w.text, callback: w.callback}));
+        if (this._predicted.length && !this._controlsShown) {
+            return [...barOrder(this._predicted).map(s =>
+                ({code: 'suggestion', label: s.literal ? `“${s.word}”` : s.word, suggestion: s})),
+            {code: 'controls', label: '⋯'}];
+        }
+        return BAR_CONTROLS;
+    }
+
     _buildBar() {
+        const defs = this._barUnits ? this._barDefs() : [];
+        const signature = defs.map(d => d.code).join();
+        const barKeys = this._keys.filter(k => k.bar && k.code !== 'mode');
+        // the same keys with other words: only the labels change (a key typed, the next suggestions)
+        if (signature && signature === this._barSignature && barKeys.length === defs.length) {
+            barKeys.forEach((key, i) => {
+                key.def = defs[i];
+                if (key.label)
+                    key.label.text = this._textFor(key);
+            });
+            return;
+        }
+        this._barSignature = signature;
         for (const key of this._keys.filter(k => k.bar))
             key.actor.destroy();
         this._keys = this._keys.filter(k => !k.bar);
         if (this._barUnits) {
-            const words = this._suggestionsVisible ? this._suggestions.slice(0, 3) : [];
-            const defs = words.length
-                ? (words.length === 3 ? [words[1], words[0], words[2]] : words).map(w =>
-                    ({code: 'suggestion', label: w.text, callback: w.callback}))
-                : BAR_CONTROLS;
-            const width = 0.9 / defs.length;
+            // ⋯ is narrow, the words share the rest
+            const narrow = defs.filter(d => d.code === 'controls').length;
+            const width = (0.9 - 0.1 * narrow) / (defs.length - narrow);
             this._keys.push(this._makeKey({code: 'mode'}, 0, 0, 0.1, this._barUnits, true));
-            defs.forEach((def, i) =>
-                this._keys.push(this._makeKey(def, 0.1 + i * width, 0, width, this._barUnits, true)));
+            let x = 0.1;
+            for (const def of defs) {
+                const w = def.code === 'controls' ? 0.1 : width;
+                this._keys.push(this._makeKey(def, x, 0, w, this._barUnits, true));
+                x += w;
+            }
         }
         this._relabel();
         this.queue_relayout();
@@ -165,19 +222,129 @@ export const KeyboardView = GObject.registerClass({
 
     // the input method's word suggestions (Keyboard.addSuggestion and the others, as ibusCandidatePopup calls them)
     resetSuggestions() {
-        this._suggestions = [];
+        this._imSuggestions = [];
         this._queueBar();
     }
 
     addSuggestion(text, callback) {
-        this._suggestions.push({text, callback});
-        this._suggestionsVisible = true;
+        this._imSuggestions.push({text, callback});
+        this._imVisible = true;
         this._queueBar();
     }
 
     setSuggestionsVisible(visible) {
-        this._suggestionsVisible = visible;
+        this._imVisible = visible;
         this._queueBar();
+    }
+
+    // ---- the text before the cursor, and the suggestions for it ----
+
+    _suggesting() {
+        if (!this.predictor || !this._settings.get_boolean('suggestions'))
+            return false;
+        const hints = this.keyboard?._contentHints ?? 0;
+        return !PRIVATE_PURPOSES.has(this.controller?.purpose) && !(hints & PRIVATE_HINTS);
+    }
+
+    _learning() {
+        return this._suggesting() && this._settings.get_boolean('learn');
+    }
+
+    // a field gets the keyboard: what the application says is before its cursor, or nothing known yet
+    _resetContext() {
+        this._ctx = null;
+        this._ctxTime = 0;
+        this._autoSpace = false;
+        this._controlsShown = false;
+        this._onSurrounding(true);
+        if (this._ctx === null)
+            Main.inputMethod.request_surrounding();
+        this._queuePredict();
+    }
+
+    // the application's surrounding text: taken, unless a key typed just now (@force: always)
+    _onSurrounding(force) {
+        if (!force && GLib.get_monotonic_time() - this._ctxTime < SURROUNDING_GRACE_US)
+            return;
+        const [text, cursor, anchor] = Main.inputMethod.getSurroundingText();
+        if (text === null || text === undefined)
+            return;
+        const ctx = cursor === anchor
+            ? [...text].slice(Math.max(0, cursor - CONTEXT_CHARS), cursor).join('') : null;
+        if (ctx === this._ctx)
+            return;
+        this._ctx = ctx;
+        this._autoSpace = false;
+        this._controlsShown = false;
+        this._queuePredict();
+    }
+
+    // what the keys just typed or did: the new text before the cursor (null: unknown, the application will tell)
+    _setContext(ctx) {
+        this._ctx = ctx !== null && ctx.length > 2 * CONTEXT_CHARS ? ctx.slice(-CONTEXT_CHARS) : ctx;
+        this._ctxTime = GLib.get_monotonic_time();
+        this._controlsShown = false;
+        this._queuePredict();
+    }
+
+    // the suggestions again, once the key's output is queued
+    _queuePredict() {
+        if (this._predictId)
+            return;
+        this._predictId = GLib.idle_add_once(GLib.PRIORITY_DEFAULT, () => {
+            this._predictId = 0;
+            let list = [];
+            try {
+                if (this._suggesting())
+                    list = this.predictor.suggest(this._ctx);
+            } catch (e) {
+                logError(e, 'gnome-phone: touch keyboard suggestions');
+            }
+            this._predicted = list;
+            this._queueBar();
+        });
+    }
+
+    // the suggestions as the settings now want them
+    refreshSuggestions() {
+        this._predicted = [];
+        this._queuePredict();
+    }
+
+    // a suggestion tapped: it takes the place of the word's typed part, with a space after it
+    _pick(s) {
+        const controller = this.controller;
+        if (!controller)
+            return;
+        this._takeModifiers(false);
+        const ctx = this._ctx ?? '';
+        const base = ctx.slice(0, ctx.length - s.replace);
+        const remove = [...ctx.slice(base.length)].length;
+        const text = `${s.word} `;
+        if (this._learning())
+            this.predictor.learn(base + text, true);
+        this._queue(async () => {
+            if (remove && Main.inputMethod.currentFocus) {
+                Main.inputMethod.delete_surrounding(-remove, remove);
+            } else {
+                for (let i = 0; i < remove; i++) {
+                    controller.keyvalPress(Clutter.KEY_BackSpace);
+                    controller.keyvalRelease(Clutter.KEY_BackSpace);
+                }
+            }
+            await controller.commit(text, null);
+            this.keyboard?._updateLevelFromHints(true);
+        });
+        this._setContext(base + text);
+        this._autoSpace = true;
+    }
+
+    // a long press on a suggestion: never again
+    _forget(s) {
+        this.predictor?.forget(s.word);
+        if (this._settings.get_boolean('haptics'))
+            Haptics.vibrateRaw([[1, 30]]);
+        this.refreshSuggestions();
     }
 
     _setPage(page) {
@@ -417,8 +584,10 @@ export const KeyboardView = GObject.registerClass({
         if (key.code in MODIFIERS)
             return this._endModifier(key, false);
         if (touch.repeated) {
-            if (key.code === 'backspace' && !this._chording())
+            if (key.code === 'backspace' && !this._chording()) {
                 this.controller?.toggleDelete(false);
+                Main.inputMethod.request_surrounding();
+            }
             return;
         }
         this._type(key);
@@ -497,10 +666,17 @@ export const KeyboardView = GObject.registerClass({
 
     _longPress(touch) {
         const {key} = touch;
+        if (key.code === 'suggestion' && key.def.suggestion) {
+            touch.done = true;
+            this._forget(key.def.suggestion);
+            return;
+        }
         if (key.def.repeat) {
             touch.repeated = true;
             if (key.code === 'backspace' && !this._chording()) {
                 // the controller deletes on, word by word after a while, until it is told to stop
+                this._autoSpace = false;
+                this._setContext(null);
                 this.controller?.toggleDelete(true);
                 return;
             }
@@ -691,13 +867,21 @@ export const KeyboardView = GObject.registerClass({
         case 'abc':
             return this._setPage('letters');
         case 'suggestion':
+            if (key.def.suggestion)
+                return this._pick(key.def.suggestion);
             this._takeModifiers(false);
+            this._setContext(null);
             return this._queue(() => key.def.callback?.());
+        case 'controls':
+            this._controlsShown = true;
+            return this._buildBar();
         case 'settings':
             return this.emit('action', 'settings');
         case 'backspace':
             if (!this._chording()) {
                 this._takeModifiers(false);
+                this._autoSpace = false;
+                this._setContext(this._ctx === null ? null : [...this._ctx].slice(0, -1).join(''));
                 return this._queue(() => {
                     this.controller?.toggleDelete(true);
                     this.controller?.toggleDelete(false);
@@ -718,10 +902,41 @@ export const KeyboardView = GObject.registerClass({
         const controller = this.controller;
         if (!controller)
             return;
+        if (chord) {
+            this._autoSpace = false;
+            this._setContext(null);
+            this._queue(async () => {
+                await controller.commit(base, modifiers);
+                Main.inputMethod.request_surrounding();
+            });
+            return;
+        }
+        const prev = this._ctx ?? '';
+        // after a suggestion's space: a space is already there, a punctuation mark goes before it
+        if (this._autoSpace && text === ' ') {
+            this._autoSpace = false;
+            return;
+        }
+        const swap = this._autoSpace && SPACE_SWAP.test(text) && prev.endsWith(' ');
+        const out = swap ? `${text} ` : text;
+        const ctx = (swap ? prev.slice(0, -1) : prev) + out;
+        // a word just ended: learned, with the word before it
+        if (!swap && this._learning() && /[\p{L}\p{M}]$/u.test(prev) && !/[\p{L}\p{M}'\p{N}]/u.test(text))
+            this.predictor.learn(ctx);
         this._queue(async () => {
-            await controller.commit(chord ? base : text, chord ? modifiers : null);
+            if (swap) {
+                if (Main.inputMethod.currentFocus) {
+                    Main.inputMethod.delete_surrounding(-1, 1);
+                } else {
+                    controller.keyvalPress(Clutter.KEY_BackSpace);
+                    controller.keyvalRelease(Clutter.KEY_BackSpace);
+                }
+            }
+            await controller.commit(out, null);
             this.keyboard?._updateLevelFromHints(true);
         });
+        this._setContext(ctx);
+        this._autoSpace = swap;
     }
 
     // a special key (arrows, Tab, Esc, F-keys...) with the modifiers held, and Shift in selection mode
@@ -733,6 +948,9 @@ export const KeyboardView = GObject.registerClass({
         const modifiers = this._takeModifiers(true);
         if (this._select && CURSOR.has(code))
             modifiers.add(MODIFIERS.shift);
+        // the cursor moved, or the text changed in a way only the application knows
+        this._autoSpace = false;
+        this._setContext(null);
         this._queue(() => {
             for (const m of modifiers)
                 controller.keyvalPress(m);
@@ -740,13 +958,17 @@ export const KeyboardView = GObject.registerClass({
             controller.keyvalRelease(keyval);
             for (const m of [...modifiers].reverse())
                 controller.keyvalRelease(m);
+            Main.inputMethod.request_surrounding();
         });
     }
 
     _onDestroy() {
-        if (this._barId)
-            GLib.source_remove(this._barId);
-        this._barId = 0;
+        Main.inputMethod.disconnectObject(this);
+        for (const id of [this._barId, this._predictId]) {
+            if (id)
+                GLib.source_remove(id);
+        }
+        this._barId = this._predictId = 0;
         this._cancelAll();
         this._preview.destroy();
         this._popup.destroy();

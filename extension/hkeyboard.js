@@ -4,6 +4,8 @@
 // builds are replaced, in Keyboard._updateKeys, and the keypads for digits, numbers and phone numbers stay the shell's.
 // The keyboard also opens at once (the shell waits 300 ms first, KEYBOARD_REST_TIME) and takes its height from the
 // settings (de.yesman.GnomePhone.Keyboard, Neo Settings' "Touch keyboard" page), which apply live.
+// The word suggestions are made here (hkeyboard/predictor.js), so the shell's OSK completion stays off: it switches
+// the input method to ibus-typing-booster on every open and back on every close (1.5 s the first time, ~50 ms then).
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
@@ -14,6 +16,7 @@ import * as InputSourceManager from 'resource:///org/gnome/shell/ui/status/keybo
 
 import {compactFor, languageFor, load} from './hkeyboard/layout.js';
 import {KeyboardStyle} from './hkeyboard/style.js';
+import {Predictor} from './hkeyboard/predictor.js';
 import {KeyboardView} from './hkeyboard/view.js';
 import {openSettings} from './settings.js';
 
@@ -24,6 +27,8 @@ const STOCK_PURPOSES = new Set([
 // settings that change the rows, or only the keys' placement
 const REBUILD = new Set(['extension-row', 'top-row-scale', 'mode', 'bar', 'bar-scale']);
 const HEIGHT = new Set(['height-portrait', 'height-landscape']);
+const SUGGESTIONS = new Set(['suggestions', 'learn']);
+const DICTS_DIR = GLib.filename_from_uri(GLib.uri_resolve_relative(import.meta.url, 'hkdicts', GLib.UriFlags.NONE))[0];
 
 export class TouchKeyboard {
     constructor() {
@@ -34,6 +39,8 @@ export class TouchKeyboard {
         }
         this._settings = new Gio.Settings({settings_schema: schema});
         this._style = new KeyboardStyle(this._settings, () => this._rowHeight());
+        this._predictor = new Predictor(DICTS_DIR, this._languages(),
+            GLib.build_filenamev([GLib.get_user_data_dir(), 'gnome-phone', 'keyboard', 'history.json']));
 
         const self = this;
         const proto = KeyboardUI.Keyboard.prototype;
@@ -98,6 +105,10 @@ export class TouchKeyboard {
         });
     }
 
+    _languages() {
+        return this._settings.get_string('languages').split(',');
+    }
+
     get _keyboard() {
         return Main.keyboard._keyboard ?? null;
     }
@@ -139,6 +150,8 @@ export class TouchKeyboard {
         }
         view.controller = keyboard._keyboardController;
         view.keyboard = keyboard;
+        view.predictor = this._predictor;
+        this._noCompletion(keyboard._keyboardController);
 
         // the shell's keys, if a keypad was up
         if (keyboard._currentPage && keyboard._currentPage !== view) {
@@ -161,6 +174,18 @@ export class TouchKeyboard {
         keyboard._emojiSelection.setRatio(10, 4);
         view.setAutoShift(false);
         this._style.update();
+    }
+
+    // the shell's OSK completion (ibus-typing-booster) kept off while the touch keyboard is on
+    _noCompletion(controller) {
+        if (controller._hkSetOskCompletion)
+            return;
+        const self = this;
+        const orig = controller._hkSetOskCompletion = controller.setOskCompletion;
+        controller.setOskCompletion = function (enabled) {
+            return orig.call(this, self._settings?.get_boolean('enabled') ? false : enabled);
+        };
+        controller.setOskCompletion(false).catch(e => logError(e, 'gnome-phone: OSK completion'));
     }
 
     _detach(keyboard) {
@@ -216,6 +241,12 @@ export class TouchKeyboard {
             return;
         }
         const view = this._keyboard?._hkView;
+        if (key === 'languages')
+            this._predictor.setLanguages(this._languages());
+        if (key === 'languages' || SUGGESTIONS.has(key)) {
+            view?.refreshSuggestions();
+            return;
+        }
         if (REBUILD.has(key))
             view?.rebuild();
         else
@@ -243,6 +274,11 @@ export class TouchKeyboard {
         this._settings.disconnectObject(this);
         Object.assign(KeyboardUI.Keyboard.prototype, this._orig);
         const keyboard = this._keyboard;
+        const controller = keyboard?._keyboardController;
+        if (controller?._hkSetOskCompletion) {
+            controller.setOskCompletion = controller._hkSetOskCompletion;
+            delete controller._hkSetOskCompletion;
+        }
         if (keyboard?._hkView) {
             this._detach(keyboard);
             keyboard._hkView.destroy();
@@ -250,6 +286,7 @@ export class TouchKeyboard {
             keyboard._relayout();
         }
         this._style.destroy();
+        this._predictor.destroy();
         this._settings = null;
     }
 }

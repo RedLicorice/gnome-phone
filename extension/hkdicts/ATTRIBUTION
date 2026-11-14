@@ -1,0 +1,14 @@
+The touch keyboard's dictionaries (it.dict, en.dict) are the 60000 most frequent words, with their frequencies and
+next words, of HeliBoard's word lists, converted by tools/dict2bin.py:
+
+  it.dict  main_it__experimental.combined
+  en.dict  main_en_US__experimental.combined
+  from https://codeberg.org/Helium314/aosp-dictionaries (wordlists/)
+
+Those lists were made by Helium314 from the word lists of the Leipzig Corpora Collection (Wortschatz, Leipzig
+University, https://wortschatz.uni-leipzig.de/en/download/), which are published under the Creative Commons
+Attribution 4.0 International license (CC BY 4.0, https://creativecommons.org/licenses/by/4.0/). The selection and
+the binary format are changes made for this keyboard.
+
+  D. Goldhahn, T. Eckart, U. Quasthoff: Building Large Monolingual Dictionaries at the Leipzig Corpora Collection:
+  From 100 to 200 Languages. Proceedings of LREC 2012.

@@ -157,5 +157,27 @@
       <default>true</default>
       <summary>Slide along the space bar to move the cursor</summary>
     </key>
+    <key name="suggestions" type="b">
+      <default>true</default>
+      <summary>Word suggestions in the bar</summary>
+      <description>Completions of the word being typed and, after a space, the likeliest next words; never in
+        password, terminal, address or number fields.</description>
+    </key>
+    <key name="languages" type="s">
+      <choices>
+        <choice value="it,en"/>
+        <choice value="en,it"/>
+        <choice value="it"/>
+        <choice value="en"/>
+      </choices>
+      <default>'it,en'</default>
+      <summary>The dictionaries of the suggestions, the preferred one first</summary>
+    </key>
+    <key name="learn" type="b">
+      <default>true</default>
+      <summary>Learn from what is typed</summary>
+      <description>The words and word pairs typed are kept, privately, in the user's data directory and suggested
+        first; a long press on a suggestion forgets it.</description>
+    </key>
   </schema>
 </schemalist>

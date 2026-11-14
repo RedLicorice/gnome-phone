@@ -434,6 +434,9 @@ ns_page_touch_keyboard (GtkWidget *row, gpointer data)
 {
   static const char *const modes[] = { "compact", "full", NULL };
   static const char *const mode_labels[] = { "Compact", "Full (Hacker's Keyboard)", NULL };
+  static const char *const languages[] = { "it,en", "en,it", "it", "en", NULL };
+  static const char *const language_labels[] = { "Italiano + English", "English + Italiano", "Italiano", "English",
+                                                  NULL };
   static const char *const styles[] = { "dark", "light", "black", "material", NULL };
   static const char *const style_labels[] = { "Dark", "Light", "Black", "Material", NULL };
   static const char *const swipes[] = { "none", "close", "extension", "settings", "height-up", "height-down",
@@ -471,6 +474,9 @@ ns_page_touch_keyboard (GtkWidget *row, gpointer data)
   int_slider (g, "Long press (ms)", s, "long-press-ms", 100, 2000, 50);
   int_slider (g, "Repeat delay (ms)", s, "repeat-delay-ms", 100, 1000, 50);
   int_slider (g, "Repeat interval (ms)", s, "repeat-interval-ms", 20, 200, 10);
+  ns_row_switch (g, "Suggestions", "In the bar, while typing and after a space", s, "suggestions");
+  ns_row_choice (g, "Languages", s, "languages", languages, language_labels);
+  ns_row_switch (g, "Learn from what I type", "A long press on a suggestion forgets it", s, "learn");
   ns_row_switch (g, "Vibrate on keypress", NULL, s, "haptics");
   int_slider (g, "Vibration (ms)", s, "haptic-ms", 5, 100, 1);
   ns_row_spin (g, "Touch offset (px)", s, "touch-offset", 0, 20);

@@ -1,6 +1,7 @@
 # The gnome-phone GNOME Shell extension, installed system-wide (debian/: gnome-shell-extension-gnome-phone).
 # Its own project, like libneo and the apps. Everything in this directory is the extension except the generators in
-# tools/ (vd2js.py, l3icons.py: they read an Android source tree) and Python's caches.
+# tools/ (vd2js.py, l3icons.py: they read an Android source tree; hk2json.py, dict2bin.py: the touch keyboard's
+# layouts and dictionaries), the tests in tests/ and Python's caches.
 project('gnome-shell-extension-gnome-phone', version: '0.1.0', meson_version: '>= 1.0')
 
 uuid = 'gnome-phone@yesman.de'
@@ -8,8 +9,14 @@ extdir = get_option('datadir') / 'gnome-shell' / 'extensions' / uuid
 bindir = get_option('prefix') / get_option('bindir')
 
 install_subdir('.', install_dir: extdir, strip_directory: true,
-  exclude_directories: ['tools', '__pycache__'],
+  exclude_directories: ['tools', 'tests', '__pycache__'],
   exclude_files: ['meson.build', 'home.js', 'appmem.py'])
+
+# the touch keyboard's word suggestions on the shipped dictionaries (plain gjs, no shell needed)
+gjs = find_program('gjs', required: false)
+if gjs.found()
+  test('predictor', gjs, args: ['-m', files('tests/predictor.test.js')])
+endif
 
 # appmem.py runs as a program of its own (recents.js)
 install_data('appmem.py', install_dir: extdir, install_mode: 'rwxr-xr-x')
