@@ -6,9 +6,16 @@
  * turned off: the lock screen shows a wrong attempt at once and throttles repeated ones itself, as Android does.
  *
  * pam_unix checks the password of the user it runs as through its setgid helper (unix_chkpwd), so this needs no
- * privileges of its own. */
+ * privileges of its own.
+ *
+ * gp-auth --fingerprint: a finger on the sensor instead, through PAM service "gnome-phone-fingerprint" (pam_fprintd,
+ * one try). Nothing is read from stdin. Exit status: 0 the finger matched, 1 it did not, 3 no finger came (pam_fprintd's
+ * timeout, or SIGINT: the lock screen stops it so) or there is nothing to match with (no fprintd, no sensor, no prints),
+ * 2 PAM could not run. The lock screen counts the misses and asks for the PIN after a few. */
 #include <pwd.h>
+#include <stdbool.h>
 #include <security/pam_appl.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,6 +24,7 @@
 #define MAX_SECRET 256
 
 static char secret[MAX_SECRET];
+static bool fingerprint;
 
 static int
 converse (int n, const struct pam_message **msg, struct pam_response **resp, void *data)
@@ -28,6 +36,13 @@ converse (int n, const struct pam_message **msg, struct pam_response **resp, voi
   for (int i = 0; i < n; i++) {
     switch (msg[i]->msg_style) {
     case PAM_PROMPT_ECHO_OFF:
+      /* a finger only: a module that wants a password has nothing to get */
+      if (fingerprint) {
+        for (int j = 0; j < i; j++)
+          free (r[j].resp);
+        free (r);
+        return PAM_CONV_ERR;
+      }
       r[i].resp = strdup (secret);
       break;
     case PAM_PROMPT_ECHO_ON:   /* only ever the user name */
@@ -53,7 +68,7 @@ no_delay (int status, unsigned int usec, void *data)
 }
 
 int
-main (void)
+main (int argc, char **argv)
 {
   struct passwd *pw = getpwuid (getuid ());
   struct pam_conv conv = { converse, NULL };
@@ -61,15 +76,29 @@ main (void)
   size_t len;
   int ret;
 
-  if (!pw || !fgets (secret, sizeof secret, stdin))
+  fingerprint = argc > 1 && strcmp (argv[1], "--fingerprint") == 0;
+  if (!pw)
     return 2;
-  len = strcspn (secret, "\n");
-  secret[len] = '\0';
-  if (len == 0)
-    return 1;
+  if (!fingerprint) {
+    if (!fgets (secret, sizeof secret, stdin))
+      return 2;
+    len = strcspn (secret, "\n");
+    secret[len] = '\0';
+    if (len == 0)
+      return 1;
+  }
+
+  /* pam_fprintd takes SIGINT through a signalfd, so only while it is blocked, as sudo has it: then SIGINT ends the
+   * verify and lets the sensor go (exit 3) instead of killing this with the device still claimed */
+  if (fingerprint) {
+    sigset_t block;
+    sigemptyset (&block);
+    sigaddset (&block, SIGINT);
+    sigprocmask (SIG_BLOCK, &block, NULL);
+  }
 
   conv.appdata_ptr = pw->pw_name;
-  ret = pam_start ("gnome-phone", pw->pw_name, &conv, &pamh);
+  ret = pam_start (fingerprint ? "gnome-phone-fingerprint" : "gnome-phone", pw->pw_name, &conv, &pamh);
   if (ret != PAM_SUCCESS)
     return 2;
   pam_set_item (pamh, PAM_FAIL_DELAY, (const void *) no_delay);
@@ -79,5 +108,7 @@ main (void)
   explicit_bzero (secret, sizeof secret);
   pam_end (pamh, ret);
 
+  if (fingerprint && ret != PAM_SUCCESS)
+    return ret == PAM_AUTH_ERR || ret == PAM_MAXTRIES ? 1 : ret == PAM_AUTHINFO_UNAVAIL ? 3 : 2;
   return ret == PAM_SUCCESS ? 0 : 1;
 }

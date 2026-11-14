@@ -196,6 +196,7 @@ export class Power extends Signals.EventEmitter {
         this._sleptAt = GLib.get_monotonic_time();
         this._menu?.closeNow();
         this._keyguard.lock();
+        this._keyguard.asleep?.();
 
         this._aod.visible = this._state === State.DOZING;
         this._aod.prepare();
@@ -227,7 +228,7 @@ export class Power extends Signals.EventEmitter {
         this._panel.wakeGesture(false);
         this._aod.hidden();
         this._panel.lowPower(false);
-        this._keyguard.wokeUp?.();
+        this._keyguard.wokeUp?.(reason);
         if (from === State.DOZING)
             this._fade(0, WAKE_FROM_AOD_MS, bezier(0.4, 0, 0.2, 1), () => this._hideLayer());
         else

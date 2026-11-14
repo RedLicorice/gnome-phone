@@ -21,6 +21,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as Signals from 'resource:///org/gnome/shell/misc/signals.js';
 
 import {PatternView, PinView, Strings, touchSlot, tryAgainIn} from './bouncer.js';
+import {vibrate} from './haptics.js';
 import {Canvas, paintIcon} from './icons.js';
 import {animate, clamp, EMPHASIZED_ACCELERATE, FAST_OUT_SLOW_IN, lerp, LINEAR, MIN_FLING_VELOCITY,
     TOUCH_RESPONSE, VelocityTracker} from './motion.js';
@@ -32,10 +33,38 @@ import {wholeFrames} from './redraws.js';
 import {px, screenPixels, SCALE, SCREEN_H, SCREEN_W} from './units.js';
 
 Gio._promisify(Gio.Subprocess.prototype, 'communicate_utf8_async');
+Gio._promisify(Gio.Subprocess.prototype, 'wait_async');
 Gio._promisify(Gio.File.prototype, 'load_contents_async');
 Gio._promisify(Gio.File.prototype, 'replace_contents_async');
 
 const GP_AUTH = ['/usr/local/libexec/gp-auth', '/usr/libexec/gp-auth'];
+
+// A finger on the side sensor (gp-auth --fingerprint, pam_fprintd: one try per run) unlocks. The sensor is in the
+// power key and listens while the phone is locked, screen off too: with the screen off a result counts only with the
+// key's press that wakes the phone (Xiaomi's "press to unlock"), a touch in a pocket alone does nothing.
+// After this many misses only the PIN or pattern does, until it is used; after a restart and a Lockdown too.
+const FINGER_MAX_MISSES = 5;
+// a run that ends without a finger this soon found nothing to match with (no sensor, no prints, fprintd busy): not
+// started again until the screen next comes on
+const FINGER_GAVE_UP_US = 3 * 1000 * 1000;
+// Android's biometric reject: two short buzzes
+const FINGER_MISS_BUZZ = [[1, 30], [0, 80], [1, 30]];
+// a result with the screen off and the power key's wake press belong together this close (either comes first)
+const FINGER_PRESS_WINDOW_US = 2 * 1000 * 1000;
+
+// logind's LockedHint follows the keyguard, as Shell's own screen shield sets it: loginctl and Minerva's phone_state
+// read it to know whether the phone is locked
+function setLockedHint(locked) {
+    Gio.DBus.system.call('org.freedesktop.login1', '/org/freedesktop/login1/session/auto',
+        'org.freedesktop.login1.Session', 'SetLockedHint', new GLib.Variant('(b)', [locked]),
+        null, Gio.DBusCallFlags.NONE, -1, null, (bus, res) => {
+            try {
+                bus.call_finish(res);
+            } catch (e) {
+                console.warn(`keyguard: SetLockedHint(${locked}): ${e.message}`);
+            }
+        });
+}
 
 // --- the lock screen (§6.1-6.3)
 const CLOCK_SIZE = 86 * 0.98;           // dp, the small Flex clock
@@ -181,6 +210,11 @@ export class Keyguard extends Signals.EventEmitter {
         this._lockedUntil = 0;          // realtime, ms
         this._countdownId = 0;
         this._checking = false;
+        this._finger = null;            // the running gp-auth --fingerprint
+        this._fingerMisses = 0;
+        this._fingerPending = null;     // a screen-off result waiting for the power key's press (wokeUp)
+        this._wokeByPressAt = 0;
+        this._awake = true;             // the screen is on (power.js: goToSleep / wakeUp)
         // an app's window over the lock screen (setOccluded), and the other windows' actors hidden meanwhile
         this.occludedBy = null;
         this._occlusionHidden = new Set();
@@ -376,9 +410,11 @@ export class Keyguard extends Signals.EventEmitter {
         if (this.showing) {
             // the screen went off over the bouncer: back to the lock screen
             this._hideBouncer(false);
+            this._syncFinger();
             return;
         }
         this.showing = true;
+        setLockedHint(true);
         this._unlocking?.stop();
         this._lockIcon.unlocked = !this._secure;
         this._syncClock();
@@ -395,6 +431,7 @@ export class Keyguard extends Signals.EventEmitter {
         }
         this._grab ??= Main.pushModal(this.actor, {actionMode: Shell.ActionMode.LOCK_SCREEN});
         this._prepareBouncer();
+        this._syncFinger();
         this.emit('changed');
     }
 
@@ -403,6 +440,7 @@ export class Keyguard extends Signals.EventEmitter {
         this._lockedDown = true;
         this.lock();
         this._syncPill();
+        this._syncFinger();
     }
 
     // --- occluded: an app's window over the lock screen (whenlocked.js; KeyguardViewMediator.setOccluded)
@@ -418,6 +456,7 @@ export class Keyguard extends Signals.EventEmitter {
             return;
         this._showHiddenWindows();
         this.occludedBy = win;
+        this._syncFinger();
         if (win) {
             if (this.bouncerShowing)
                 this._hideBouncer(false);
@@ -460,11 +499,109 @@ export class Keyguard extends Signals.EventEmitter {
     }
 
     // the screen came on: the lock screen as it was, the clock up to date
-    wokeUp() {
+    // @reason: power.js's ('power' for the key, 'double-tap', 'screensaver'...)
+    wokeUp(reason) {
+        this._awake = true;
+        this._wokeByPressAt = reason === 'power' ? GLib.get_monotonic_time() : 0;
+        const pending = this._fingerPending;
+        this._fingerPending = null;
         if (!this.showing)
             return;
         this._syncClock();
         this._syncState();
+        // the finger landed on the key a moment before the press went through
+        if (pending && this._wokeByPressAt && this._wokeByPressAt - pending.at < FINGER_PRESS_WINDOW_US)
+            this._fingerDone(pending.status, pending.usec);
+        else
+            this._syncFinger();
+    }
+
+    // the screen went off (after lock()): the sensor keeps listening, for the press that wakes the phone
+    asleep() {
+        this._awake = false;
+        this._wokeByPressAt = 0;
+        this._fingerPending = null;
+        this._syncFinger();
+    }
+
+    // --- a finger on the sensor
+
+    get _fingerAllowed() {
+        return this.showing && this._secure && !this._afterRestart && !this._lockedDown &&
+            !this._unlockingNow && !this.occludedBy && this._fingerMisses < FINGER_MAX_MISSES;
+    }
+
+    _syncFinger() {
+        if (this._fingerAllowed)
+            this._startFinger();
+        else
+            this._stopFinger();
+    }
+
+    async _startFinger() {
+        if (this._finger)
+            return;
+        const helper = GP_AUTH.find(p => GLib.file_test(p, GLib.FileTest.IS_EXECUTABLE));
+        if (!helper)
+            return;
+        let proc;
+        try {
+            proc = Gio.Subprocess.new([helper, '--fingerprint'],
+                Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE);
+        } catch (e) {
+            logError(e, 'gnome-phone: gp-auth --fingerprint');
+            return;
+        }
+        this._finger = proc;
+        const started = GLib.get_monotonic_time();
+        try {
+            await proc.wait_async(null);
+        } catch (e) {
+        }
+        // stopped meanwhile (_stopFinger): its answer no longer counts
+        if (this._finger !== proc)
+            return;
+        this._finger = null;
+        const status = proc.get_if_exited() ? proc.get_exit_status() : 2;
+        this._fingerDone(status, GLib.get_monotonic_time() - started);
+    }
+
+    // SIGINT: pam_fprintd stops the verify and lets the sensor go
+    _stopFinger() {
+        const proc = this._finger;
+        this._finger = null;
+        proc?.send_signal(2);
+    }
+
+    // @status: gp-auth --fingerprint's, 0 a match, 1 a miss, 3 no finger (timeout) or nothing to match, 2 PAM failed
+    _fingerDone(status, usec) {
+        if (!this._fingerAllowed)
+            return;
+        // screen off: the result waits for the power key's press (wokeUp), a touch alone is neither a match nor a miss
+        if (!this._awake && (status === 0 || status === 1)) {
+            this._fingerPending = {status, usec, at: GLib.get_monotonic_time()};
+            this._syncFinger();
+            return;
+        }
+        if (status === 0) {
+            this._fingerMisses = 0;
+            if (this.bouncerShowing && this._bouncer)
+                this._bouncer.disappear(() => this._goingAway());
+            else
+                this._goingAway();
+            return;
+        }
+        if (status === 1) {
+            this._fingerMisses++;
+            vibrate(FINGER_MISS_BUZZ);
+            if (this._bouncerActive && !this._lockedOut && !this._checking) {
+                this._bouncer.setMessage(this._fingerMisses < FINGER_MAX_MISSES ? 'Fingerprint not recognised'
+                    : 'Too many attempts', this._fingerMisses < FINGER_MAX_MISSES ? '' : this._strings.prompt);
+            }
+        } else if (usec < FINGER_GAVE_UP_US) {
+            return;
+        }
+        this._syncFinger();
     }
 
     // --- the swipe up and the bouncer
@@ -775,6 +912,7 @@ export class Keyguard extends Signals.EventEmitter {
             return;
         if (result === 0) {
             this._failures = 0;
+            this._fingerMisses = 0;
             this._lockedUntil = 0;
             // the length auto-confirm goes by: this PIN's, if it is digits only and long enough
             if (this._bouncer.kind === 'pin')
@@ -902,6 +1040,7 @@ export class Keyguard extends Signals.EventEmitter {
         if (this._unlockingNow || !this.showing)
             return;
         this._unlockingNow = true;
+        this._stopFinger();
         this._settle?.stop();
         this._settle = null;
         if (this._countdownId)
@@ -966,6 +1105,7 @@ export class Keyguard extends Signals.EventEmitter {
             Main.popModal(this._grab);
         this._grab = null;
         this.showing = false;
+        setLockedHint(false);
         this.emit('changed');
     }
 
@@ -978,6 +1118,7 @@ export class Keyguard extends Signals.EventEmitter {
     }
 
     destroy() {
+        this._stopFinger();
         this._settle?.stop();
         this._unlocking?.stop();
         wholeFrames(this, false);

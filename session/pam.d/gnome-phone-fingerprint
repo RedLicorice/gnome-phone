@@ -1,0 +1,5 @@
+# gnome-phone's lock screen, a finger on the sensor (gp-auth --fingerprint): one try per run. The lock screen runs it
+# while the phone is locked (screen off too, where a result needs the power key's press), counts the misses and asks for
+# the PIN after five, and after a restart. The long timeout only spares re-arming the sensor every 30 s.
+auth	required	pam_fprintd.so max-tries=1 timeout=300
+@include common-account
