@@ -186,6 +186,85 @@ on_theme_changed (GSettings *settings, const char *key, gpointer data)
     }
 }
 
+/* The Renaissance look for the apps that carry colours of their own (Messaging's #b8ebf3 FAB, Dialer's teal ...): the
+ * same mapping as tools/theme/gen_app_overrides.py does for their CSS. Teal and cyan pastels go gold, dark teal goes
+ * lapis, neutrals take the night's violet cast, white goes to parchment; other hues stay. Identity in the stock look. */
+static void
+rgb_to_hls (double r, double g, double b, double *h, double *l, double *s)
+{
+  double max = MAX (r, MAX (g, b)), min = MIN (r, MIN (g, b)), d = max - min;
+  *l = (max + min) / 2;
+  *h = 0;
+  *s = 0;
+  if (d == 0)
+    return;
+  *s = *l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  if (max == r)
+    *h = fmod ((g - b) / d + (g < b ? 6 : 0), 6) / 6;
+  else if (max == g)
+    *h = ((b - r) / d + 2) / 6;
+  else
+    *h = ((r - g) / d + 4) / 6;
+}
+
+static double
+hue_channel (double p, double q, double t)
+{
+  if (t < 0) t += 1;
+  if (t > 1) t -= 1;
+  if (t < 1. / 6) return p + (q - p) * 6 * t;
+  if (t < 1. / 2) return q;
+  if (t < 2. / 3) return p + (q - p) * (2. / 3 - t) * 6;
+  return p;
+}
+
+static void
+hls_to_rgb (double h, double l, double s, GdkRGBA *out)
+{
+  if (s == 0)
+    {
+      out->red = out->green = out->blue = l;
+      return;
+    }
+  double q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+  out->red = hue_channel (p, q, h + 1. / 3);
+  out->green = hue_channel (p, q, h);
+  out->blue = hue_channel (p, q, h - 1. / 3);
+}
+
+GdkRGBA
+neo_theme_map_rgba (const GdkRGBA *c)
+{
+  if (!renaissance)
+    return *c;
+  double h, l, s;
+  GdkRGBA out = { 0, 0, 0, c->alpha };
+  rgb_to_hls (c->red, c->green, c->blue, &h, &l, &s);
+  double deg = h * 360;
+  if (s < 0.14)
+    {
+      if (l > 0.93)
+        out = (GdkRGBA) { 0xf0 / 255., 0xe6 / 255., 0xd0 / 255., c->alpha };
+      else if (l > 0.75)
+        hls_to_rgb (41. / 360, l * 0.97, 0.22, &out);
+      else if (l < 0.45)
+        hls_to_rgb (250. / 360, l * 0.55, 0.28, &out);
+      else
+        hls_to_rgb (41. / 360, l * 0.9, 0.10, &out);
+    }
+  else if (deg >= 140 && deg <= 230 && s < 0.95)
+    {
+      if (l < 0.42)
+        hls_to_rgb (224. / 360, l * 0.85, 0.52, &out);
+      else
+        hls_to_rgb (41. / 360, MIN (l, 0.78), 0.55, &out);
+    }
+  else
+    return *c;
+  out.alpha = c->alpha;
+  return out;
+}
+
 void
 neo_init (void)
 {

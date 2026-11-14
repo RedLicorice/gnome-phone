@@ -48,6 +48,9 @@ void    neo_init        (void);
 /* Whether the optional Renaissance theme (setting de.yesman.GnomePhone.Theme name) is in force. It follows the setting
  * live: the CSS reloads, drawn widgets recolour on their next draw. */
 gboolean neo_theme_is_renaissance (void);
+/* A colour an app brings of its own, as the Renaissance look wants it (unchanged in the stock look): teal and cyan
+ * pastels to gold, dark teal to lapis, neutrals to the night, white to parchment. See neo-pressable fills. */
+GdkRGBA  neo_theme_map_rgba (const GdkRGBA *color);
 
 GdkRGBA neo_color       (NeoColor color);
 GdkRGBA neo_color_alpha (NeoColor color, float alpha);
