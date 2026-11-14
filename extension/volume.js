@@ -17,7 +17,7 @@ import {raiseToTop} from './endmark.js';
 import {vibrate} from './haptics.js';
 import {Canvas, paintIcon, VectorIcon} from './icons.js';
 import {animate, animateSpring, bezier, clamp, EMPHASIZED_DECELERATE, lerp, Spring} from './motion.js';
-import {Color, rgba, setSource} from './palette.js';
+import {Color, gild, rgba, setSource} from './palette.js';
 import {openSettings} from './settings.js';
 import {px, SCALE, SCREEN_H, screenPixels} from './units.js';
 
@@ -143,7 +143,7 @@ function roundedRect(cr, x, y, w, h, rTop, rBottom) {
 }
 
 function shapeStyle(color, radius, alpha = 1) {
-    return `background-color: ${rgba(color.map(Math.round), alpha)}; border-radius: ${px(radius).toFixed(2)}px;`;
+    return `background-color: ${rgba(color.map(Math.round), alpha)}; border-radius: ${px(radius).toFixed(2)}px;${gild(0.5)}`;
 }
 
 // --- the slider: track, handle and stream icon, 0 at the bottom

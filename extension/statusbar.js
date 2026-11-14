@@ -14,7 +14,7 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {Canvas, paintIcon} from './icons.js';
-import {Color, cogl, font, setSource, Type} from './palette.js';
+import {Color, cogl, dataFont, font, setSource, Type} from './palette.js';
 import {px, screenPixels, SCALE, SCREEN_W} from './units.js';
 
 // --- geometry, screen px of the 1080x2280 reference (spec §1)
@@ -357,7 +357,7 @@ class StatusBar extends St.Widget {
         this.add_child(this._background);
 
         this._clock = new Clutter.Text({
-            font_name: font(...Type.labelLargeEmphasized),
+            font_name: dataFont(...Type.labelLargeEmphasized) ?? font(...Type.labelLargeEmphasized),
             color: cogl(Color.white),
         });
         this.add_child(this._clock);

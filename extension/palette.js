@@ -4,7 +4,7 @@
 import Cogl from 'gi://Cogl';
 
 import {isRenaissance} from './theme.js';
-import {sp} from './units.js';
+import {SCALE, sp} from './units.js';
 
 // [r, g, b] 0..255; roles are the dark scheme
 const STOCK = {
@@ -89,6 +89,17 @@ export const SHADE_PANEL = over([Color.accent1_800, 0.32],
     over([Color.neutral1_500_l4, 0.32], [[64, 64, 64], 0.40]));
 
 const FAMILY = 'Google Sans Flex';
+
+// The Renaissance theme's gilded edge for a surface's St style string (one physical pixel at the phone's scale, a gold
+// hairline); '' in the stock look
+export function gild(alpha = 0.4) {
+    return isRenaissance() ? ` border: ${(1 / SCALE).toFixed(3)}px solid rgba(217, 178, 106, ${alpha});` : '';
+}
+
+// Data text (the status bar clock) in a mono face in the Renaissance theme; Pango falls to the stock face without it
+export function dataFont(sizeSp, wght) {
+    return isRenaissance() ? `JetBrains Mono, ${FAMILY} ${wght >= 600 ? 'Bold ' : ''}${sp(sizeSp).toFixed(3)}px` : null;
+}
 
 // The Renaissance theme sets big text (clocks) in Michelangelus; where it is not installed Pango falls to the stock face
 const DISPLAY_FROM_SP = 24;
