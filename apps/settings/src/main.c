@@ -219,16 +219,57 @@ dark_changed (AdwStyleManager *sm, GParamSpec *ps, GtkWidget *win)
     gtk_widget_remove_css_class (win, "ns-dark");
 }
 
-/* the optional Renaissance look (de.yesman.GnomePhone.Theme name): a class on the window that style.css keys on,
- * live with the setting */
+/* the optional Renaissance look (de.yesman.GnomePhone.Theme name): a class on the window that style.css keys on, and
+ * the theme's wallpaper (a parallax set, if installed) in place of the picture in use, which is kept in the setting
+ * previous-wallpaper and put back when the look goes. Live with the setting. */
+static char *
+theme_wallpaper_uri (void)
+{
+  g_autofree char *user = g_build_filename (g_get_user_data_dir (), "neo-launcher", "parallax", "renaissance-cyber",
+                                            "wallpaper.jpg", NULL);
+  const char *system = "/usr/share/neo-launcher/parallax/renaissance-cyber/wallpaper.jpg";
+  if (g_file_test (user, G_FILE_TEST_EXISTS))
+    return g_filename_to_uri (user, NULL, NULL);
+  if (g_file_test (system, G_FILE_TEST_EXISTS))
+    return g_filename_to_uri (system, NULL, NULL);
+  return NULL;
+}
+
+static void
+theme_wallpaper (GSettings *theme, gboolean on)
+{
+  if (!ns_settings_exists ("org.gnome.desktop.background"))
+    return;
+  g_autoptr (GSettings) bg = ns_settings ("org.gnome.desktop.background");
+  g_autofree char *mine = theme_wallpaper_uri ();
+  g_autofree char *now = g_settings_get_string (bg, "picture-uri");
+  if (on && mine) {
+    if (g_strcmp0 (now, mine) != 0) {
+      g_settings_set_string (theme, "previous-wallpaper", now);
+      g_settings_set_string (bg, "picture-uri", mine);
+      g_settings_set_string (bg, "picture-uri-dark", mine);
+    }
+  } else if (!on && mine && g_strcmp0 (now, mine) == 0) {
+    g_autofree char *before = g_settings_get_string (theme, "previous-wallpaper");
+    if (*before) {
+      g_settings_set_string (bg, "picture-uri", before);
+      g_settings_set_string (bg, "picture-uri-dark", before);
+    }
+    g_settings_set_string (theme, "previous-wallpaper", "");
+  }
+}
+
 static void
 theme_changed (GSettings *theme, const char *key, GtkWidget *win)
 {
   g_autofree char *name = g_settings_get_string (theme, "name");
-  if (g_strcmp0 (name, "renaissance") == 0)
+  gboolean on = g_strcmp0 (name, "renaissance") == 0;
+  if (on)
     gtk_widget_add_css_class (win, "ns-ren");
   else
     gtk_widget_remove_css_class (win, "ns-ren");
+  if (key)  /* a change, not the window's start */
+    theme_wallpaper (theme, on);
 }
 
 static GtkWidget *nav_view;
@@ -257,7 +298,7 @@ activate (GtkApplication *app, gpointer data)
   GSettings *theme = ns_settings ("de.yesman.GnomePhone.Theme");
   if (theme) {
     g_signal_connect_object (theme, "changed::name", G_CALLBACK (theme_changed), win, 0);
-    theme_changed (theme, "name", win);
+    theme_changed (theme, NULL, win);
     g_object_set_data_full (G_OBJECT (win), "ns-theme", theme, g_object_unref);
   }
   GtkWidget *nav = nav_view = adw_navigation_view_new ();
