@@ -15,4 +15,7 @@ GtkWindow *cam_window_new        (GtkApplication *app);
 /* the shell's "volume-key" action: +1 up, -1 down */
 void       cam_window_volume_key (GtkWindow *window, int direction);
 
+/* argv of the process, for starting it afresh (cam_pipeline_needs_fresh_process) */
+void       cam_window_remember_argv (char **argv);
+
 G_END_DECLS

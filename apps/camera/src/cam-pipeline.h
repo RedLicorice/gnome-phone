@@ -68,6 +68,13 @@ void          cam_pipeline_set_zoom       (CamPipeline *self, double zoom);
 gboolean      cam_pipeline_has_af         (CamPipeline *self);
 void          cam_pipeline_refocus        (CamPipeline *self);
 
+/* TRUE if opening @camera_id would crash libcamera's GStreamer source: this process opened it before and another camera
+ * since. (libcamerasrc connects Camera::requestCompleted at every open and never disconnects, so a Camera that stays
+ * alive between two opens gets every completion twice, and the second one trips an assertion in requestCompleted and
+ * then an abort in ControlValue::get. A camera opened again right after itself, or one never opened, is fine.) The
+ * window starts a new process for it (cam-window.c). */
+gboolean      cam_pipeline_needs_fresh_process (CamPipeline *self, const char *camera_id);
+
 /* The picture tuning of the camera in use (libcamera's Gamma, Contrast, Saturation), live and kept across restarts and
  * camera changes. @enabled FALSE: none wanted (the camera stays as libcamera has it, after a tuned one it is
  * neutral). */

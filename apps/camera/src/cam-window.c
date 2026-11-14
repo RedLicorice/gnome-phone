@@ -1,5 +1,8 @@
 /* cam-window: see cam-window.h. "A/" is CameraActivity.kt, "VM/" CameraViewModel.kt (spec/camera.md's notation). */
 #include "cam-window.h"
+
+#include <errno.h>
+#include <unistd.h>
 #include "cam-constants.h"
 #include "cam-devices.h"
 #include "cam-dialogs.h"
@@ -1195,6 +1198,35 @@ preview_cover (CamView *self)
   return self->mode == CAM_MODE_VIDEO || (self->mode == CAM_MODE_PHOTO && self->wide);
 }
 
+/* The process starts afresh, on the camera the settings now name (see cam_pipeline_needs_fresh_process) */
+static char **restart_argv = NULL;
+
+void
+cam_window_remember_argv (char **argv)
+{
+  g_strfreev (restart_argv);
+  restart_argv = g_strdupv (argv);
+}
+
+static void
+restart_app (CamView *self)
+{
+  g_autofree char *exe = g_file_read_link ("/proc/self/exe", NULL);
+
+  g_message ("camera: %s was opened before; a new process opens it (libcamerasrc cannot open it again after another camera)",
+             self->camera->id);
+  tune_flush (self);
+  if (self->led != CAM_LED_OFF)
+    cam_flash_led_set_sync (CAM_LED_OFF);
+  self->led = CAM_LED_OFF;
+  cam_flash_led_flush ();
+  g_settings_sync ();
+  if (restart_argv)
+    execv (exe ? exe : "/proc/self/exe", restart_argv);  /* by its own path: the process keeps its name */
+  g_warning ("camera: cannot start a new process: %s", g_strerror (errno));
+  fail (self, _("There was an error while preparing the stream. Please report this to the developers."));
+}
+
 static void
 bind_camera (CamView *self)
 {
@@ -1202,6 +1234,11 @@ bind_camera (CamView *self)
 
   if (!self->running || !self->camera)
     return;
+  if (cam_pipeline_needs_fresh_process (self->pipeline, self->camera->id))
+    {
+      restart_app (self);
+      return;
+    }
   if (!stream_size (self, &width, &height))
     {
       fail (self, _("There was an error while preparing the stream. Please report this to the developers."));
