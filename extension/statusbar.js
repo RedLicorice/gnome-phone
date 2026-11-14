@@ -339,14 +339,17 @@ class SystemIcons extends Canvas {
         // the camera chip (camera.js): painted while a camera is in use, and a tap on it opens the sheet. Only then is
         // the canvas reactive: the rest of the time it takes no touch from what is under it
         state.camera?.connectObject('changed', () => this._syncCamera(), this);
-        this._chipTap = new Clutter.ClickGesture();
-        this._chipTap.connect('recognize', g => {
-            const point = g.get_point_coords(0);
-            const chip = this._chipRect();
-            if (chip && point.x >= chip[0] && point.x <= chip[1] && point.y >= chip[2] && point.y <= chip[3])
-                state.camera.tap();
+        // The events of this canvas, not a gesture: the lock screen takes the touch at its own actor, after the one under
+        // the finger has seen it (as it does for its lock icon), and a gesture on the canvas would never be told
+        this._down = null;
+        this.connect('button-press-event', (a, event) => this._chipDown(event));
+        this.connect('button-release-event', (a, event) => this._chipUp(event));
+        this.connect('touch-event', (a, event) => {
+            const type = event.type();
+            if (type === Clutter.EventType.TOUCH_BEGIN)
+                return this._chipDown(event);
+            return type === Clutter.EventType.TOUCH_END ? this._chipUp(event) : Clutter.EVENT_PROPAGATE;
         });
-        this.add_action(this._chipTap);
         this._syncCamera();
     }
 
@@ -354,6 +357,28 @@ class SystemIcons extends Canvas {
         this.reactive = !!this._state.camera?.inUse;
         if (systemIconsKey(this._state) !== this._drawn)
             this.queue_repaint();
+    }
+
+    _chipDown(event) {
+        const [x, y] = event.get_coords();
+        const [ok, lx, ly] = this.transform_stage_point(x, y);
+        this._down = ok ? [lx, ly] : null;
+        return Clutter.EVENT_PROPAGATE;
+    }
+
+    // a tap: released on the chip, not far from where it went down
+    _chipUp(event) {
+        const down = this._down;
+        this._down = null;
+        const chip = down && this._chipRect();
+        if (!chip)
+            return Clutter.EVENT_PROPAGATE;
+        const [x, y] = event.get_coords();
+        const [ok, lx, ly] = this.transform_stage_point(x, y);
+        const inside = (px, py) => px >= chip[0] && px <= chip[1] && py >= chip[2] && py <= chip[3];
+        if (ok && inside(lx, ly) && inside(down[0], down[1]))
+            this._state.camera.tap();
+        return Clutter.EVENT_PROPAGATE;
     }
 
     // the chip's box [x0, x1, y0, y1] in the canvas's own logical px, with a finger's margin; null without a chip
