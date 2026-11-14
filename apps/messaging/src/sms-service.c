@@ -9,6 +9,7 @@
  * It stands aside while gsm2sip is in gateway mode, as the Phone's service does: then gsm2sipd takes the modem's
  * messages to SIP, and a second taker would delete them off the modem before it got them. */
 #include "messaging-types.h"
+#include "sms-agent.h"
 #include "sms-modem.h"
 #include "sms-store.h"
 #include "blocked-numbers.h"
@@ -35,6 +36,9 @@
  * notification for several conversations, its first 30 characters */
 #define NOTIFICATION_LINES 7
 #define GROUP_NAME_CHARS 30
+/* a message to an agent that the bridge has not taken within 60 s fails (NEO_MESSAGING_AGENT_TIMEOUT_MS for the
+ * tests) */
+#define AGENT_TIMEOUT_MS (60 * 1000)
 
 static const char introspection[] =
   "<node>"
@@ -64,6 +68,15 @@ static const char introspection[] =
   "    <method name='SetVisible'><arg name='conversation' type='x' direction='in'/></method>"
   /* bugle_db changed: this conversation, or 0 for more than one */
   "    <signal name='Changed'><arg name='conversation' type='x'/></signal>"
+  /* a message written into an agent's conversation (Send, Resend), for the bridge to take; kept as sending until
+   * Delivered says it took it (ok) or could not */
+  "    <signal name='Outgoing'><arg name='message' type='x'/><arg name='conversation' type='x'/>"
+  "      <arg name='destination' type='s'/><arg name='text' type='s'/></signal>"
+  "    <method name='Delivered'><arg name='message' type='x' direction='in'/>"
+  "      <arg name='ok' type='b' direction='in'/></method>"
+  /* a message from an agent ('agent:<name>'), kept as one that came into its conversation (made if new) */
+  "    <method name='Inject'><arg name='destination' type='s' direction='in'/>"
+  "      <arg name='text' type='s' direction='in'/><arg name='message' type='x' direction='out'/></method>"
   "  </interface>"
   "</node>";
 
@@ -106,6 +119,8 @@ typedef struct {
   GHashTable *reports;          /* reference -> Report: the delivery reports waited for (256 at most: a TP-MR is a
                                  * byte) */
   GSettings *settings;          /* the app's (de.yesman.Messaging), for "delivery-reports"; NULL without its schema */
+  GHashTable *agent_waits;      /* message id -> its timeout: the messages to agents the bridge has not taken yet */
+  guint agent_timeout;          /* ms */
 
   gint64 visible;               /* SetVisible's */
   char *visible_sender;
@@ -146,8 +161,11 @@ emit_properties (Service *self)
 static char *
 participant_name (Service *self, const char *destination)
 {
-  const Contact *contact = contacts_lookup (self->contacts, destination, country (self));
+  const Contact *contact;
 
+  if (sms_agent_name (destination))
+    return g_strdup (sms_agent_name (destination));
+  contact = contacts_lookup (self->contacts, destination, country (self));
   return contact && contact->name ? g_strdup (contact->name) : phone_number_format (destination, country (self));
 }
 
@@ -717,6 +735,17 @@ app_settings (void)
 
 /* --- messages coming */
 
+/* a message came into @conversation: where the app shows it, it is read (the conversation open) or seen (the list at
+ * its top) at once */
+static void
+came_where_shown (Service *self, gint64 conversation)
+{
+  if (self->visible > 0 && conversation == self->visible)
+    sms_store_mark_read (self->store, self->visible);
+  else if (self->visible == 0)
+    sms_store_mark_seen (self->store, 0);
+}
+
 static void
 on_received (const char *path, const char *number, const char *text, gint64 timestamp, gpointer data)
 {
@@ -740,11 +769,8 @@ on_received (const char *path, const char *number, const char *text, gint64 time
       sms_store_set_archived (self->store, message->conversation_id, TRUE);
       g_message ("sms: %s is from a blocked number: archived, not notified", path);
     }
-  /* where the app shows it, it is read (the conversation open) or seen (the list at its top) at once */
-  else if (self->visible > 0 && message->conversation_id == self->visible)
-    sms_store_mark_read (self->store, self->visible);
-  else if (self->visible == 0)
-    sms_store_mark_seen (self->store, 0);
+  else
+    came_where_shown (self, message->conversation_id);
   emit_changed (self, message->conversation_id);
   update_notification (self, TRUE);
 }
@@ -828,6 +854,113 @@ on_gateway_proxy (GObject *source, GAsyncResult *result, gpointer data)
     }
   /* the modem is started only now: in gateway mode it is never ours, not even for a moment */
   sync_gateway (self);
+}
+
+/* --- agents (sms-agent.h): their messages go to minerva-chat-bridge and come from it, never through the modem */
+
+typedef struct {
+  Service *self;
+  gint64 message;
+} AgentWait;
+
+static void
+remove_source (gpointer source)
+{
+  g_source_remove (GPOINTER_TO_UINT (source));
+}
+
+static guint
+agent_timeout (void)
+{
+  const char *ms = g_getenv ("NEO_MESSAGING_AGENT_TIMEOUT_MS");
+
+  return ms && *ms ? (guint) g_ascii_strtoull (ms, NULL, 10) : AGENT_TIMEOUT_MS;
+}
+
+static gboolean
+is_agent_conversation (Service *self, gint64 id)
+{
+  g_autoptr(SmsConversation) conversation = sms_store_get (self->store, id);
+
+  return conversation && sms_agent_is_conversation ((const char * const *) conversation->destinations);
+}
+
+/* the bridge took it (sent) or could not (failed, notified as an SMS that could not go) */
+static void
+agent_delivered (Service *self, const SmsMessage *message, gboolean ok)
+{
+  g_hash_table_remove (self->agent_waits, &message->id);
+  if (ok)
+    {
+      g_message ("sms: message %" G_GINT64_FORMAT " taken by the bridge", message->id);
+      if (g_hash_table_remove (self->failed, &message->id))
+        update_failures (self, FALSE);
+      set_status (self, message, MESSAGE_STATUS_OUTGOING_COMPLETE, 0, g_get_real_time () / 1000);
+    }
+  else
+    {
+      g_message ("sms: message %" G_GINT64_FORMAT " not taken by the bridge", message->id);
+      set_status (self, message, MESSAGE_STATUS_OUTGOING_FAILED, 0, 0);
+      g_hash_table_insert (self->failed, int64_dup (message->id), int64_dup (message->conversation_id));
+      update_failures (self, TRUE);
+    }
+}
+
+static gboolean
+on_agent_timeout (gpointer data)
+{
+  AgentWait *wait = data;
+  Service *self = wait->self;
+  g_autoptr(SmsMessage) message = sms_store_get_message (self->store, wait->message);
+  gpointer key;
+
+  /* its source goes as this returns: out of the table without removing it */
+  if (g_hash_table_steal_extended (self->agent_waits, &wait->message, &key, NULL))
+    g_free (key);
+  if (message && message->status == MESSAGE_STATUS_OUTGOING_SENDING)
+    {
+      g_message ("sms: message %" G_GINT64_FORMAT ": no Delivered in %u ms", message->id, self->agent_timeout);
+      agent_delivered (self, message, FALSE);
+    }
+  return G_SOURCE_REMOVE;
+}
+
+/* the message is the bridge's: Outgoing, whether a bridge runs or not, and it fails unless Delivered comes in time */
+static void
+agent_send (Service *self, gint64 id)
+{
+  g_autoptr(SmsMessage) message = sms_store_get_message (self->store, id);
+  g_autoptr(SmsConversation) conversation = message ? sms_store_get (self->store, message->conversation_id) : NULL;
+  AgentWait *wait;
+  guint source;
+
+  if (!conversation)
+    return;
+  set_status (self, message, MESSAGE_STATUS_OUTGOING_SENDING, 0, 0);
+  wait = g_new0 (AgentWait, 1);
+  wait->self = self;
+  wait->message = id;
+  source = g_timeout_add_full (G_PRIORITY_DEFAULT, self->agent_timeout, on_agent_timeout, wait, g_free);
+  g_hash_table_replace (self->agent_waits, int64_dup (id), GUINT_TO_POINTER (source));
+  g_dbus_connection_emit_signal (self->session, NULL, SMS_PATH, SMS_INTERFACE, "Outgoing",
+                                 g_variant_new ("(xxss)", id, message->conversation_id, conversation->destinations[0],
+                                                message->text ? message->text : ""), NULL);
+}
+
+/* a message from the agent at @destination: as one that came by SMS (on_received), without a modem. Its id, or 0 */
+static gint64
+agent_inject (Service *self, const char *destination, const char *text)
+{
+  gint64 now = g_get_real_time () / 1000;
+  g_autoptr(SmsMessage) message = NULL;
+  gint64 id = sms_store_add_incoming (self->store, destination, text, now, now, NULL);
+
+  if (!id || !(message = sms_store_get_message (self->store, id)))
+    return 0;
+  came_where_shown (self, message->conversation_id);
+  emit_changed (self, message->conversation_id);
+  update_notification (self, TRUE);
+  return id;
 }
 
 /* --- what the app shows */
@@ -943,8 +1076,28 @@ on_method_call (GDBusConnection *bus, const char *sender, const char *path, cons
       sms_store_set_archived (self->store, id, FALSE);
       emit_changed (self, id);
       g_dbus_method_invocation_return_value (invocation, g_variant_new ("(x)", message));
-      queue_message (self, message);
-      send_next (self);
+      if (is_agent_conversation (self, id))
+        agent_send (self, message);
+      else
+        {
+          queue_message (self, message);
+          send_next (self);
+        }
+      return;
+    }
+  if (g_str_equal (method, "Inject"))
+    {
+      const char *destination;
+      gint64 message;
+
+      g_variant_get (parameters, "(&s&s)", &destination, &text);
+      if (!sms_agent_name (destination) || !*text)
+        g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                                               "Not an agent's destination, or no text");
+      else if (!(message = agent_inject (self, destination, text)))
+        g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR, G_DBUS_ERROR_FAILED, "Not kept");
+      else
+        g_dbus_method_invocation_return_value (invocation, g_variant_new ("(x)", message));
       return;
     }
 
@@ -963,9 +1116,27 @@ on_method_call (GDBusConnection *bus, const char *sender, const char *path, cons
       g_hash_table_remove (self->failed, &id);
       update_failures (self, FALSE);
       g_hash_table_remove (self->retries, &id);
-      set_status (self, message, MESSAGE_STATUS_OUTGOING_RESENDING, 0, 0);
-      queue_message (self, id);
-      send_next (self);
+      if (is_agent_conversation (self, message->conversation_id))
+        agent_send (self, id);
+      else
+        {
+          set_status (self, message, MESSAGE_STATUS_OUTGOING_RESENDING, 0, 0);
+          queue_message (self, id);
+          send_next (self);
+        }
+    }
+  else if (g_str_equal (method, "Delivered"))
+    {
+      g_autoptr(SmsMessage) message = NULL;
+
+      g_variant_get (parameters, "(xb)", &id, &flag);
+      message = sms_store_get_message (self->store, id);
+      if (!message || MESSAGE_STATUS_IS_INCOMING (message->status)
+          || !is_agent_conversation (self, message->conversation_id))
+        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS, "No message to an agent %" G_GINT64_FORMAT,
+                     id);
+      else
+        agent_delivered (self, message, flag);
     }
   else if (g_str_equal (method, "MarkRead"))
     {
@@ -1012,6 +1183,7 @@ on_method_call (GDBusConnection *bus, const char *sender, const char *path, cons
       g_variant_get (parameters, "(x)", &id);
       /* one still going is not stopped on the modem, but nothing more of it goes */
       g_hash_table_remove (self->retries, &id);
+      g_hash_table_remove (self->agent_waits, &id);
       if (g_hash_table_remove (self->failed, &id))
         update_failures (self, FALSE);
       conversation = sms_store_delete_message (self->store, id);
@@ -1120,6 +1292,8 @@ main (int argc, char **argv)
   service.retries = g_hash_table_new_full (g_int64_hash, g_int64_equal, g_free, retry_free);
   service.reports = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, report_free);
   service.settings = app_settings ();
+  service.agent_waits = g_hash_table_new_full (g_int64_hash, g_int64_equal, g_free, remove_source);
+  service.agent_timeout = agent_timeout ();
   g_queue_init (&service.outbox);
 
   node = g_dbus_node_info_new_for_xml (introspection, NULL);
@@ -1136,7 +1310,15 @@ main (int argc, char **argv)
    * seen is notified again, quietly */
   unsent = sms_store_list_unsent (service.store);
   for (guint i = 0; i < unsent->len; i++)
-    queue_message (&service, ((SmsMessage *) unsent->pdata[i])->id);
+    {
+      SmsMessage *message = unsent->pdata[i];
+
+      /* but one to an agent, which the bridge may have taken already, fails: given twice only when tapped again */
+      if (is_agent_conversation (&service, message->conversation_id))
+        sms_store_set_status (service.store, message->id, MESSAGE_STATUS_OUTGOING_FAILED, 0, 0);
+      else
+        queue_message (&service, message->id);
+    }
   update_notification (&service, FALSE);
 
   g_unix_signal_add (SIGTERM, on_signal, &service);
@@ -1155,6 +1337,7 @@ main (int argc, char **argv)
   g_queue_clear (&service.outbox);
   g_hash_table_unref (service.retries);
   g_hash_table_unref (service.reports);
+  g_hash_table_unref (service.agent_waits);
   g_clear_object (&service.settings);
   g_hash_table_unref (service.failed);
   notifier_free (service.notifier);

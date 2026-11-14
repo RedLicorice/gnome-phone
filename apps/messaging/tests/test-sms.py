@@ -25,6 +25,7 @@ COMPLETE, DELIVERED, YET_TO_SEND, SENDING, RESENDING, AWAITING_RETRY, FAILED, IN
 UNKNOWN_ERROR = 'org.freedesktop.ModemManager1.Error.MessageError.Unknown'
 NO_NETWORK = 'org.freedesktop.ModemManager1.Error.MobileEquipment.NoNetwork'
 ANNA, BOB = '+491701234567', '+491709999999'
+AGENT = 'agent:Minerva'
 
 failures = []
 
@@ -78,6 +79,9 @@ class Test:
         self.changed = []
         self.bus.signal_subscribe(None, IFACE, 'Changed', PATH, None, Gio.DBusSignalFlags.NONE,
                                   lambda *a: self.changed.append(a[5].unpack()[0]))
+        self.outgoing = []
+        self.bus.signal_subscribe(None, IFACE, 'Outgoing', PATH, None, Gio.DBusSignalFlags.NONE,
+                                  lambda *a: self.outgoing.append(a[5].unpack()))
 
     def wait(self, what, predicate, timeout=5.0):
         ctx = GLib.MainContext.default()
@@ -104,6 +108,14 @@ class Test:
             while ctx.pending():
                 ctx.iteration(False)
             time.sleep(0.02)
+
+    def error(self, method, args, signature):
+        # the D-Bus error name the call fails with, or None
+        try:
+            self.service(method, args, signature)
+        except GLib.Error as e:
+            return Gio.DBusError.get_remote_error(e)
+        return None
 
     def service(self, method, args=None, signature=None):
         reply = self.bus.call_sync(NAME, PATH, IFACE, method, GLib.Variant(signature, args) if signature else None,
@@ -397,6 +409,68 @@ def run(t):
     t.wait('and deleted off the modem', lambda: sms not in t.report()['messages'])
 
 
+def run_agents(t):
+    # an agent's conversation (sms-agent.h): its messages go to the bridge (Outgoing, Delivered) and come from it
+    # (Inject), never through the modem, which need not be there
+    invalid = 'org.freedesktop.DBus.Error.InvalidArgs'
+    t.modem('Clear')
+    t.modem('SetMessaging', (False,), '(b)')
+    t.wait('agents: without a modem, not available', lambda: not t.prop('Available'))
+    # what earlier parts left unread would share the notification: read first, so the agent's has it to itself
+    for (conversation,) in t.query('SELECT _id FROM conversations'):
+        t.service('MarkRead', (conversation,), '(x)')
+    t.wait('earlier messages read: no notification', lambda: t.notification() is None)
+    t.changed.clear()
+    message = t.service('Inject', (AGENT, 'Ciao, sono Minerva'), '(ss)')[0]
+    minerva = t.wait('a message from an agent is kept', lambda: t.conversation_of(AGENT))
+    rows = t.messages(minerva)
+    check('as one that came, unread, with the id Inject gave', rows and rows[-1][0] == message
+          and rows[-1][1:3] == (INCOMING, 0), rows)
+    t.wait('Changed names its conversation', lambda: minerva in t.changed)
+    n = t.wait('and notified, by the agent\'s name', lambda: t.notification('Minerva'))
+    if n:
+        check('its text', n[1]['body'] == 'Ciao, sono Minerva', n)
+    check('the same conversation for GetConversation',
+          t.service('GetConversation', ([AGENT],), '(as)')[0] == minerva)
+    check('Inject for a destination that is no agent\'s: InvalidArgs',
+          t.error('Inject', (ANNA, 'Hello'), '(ss)') == invalid)
+    t.service('SetVisible', (minerva,), '(x)')
+    t.wait('opening it takes the notification away', lambda: t.notification('Minerva') is None)
+    message = t.service('Inject', (AGENT, 'Ti vedo'), '(ss)')[0]
+    t.wait('a message into the open conversation is read', lambda: t.messages(minerva)[-1][0] == message
+           and t.messages(minerva)[-1][2] == 1)
+    t.settle()
+    check('and not notified', t.notification('Minerva') is None, t.report()['notifications'])
+    t.service('SetVisible', (-1,), '(x)')
+
+    # sending, with no modem
+    message = t.service('Send', (minerva, 'Come stai?'), '(xs)')[0]
+    t.wait('Send with no modem: Outgoing, with its ids', lambda: (message, minerva, AGENT, 'Come stai?') in t.outgoing)
+    check('kept as sending', t.status(message) == SENDING, t.status(message))
+    check('and not given to the modem', not t.logged('Create'), t.report()['log'])
+    t.service('Delivered', (message, True), '(xb)')
+    t.wait('Delivered ok: sent', lambda: t.status(message) == COMPLETE)
+    message = t.service('Send', (minerva, 'Ci sei?'), '(xs)')[0]
+    t.wait('another: Outgoing', lambda: [o for o in t.outgoing if o[0] == message])
+    t.service('Delivered', (message, False), '(xb)')
+    t.wait('Delivered not ok: failed', lambda: t.status(message) == FAILED)
+    n = t.wait('"Message not sent"', lambda: t.notification('Message not sent'))
+    if n:
+        check('naming the agent', n[1]['body'] == 'Minerva', n)
+    t.service('Resend', (message,), '(x)')
+    t.wait('Resend: Outgoing again', lambda: len([o for o in t.outgoing if o[0] == message]) == 2)
+    check('sending again', t.status(message) == SENDING, t.status(message))
+    t.wait('its notification goes', lambda: t.notification('Message not sent') is None)
+    t.wait('no Delivered in time (1.5 s here): failed', lambda: t.status(message) == FAILED, timeout=5)
+    t.wait('and notified', lambda: t.notification('Message not sent'))
+    incoming = t.messages(minerva)[0][0]
+    check('Delivered for a message that came: InvalidArgs',
+          t.error('Delivered', (incoming, True), '(xb)') == invalid)
+    check('Delivered for no message: InvalidArgs', t.error('Delivered', (999999, True), '(xb)') == invalid)
+    t.modem('SetMessaging', (True,), '(b)')
+    t.wait('the modem back, available', lambda: t.prop('Available'))
+
+
 def main():
     build, source = sys.argv[1], sys.argv[2]
     tmp = tempfile.mkdtemp(prefix='test-sms-')
@@ -411,7 +485,8 @@ def main():
         write_settings(config_home, delivery_reports=False)
         env = dict(os.environ, DBUS_SESSION_BUS_ADDRESS=session_address, NEO_MESSAGING_SYSTEM_BUS=system_address,
                    XDG_DATA_HOME=os.path.join(tmp, 'data'), XDG_CONFIG_HOME=config_home,
-                   GSETTINGS_BACKEND='keyfile', GSETTINGS_SCHEMA_DIR=tmp, LANG='C.UTF-8', LC_ALL='C.UTF-8')
+                   GSETTINGS_BACKEND='keyfile', GSETTINGS_SCHEMA_DIR=tmp, LANG='C.UTF-8', LC_ALL='C.UTF-8',
+                   NEO_MESSAGING_AGENT_TIMEOUT_MS='1500')
         mock = subprocess.Popen([sys.executable, os.path.join(source, 'tests', 'mock-modem.py'), system_address,
                                  '--waiting'], env=env, stdout=subprocess.PIPE, text=True)
         procs.append(mock)
@@ -419,7 +494,9 @@ def main():
             print('FAIL the mock modem did not start')
             return 1
         procs.append(subprocess.Popen([os.path.join(build, 'neo-messaging-sms')], env=env))
-        run(Test(session_address, os.path.join(tmp, 'data', 'neo-messaging', 'bugle_db'), config_home))
+        t = Test(session_address, os.path.join(tmp, 'data', 'neo-messaging', 'bugle_db'), config_home)
+        run(t)
+        run_agents(t)
     finally:
         for p in reversed(procs):
             p.terminate()

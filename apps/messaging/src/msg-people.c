@@ -1,15 +1,20 @@
 /* Who a conversation is with (msg-people.h). */
 #include "msg-people.h"
 #include "phone-number.h"
+#include "sms-agent.h"
 
 MsgPerson *
 msg_person_new (Contacts *contacts, const char *destination, const char *country)
 {
   MsgPerson *person = g_new0 (MsgPerson, 1);
-  const Contact *contact = contacts ? contacts_lookup (contacts, destination, country) : NULL;
+  /* an agent is named by its name, and is no contact */
+  const Contact *contact = contacts && !sms_agent_name (destination)
+                           ? contacts_lookup (contacts, destination, country) : NULL;
 
   person->destination = g_strdup (destination);
-  if (contact)
+  if (sms_agent_name (destination))
+    person->name = g_strdup (sms_agent_name (destination));
+  else if (contact)
     {
       person->is_contact = TRUE;
       person->name = g_strdup (contact->name_primary ? contact->name_primary : contact->name);

@@ -1,6 +1,7 @@
 /* The conversation list (conversation-list.h). */
 #include "conversation-list.h"
 #include "blocked-numbers.h"
+#include "sms-agent.h"
 #include "msg-add-contact.h"
 #include "msg-action-bar.h"
 #include "msg-avatar.h"
@@ -83,7 +84,7 @@ blockable (ConversationList *self)
   g_hash_table_iter_init (&iter, self->selected);
   g_hash_table_iter_next (&iter, &key, NULL);
   row = g_hash_table_lookup (self->rows, key);
-  if (!row || !row->destination
+  if (!row || !row->destination || sms_agent_name (row->destination)
       || blocked_numbers_contains (blocked_numbers_get_default (), row->destination, country (self)))
     return NULL;
   return row;
