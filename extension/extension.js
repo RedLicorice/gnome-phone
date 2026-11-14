@@ -23,8 +23,10 @@ import {overWindows} from './scanout.js';
 import {Power} from './power.js';
 import {PowerMenu} from './powermenu.js';
 import {Rotation} from './rotation.js';
+import {closeApp} from './recents.js';
 import {Service} from './service.js';
 import {Shade} from './shade.js';
+import {Stacks} from './stacks.js';
 import {SystemState} from './state.js';
 import {StatusBar, hideShellPanel} from './statusbar.js';
 import {VolumeDialog} from './volume.js';
@@ -96,6 +98,9 @@ export default class GnomePhoneExtension extends Extension {
         this._mipmaps = new NoWindowMipmaps();
         this._home = new Home(this);
         this._service = new Service(this._home, this._boost);
+        // whose each window is (agents' windows stay in recents), and the API agents open them through
+        this._stacks = new Stacks(this._home, closeApp);
+        this._service.setStacks(this._stacks);
 
         // Android's SystemUI: the status bar in place of the shell's top panel
         this._state = new SystemState();
@@ -217,6 +222,8 @@ export default class GnomePhoneExtension extends Extension {
         this._state?.destroy();
         this._state = null;
 
+        this._stacks?.destroy();
+        this._stacks = null;
         this._service?.destroy();
         this._service = null;
         this._home?.destroy();

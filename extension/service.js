@@ -75,6 +75,11 @@ export class Service {
         this._nav.drawerOpen = open;
     }
 
+    // stacks.js: recents shows the owners' stacks as tabs
+    setStacks(stacks) {
+        this._nav.stacks = stacks;
+    }
+
     setKeyguard(keyguard) {
         this._keyguard = keyguard;
         this._nav.setKeyguard(keyguard);
