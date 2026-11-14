@@ -126,7 +126,7 @@ face_get (TextFont *f, int i)
   return fc;
 }
 
-gboolean
+bool
 text_family_installed (const char *family)
 {
   FcPattern *pat = FcPatternCreate ();
@@ -136,7 +136,7 @@ text_family_installed (const char *family)
   FcResult res;
   FcPattern *match = FcFontMatch (NULL, pat, &res);
   FcChar8 *got = NULL;
-  gboolean ok = match && FcPatternGetString (match, FC_FAMILY, 0, &got) == FcResultMatch && got &&
+  bool ok = match && FcPatternGetString (match, FC_FAMILY, 0, &got) == FcResultMatch && got &&
                 g_ascii_strcasecmp ((const char *) got, family) == 0;
   if (match)
     FcPatternDestroy (match);
