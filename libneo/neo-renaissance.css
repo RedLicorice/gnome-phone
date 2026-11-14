@@ -1,0 +1,88 @@
+/* Cyberpunk meets Italian Renaissance: loaded after neo.css when the setting de.yesman.GnomePhone.Theme name is
+ * 'renaissance'. The palette (neo-style.c) already recolours everything; this adds the type and the ornament.
+ *
+ * Michelangelus has no distribution licence: it is installed on the device from the owner's own copy, never shipped
+ * here. Where it is absent the chain falls to Cinzel, then to the stock face, so the theme still reads. Nothing in
+ * this file animates: idle costs no CPU or GPU. Gold hairlines frame surfaces (a gilded edge); cyan is only an
+ * edge light on focus. */
+
+@define-color neo_gold #d9b26a;
+@define-color neo_gold_hi #f3dc9f;
+@define-color neo_cyan #38e8ff;
+@define-color neo_magenta #ff3bd4;
+@define-color neo_lapis #23418f;
+@define-color neo_terracotta #e0936f;
+
+/* --- type: Michelangelus for titles, the stock sans for reading */
+
+.neo-display-large,
+.neo-headline-large,
+.neo-title-large,
+.neo-app-bar-title,
+.neo-dialog-title {
+  font-family: "Michelangelus", "Cinzel", "Neo Roboto", serif;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: @neo_gold_hi;
+}
+
+.neo-app-bar-title { font-size: 26px; }
+.neo-dialog-title { font-size: 28px; }
+
+/* mono for data (numbers, codes, times in lists) wherever an app marks them tabular */
+.neo-tabular {
+  font-family: "JetBrains Mono", "Share Tech Mono", monospace;
+  font-weight: 500;
+}
+
+/* --- gilded edges */
+
+.neo-app-bar {
+  border-bottom: 1px solid alpha(@neo_gold, 0.45);
+  box-shadow: 0 1px 10px alpha(@neo_cyan, 0.10);
+}
+
+.neo-nav-bar {
+  border-top: 1px solid alpha(@neo_gold, 0.45);
+  box-shadow: 0 -1px 10px alpha(@neo_cyan, 0.10);
+}
+
+.neo-card {
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px alpha(@neo_gold, 0.30);
+}
+
+.neo-dialog {
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 1px alpha(@neo_gold, 0.65), inset 0 0 0 4px @neo_surface_container_highest,
+              inset 0 0 0 5px alpha(@neo_gold, 0.25), 0 0 24px alpha(@neo_cyan, 0.14);
+}
+
+.neo-dialog.flush { box-shadow: inset 0 0 0 1px alpha(@neo_gold, 0.45); }
+
+.neo-snackbar {
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px alpha(@neo_gold, 0.45), 0 0 12px alpha(@neo_cyan, 0.12);
+}
+
+.neo-nav-indicator {
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px alpha(@neo_gold, 0.55);
+}
+
+.neo-scrim { background-color: rgba(4, 3, 10, 0.72); }
+
+/* --- text buttons and fields: gold, with a neon edge on focus */
+
+.neo-text-button { color: @neo_gold; }
+
+.neo-entry { border-bottom-color: alpha(@neo_gold, 0.55); }
+.neo-entry:focus-within {
+  border-bottom-color: @neo_gold_hi;
+  box-shadow: 0 2px 8px -2px alpha(@neo_cyan, 0.7);
+}
+
+*:focus-visible {
+  outline: 2px solid @neo_gold_hi;
+  outline-offset: 2px;
+}

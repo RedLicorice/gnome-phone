@@ -10,6 +10,7 @@ import PangoCairo from 'gi://PangoCairo';
 import {Canvas} from './icons.js';
 import {setSource} from './palette.js';
 import {SCALE, screenPixels, sp} from './units.js';
+import {isRenaissance} from './theme.js';
 
 const FAMILY = 'Google Sans Flex';
 
@@ -19,7 +20,10 @@ export function fakeBoldWidth(sizePx) {
     return sizePx * (1 / 24 + (1 / 32 - 1 / 24) * t);
 }
 
-function description(sizePx, wght, {wdth = 100, rond = 100, opsz}) {
+// The Renaissance theme sets big text (the clocks) in Michelangelus, with the stock face as Pango's fallback
+function description(sizePx, wght, {wdth = 100, rond = 100, opsz}, sizeSp) {
+    if (isRenaissance() && sizeSp >= 24)
+        return Pango.FontDescription.from_string(`Michelangelus, ${FAMILY} ${wght >= 600 ? 'Bold ' : ''}${sizePx.toFixed(3)}px`);
     return Pango.FontDescription.from_string(
         `${FAMILY} ${sizePx.toFixed(3)}px @wght=${wght},wdth=${wdth},ROND=${rond},opsz=${opsz}`);
 }
@@ -34,7 +38,7 @@ class AndroidText extends Canvas {
         rond} = {}) {
         super();
         this._sizePx = sp(sizeSp) * SCALE;
-        this._font = description(this._sizePx, wght, {wdth, rond, opsz});
+        this._font = description(this._sizePx, wght, {wdth, rond, opsz}, sizeSp);
         this._letterSpacing = letterSpacing;
         this._embolden = embolden ? fakeBoldWidth(this._sizePx) : 0;
         this._colour = colour;

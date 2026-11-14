@@ -72,3 +72,29 @@ listview.ns-list > row:active .ns-li, list.ns-list > row:active .ns-li { backgro
 
 /* an app's page: Uninstall, full width under the last card */
 button.ns-uninstall { margin: 8px 16px 24px; min-height: 48px; border-radius: 14px; font-weight: 600; }
+
+/* ---- the optional Renaissance look: lapis-tinted black, gold leaf, parchment, neon cyan as an edge light.
+ * Michelangelus is installed from the owner's copy, never shipped: the chain falls back. No animation. */
+window.ns-ren, window.ns-ren .ns-root, window.ns-ren.ns-dark, window.ns-ren.ns-dark .ns-root { background-color: #08070d; color: #f0e6d0; }
+window.ns-ren .ns-card, window.ns-ren.ns-dark .ns-card, window.ns-ren .ns-li, window.ns-ren.ns-dark .ns-li {
+  background-color: #13121e; border-radius: 14px; box-shadow: inset 0 0 0 1px alpha(#d9b26a, 0.30); }
+window.ns-ren .ns-li-first { border-top-left-radius: 14px; border-top-right-radius: 14px; }
+window.ns-ren .ns-li-last { border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
+window.ns-ren .ns-big, window.ns-ren .ns-huge, window.ns-ren .ns-head, window.ns-ren .ns-big-title {
+  font-family: "Michelangelus", "Cinzel", serif; font-weight: 700; color: #f3dc9f; letter-spacing: 0.5px; }
+window.ns-ren .ns-group-title { color: #d9b26a; font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 2px; }
+window.ns-ren .ns-sub, window.ns-ren .ns-note { color: alpha(#f0e6d0, 0.6); }
+window.ns-ren .ns-card separator, window.ns-ren .ns-li > separator { background-color: alpha(#d9b26a, 0.16); }
+window.ns-ren .ns-accent { color: #d9b26a; }
+window.ns-ren .ns-blue, window.ns-ren .ns-violet, window.ns-ren .ns-purple { background-color: #23418f; color: #d9b26a; }
+window.ns-ren .ns-green, window.ns-ren .ns-lime { background-color: #0a4650; color: #38e8ff; }
+window.ns-ren .ns-orange, window.ns-ren .ns-yellow { background-color: #4a2a1c; color: #e0936f; }
+window.ns-ren .ns-red, window.ns-ren .ns-pink { background-color: #6b1237; color: #ff6f9c; }
+window.ns-ren .ns-grey { background-color: #2a283d; color: #bdb299; }
+window.ns-ren .ns-icon { box-shadow: inset 0 0 0 1px alpha(#d9b26a, 0.55); }
+window.ns-ren switch:checked { background-color: #23418f; }
+window.ns-ren switch:checked slider { background-color: #d9b26a; }
+window.ns-ren scale highlight { background-color: #d9b26a; }
+window.ns-ren scale slider { background-color: #f3dc9f; box-shadow: 0 0 8px alpha(#38e8ff, 0.5); }
+window.ns-ren entry:focus-within { box-shadow: inset 0 0 0 1px #d9b26a, 0 0 8px alpha(#38e8ff, 0.5); }
+window.ns-ren .ns-danger { color: #ff6f9c; }

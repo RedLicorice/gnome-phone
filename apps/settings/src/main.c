@@ -219,6 +219,18 @@ dark_changed (AdwStyleManager *sm, GParamSpec *ps, GtkWidget *win)
     gtk_widget_remove_css_class (win, "ns-dark");
 }
 
+/* the optional Renaissance look (de.yesman.GnomePhone.Theme name): a class on the window that style.css keys on,
+ * live with the setting */
+static void
+theme_changed (GSettings *theme, const char *key, GtkWidget *win)
+{
+  g_autofree char *name = g_settings_get_string (theme, "name");
+  if (g_strcmp0 (name, "renaissance") == 0)
+    gtk_widget_add_css_class (win, "ns-ren");
+  else
+    gtk_widget_remove_css_class (win, "ns-ren");
+}
+
 static GtkWidget *nav_view;
 
 static void
@@ -242,6 +254,12 @@ activate (GtkApplication *app, gpointer data)
   AdwStyleManager *sm = adw_style_manager_get_default ();
   g_signal_connect_object (sm, "notify::dark", G_CALLBACK (dark_changed), win, 0);
   dark_changed (sm, NULL, win);
+  GSettings *theme = ns_settings ("de.yesman.GnomePhone.Theme");
+  if (theme) {
+    g_signal_connect_object (theme, "changed::name", G_CALLBACK (theme_changed), win, 0);
+    theme_changed (theme, "name", win);
+    g_object_set_data_full (G_OBJECT (win), "ns-theme", theme, g_object_unref);
+  }
   GtkWidget *nav = nav_view = adw_navigation_view_new ();
   ns_ui_init (ADW_NAVIGATION_VIEW (nav));
   adw_navigation_view_add (ADW_NAVIGATION_VIEW (nav), main_page ());

@@ -45,6 +45,10 @@ typedef enum {
 /* Loads the stylesheet (with the palette) for the whole display. Safe to call more than once. */
 void    neo_init        (void);
 
+/* Whether the optional Renaissance theme (setting de.yesman.GnomePhone.Theme name) is in force. It follows the setting
+ * live: the CSS reloads, drawn widgets recolour on their next draw. */
+gboolean neo_theme_is_renaissance (void);
+
 GdkRGBA neo_color       (NeoColor color);
 GdkRGBA neo_color_alpha (NeoColor color, float alpha);
 /* a + (b - a) * t, per channel: the colour blends Android's animators do (ArgbEvaluator, blendARGB) */
