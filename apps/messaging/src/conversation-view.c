@@ -12,6 +12,7 @@
 #include "msg-sound.h"
 #include "phone-number.h"
 #include "popup-menu.h"
+#include "sms-agent.h"
 #include "sms-segments.h"
 
 #include <glib/gi18n.h>
@@ -610,10 +611,13 @@ on_text_changed (GtkTextBuffer *buffer, gpointer data)
   if (has_text != (neo_anim_get_to (self->reveal) > 0.5))
     neo_anim_start (self->reveal, neo_anim_get_value (self->reveal), has_text ? 1 : 0, REVEAL_MS, 0,
                     SPONGY_FAST_OUT_SLOW_IN);
-  /* "62 / 2": shown once it takes more than one message, or the last 10 are left; its line is kept either way */
+  /* "62 / 2": shown once it takes more than one message, or the last 10 are left; its line is kept either way. An
+   * agent's messages are no SMS: never */
   counter = g_strdup_printf ("%u / %u", length.remaining, length.segments);
   gtk_label_set_text (GTK_LABEL (self->counter), counter);
   gtk_widget_set_opacity (self->counter, has_text && (length.segments > 1 || length.remaining <= COUNTER_THRESHOLD)
+                                         && !(self->conversation && sms_agent_is_conversation (
+                                              (const char * const *) self->conversation->destinations))
                                          ? 1 : 0);
 }
 
