@@ -1,0 +1,11 @@
+renaissance-cyber: a parallax set for the Neo launcher, the wallpaper of the optional Renaissance look ("Cyberpunk
+meets Italian Renaissance"). Original procedural art, drawn by tools/parallax-renaissance/build_renaissance.py; no
+third-party material.
+
+Layers, back to front (depth in parallax.json):
+  layer0.jpg  -0.60  the night: lapis gradient, gold dust, armillary rings, a faint cyan perspective floor
+  layer1.png  -0.25  Vitruvian circle and square, golden pentagon, graduated ticks, cyan nodes and HUD arcs
+  layer2.png   0.10  the arcade: round arches on a dark lapis wall, gold edge, cyan inner line
+  layer3.png   0.55  the owl of Minerva framed by laurel
+  layer4.png   1.00  glitch bars, HUD corner brackets, soft gold motes
+wallpaper.jpg is the set flattened at rest (1080x2400); preview.jpg is 512x512.
