@@ -28,6 +28,7 @@
 #define CAM_LENS_BUTTON            32
 #define CAM_LENS_MARGIN            (5.0 / 3)   /* 5 px, not dp (LensSelectorLayout.kt)       §6.2   */
 #define CAM_LENS_RADIUS            8
+#define CAM_LENS_PAD               8        /* a wider pill's side padding (not in Aperture: it has the ratio only) */
 #define CAM_DIVIDER_H              1
 #define CAM_PRO_ROW_H              (253.0 / 3) /* measured: 1298…1551 px                     §7     */
 #define CAM_PRO_ROW_PAD_V          8
@@ -43,6 +44,8 @@
 #define CAM_FOCUS_RING_INSET       8        /* padding 0 → 8 dp while focusing              §9     */
 #define CAM_ZOOM_SLIDER_W          250
 #define CAM_ZOOM_SLIDER_H          32
+#define CAM_TUNE_MARGIN            8        /* the sheet's distance from the viewfinder's edges and bottom           */
+#define CAM_TUNE_LABEL_W           74       /* the tuning sheet: a slider's name                                 */
 #define CAM_FLING_MIN              75       /*                                               §1     */
 #define CAM_FLING_MIN_VELOCITY     50       /* ViewConfiguration's minimum fling, dp/s              */
 #define CAM_RIPPLE_RADIUS          34       /* half the 48 dp button's diagonal (102 px)     §6.1   */

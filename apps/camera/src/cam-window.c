@@ -13,6 +13,8 @@
 #include "cam-settings.h"
 #include "cam-sounds.h"
 #include "cam-storage.h"
+#include "cam-tone.h"
+#include "cam-tune.h"
 #include "cam-viewfinder.h"
 #include "cam-widgets.h"
 
@@ -23,6 +25,7 @@
 #define APP_ID            "de.yesman.Camera"
 #define ZOOM_MAX          8.0      /* digital: a crop of the frame (§23); CameraX's maxZoomRatio of a camera */
 #define BAR_ICON          40       /* the 24 dp drawable, fitCenter in the 48 dp button less its 4 dp padding */
+#define TUNE_SAVE_MS      300      /* a tuning slider that stopped this long ago is written to dconf */
 #define FLASH_SETTLE_MS   1000     /* the torch on before the frame is taken: the exposure follows it */
 #define SCREEN_FLASH_MS   500      /* the white screen up before the frame is taken */
 #define BITRATE_1080      16000000 /* the live app's 1080p files, ≈ 16 Mbit/s (§11.1) */
@@ -66,9 +69,9 @@ struct _CamView {
   /* the camera screen */
   GtkWidget *viewfinder, *island, *countdown, *zoom_slider, *pro_row, *snackbar;
   GtkWidget *pro_button, *lenses, *flash_button, *flash_icon;
-  GtkWidget *gallery, *shutter, *flip, *pause, *modes;
+  GtkWidget *gallery, *shutter, *flip, *pause, *modes, *tune_panel;
   GPtrArray *rotators;                  /* what turns with the phone (§17) */
-  ProButton  p_aspect, p_quality, p_fps, p_hdr, p_mic, p_timer, p_grid, p_settings;
+  ProButton  p_aspect, p_quality, p_fps, p_hdr, p_mic, p_timer, p_grid, p_tune, p_settings;
   /* over the whole window */
   GtkWidget *settings_page, *toast, *white;
 
@@ -100,6 +103,12 @@ struct _CamView {
   NeoAnim   *zoom_anim;
   guint      slider_hide;
 
+  /* the tuning sheet: the Soft ISP's gamma, contrast and saturation of the camera in use (cam-tune.h) */
+  gboolean   tune_open;
+  guint      tune_save;                 /* the pending write of tune_tone for tune_id */
+  char      *tune_id;
+  CamTone    tune_tone;
+
   /* the pro row (§7) */
   double     pro_shown;
   gboolean   pro_open;
@@ -123,6 +132,10 @@ static void bind_camera (CamView *self);
 static void update_controls (CamView *self);
 static void update_flash (CamView *self);
 static void sync_running (CamView *self);
+static void use_camera (CamView *self, CamCamera *camera);
+static void tune_sync (CamView *self);
+static void tune_flush (CamView *self);
+static void slide_pro (CamView *self, gboolean open);
 static void take_photo (CamView *self);
 static void start_video (CamView *self);
 
@@ -532,10 +545,96 @@ ui_tilt (CamView *self)
   return isnan (tilt) ? tilt : fmod (tilt - self->display_rotation + 720, 360);
 }
 
+/* ---- the lens bar and the tuning sheet --------------------------------------------------------------------------
+ * Aperture's lens bar lists zoom ratios from the lenses' focal lengths, which libcamera does not report: the order
+ * and the labels of this phone's cameras are the "lens-labels" setting, a camera not listed follows under its
+ * sensor's name, "hidden-cameras" are left out. */
+
+static gboolean
+camera_hidden (CamView *self, CamCamera *camera)
+{
+  g_auto(GStrv) hidden = g_settings_get_strv (self->settings, "hidden-cameras");
+
+  return g_strv_contains ((const char *const *) hidden, camera->id);
+}
+
+/* the camera's label and its place in "lens-labels" (a large one for a camera that is not listed) */
+static char *
+camera_label (CamView *self, CamCamera *camera, int *order)
+{
+  g_autoptr(GVariant) list = g_settings_get_value (self->settings, "lens-labels");
+  GVariantIter iter;
+  const char *id, *label;
+  int i = 0;
+
+  g_variant_iter_init (&iter, list);
+  while (g_variant_iter_next (&iter, "(&s&s)", &id, &label))
+    {
+      if (!g_strcmp0 (id, camera->id))
+        {
+          if (order)
+            *order = i;
+          return g_strdup (label);
+        }
+      i++;
+    }
+  if (order)
+    *order = G_MAXINT;
+  return camera->model ? g_ascii_strup (camera->model, -1) : g_strdup (camera->id);
+}
+
+static gint
+compare_lenses (gconstpointer a, gconstpointer b, gpointer data)
+{
+  CamCamera *ca = *(CamCamera *const *) a, *cb = *(CamCamera *const *) b;
+  int oa, ob;
+
+  g_free (camera_label (data, ca, &oa));
+  g_free (camera_label (data, cb, &ob));
+  if (oa != ob)
+    return oa < ob ? -1 : 1;
+  /* the unlisted: the larger sensor first */
+  return (gint64) cb->pixels_w * cb->pixels_h > (gint64) ca->pixels_w * ca->pixels_h ? 1 : -1;
+}
+
+/* the cameras of the facing the lens bar shows, in its order; the one in use is always among them */
+static GPtrArray *
+lens_cameras (CamView *self, CamFacing facing)
+{
+  GPtrArray *list = g_ptr_array_new ();
+
+  for (guint i = 0; i < self->cameras->len; i++)
+    {
+      CamCamera *camera = self->cameras->pdata[i];
+
+      if (camera->facing == facing && (camera == self->camera || !camera_hidden (self, camera)))
+        g_ptr_array_add (list, camera);
+    }
+  g_ptr_array_sort_with_data (list, compare_lenses, self);
+  return list;
+}
+
+static void
+remember_camera (CamView *self)
+{
+  g_settings_set_string (self->settings, "last-camera-facing", facing_name (self->facing));
+  g_settings_set_string (self->settings, "last-camera-id", self->camera ? self->camera->id : "");
+}
+
 static void
 on_lens_clicked (CamLens *lens, CamView *self)
 {
-  /* one camera per facing (cam-devices.h), so the one button is the selected one: a tap resets the zoom */
+  CamCamera *camera = g_object_get_data (G_OBJECT (lens), "camera");
+
+  if (camera && camera != self->camera && self->state == ST_IDLE)
+    {
+      use_camera (self, camera);
+      remember_camera (self);
+      update_controls (self);
+      bind_camera (self);
+      return;
+    }
+  /* the selected lens: a tap resets the zoom */
   smooth_zoom (self, 1);
 }
 
@@ -543,6 +642,7 @@ static void
 update_lenses (CamView *self)
 {
   GtkWidget *child;
+  g_autoptr(GPtrArray) list = NULL;
 
   while ((child = gtk_widget_get_first_child (self->lenses)))
     {
@@ -551,15 +651,136 @@ update_lenses (CamView *self)
     }
   if (!self->camera)
     return;
-  {
-    /* "1×": the main camera, selected */
-    GtkWidget *lens = cam_lens_new ("1×", TRUE);
-    GtkWidget *rot = rotator (self, lens);
+  list = lens_cameras (self, self->camera->facing);
+  for (guint i = 0; i < list->len; i++)
+    {
+      CamCamera *camera = list->pdata[i];
+      /* a facing with one camera has "1×", the main camera */
+      g_autofree char *label = list->len == 1 ? g_strdup ("1×") : camera_label (self, camera, NULL);
+      GtkWidget *lens = cam_lens_new (label, camera == self->camera);
+      GtkWidget *rot = rotator (self, lens);
 
-    cam_rotator_set_angle (CAM_ROTATOR (rot), CAM_COMPENSATION (ui_turn (self)), FALSE);
-    g_signal_connect (lens, "clicked", G_CALLBACK (on_lens_clicked), self);
-    gtk_box_append (GTK_BOX (self->lenses), rot);
-  }
+      g_object_set_data (G_OBJECT (lens), "camera", camera);
+      cam_rotator_set_angle (CAM_ROTATOR (rot), CAM_COMPENSATION (ui_turn (self)), FALSE);
+      g_signal_connect (lens, "clicked", G_CALLBACK (on_lens_clicked), self);
+      gtk_box_append (GTK_BOX (self->lenses), rot);
+    }
+}
+
+/* ---- the tuning sheet ---- */
+
+static char *
+camera_title (CamView *self, CamCamera *camera)
+{
+  g_autofree char *label = camera_label (self, camera, NULL);
+
+  return camera->facing == CAM_FACING_FRONT ? g_strdup (_("Front")) : g_strdup_printf (_("Back %s"), label);
+}
+
+static void
+apply_tuning (CamView *self)
+{
+  CamTone tone = CAM_TONE_NEUTRAL;
+  gboolean stored = self->camera && cam_tone_load (self->settings, self->camera->id, &tone);
+
+  cam_pipeline_set_tone (self->pipeline, stored, tone.gamma, tone.contrast, tone.saturation);
+}
+
+static void
+tune_sync (CamView *self)
+{
+  CamTone tone = CAM_TONE_NEUTRAL;
+  g_autofree char *title = NULL;
+
+  if (!self->tune_open || !self->camera)
+    return;
+  tune_flush (self);
+  cam_tone_load (self->settings, self->camera->id, &tone);
+  title = camera_title (self, self->camera);
+  cam_tune_panel_set (CAM_TUNE_PANEL (self->tune_panel), title, &tone);
+}
+
+static void
+tune_flush (CamView *self)
+{
+  if (!self->tune_save)
+    return;
+  g_clear_handle_id (&self->tune_save, g_source_remove);
+  if (self->tune_id)
+    cam_tone_store (self->settings, self->tune_id, &self->tune_tone);
+}
+
+static gboolean
+on_tune_save (gpointer data)
+{
+  CamView *self = data;
+
+  self->tune_save = 0;
+  if (self->tune_id)
+    cam_tone_store (self->settings, self->tune_id, &self->tune_tone);
+  return G_SOURCE_REMOVE;
+}
+
+static void
+tune_set (CamView *self, const CamTone *tone, gboolean at_once)
+{
+  if (!self->camera)
+    return;
+  cam_pipeline_set_tone (self->pipeline, TRUE, tone->gamma, tone->contrast, tone->saturation);
+  g_free (self->tune_id);
+  self->tune_id = g_strdup (self->camera->id);
+  self->tune_tone = *tone;
+  /* a drag moves a slider many times a second: dconf is written once it settles */
+  g_clear_handle_id (&self->tune_save, g_source_remove);
+  if (at_once)
+    cam_tone_store (self->settings, self->tune_id, &self->tune_tone);
+  else
+    self->tune_save = g_timeout_add (TUNE_SAVE_MS, on_tune_save, self);
+}
+
+static void
+on_tune_changed (CamTunePanel *panel, CamView *self)
+{
+  CamTone tone;
+
+  cam_tune_panel_get (panel, &tone);
+  tune_set (self, &tone, FALSE);
+}
+
+static void
+on_tune_reset (CamTunePanel *panel, CamView *self)
+{
+  CamTone tone = CAM_TONE_NEUTRAL;
+
+  if (!self->camera)
+    return;
+  /* the schema's seed for the camera, else neutral */
+  cam_tone_load_default (self->settings, self->camera->id, &tone);
+  tune_set (self, &tone, TRUE);
+  tune_sync (self);
+}
+
+static void
+tune_show (CamView *self, gboolean show)
+{
+  if (show == self->tune_open)
+    return;
+  self->tune_open = show;
+  gtk_widget_set_visible (self->tune_panel, show);
+  if (show)
+    {
+      slide_pro (self, FALSE);
+      tune_sync (self);
+    }
+  else
+    tune_flush (self);
+  gtk_widget_queue_allocate (GTK_WIDGET (self));
+}
+
+static void
+on_tune_done (CamTunePanel *panel, CamView *self)
+{
+  tune_show (self, FALSE);
 }
 
 /* ---- the pro row (§7) ------------------------------------------------------------------------------------------ */
@@ -660,6 +881,7 @@ update_pro_row (CamView *self)
   gtk_widget_set_visible (self->p_mic.button, video);
   gtk_widget_set_visible (self->p_timer.button, photo || video);
   gtk_widget_set_visible (self->p_grid.button, photo || video);
+  gtk_widget_set_visible (self->p_tune.button, photo || video);
   gtk_widget_set_visible (self->p_settings.button, photo || video);
 
   pro_set (&self->p_aspect, "cam-aspect-ratio-symbolic", self->wide ? "16:9" : "4:3");
@@ -672,6 +894,7 @@ update_pro_row (CamView *self)
            self->mic ? _("MIC ON") : _("MIC OFF"));
   pro_set (&self->p_timer, timer_icon, timer_label);
   pro_set (&self->p_grid, grid_icons[self->grid], grid_labels[self->grid]);
+  pro_set (&self->p_tune, "cam-tune-symbolic", _("TUNE"));
   pro_set (&self->p_settings, "cam-settings-symbolic", _("SETTINGS"));
 
   gtk_widget_set_sensitive (self->p_aspect.button, idle);
@@ -683,6 +906,7 @@ update_pro_row (CamView *self)
   /* the mic: idle, or live while recording a sound track (MIC OFF at the start records none) */
   gtk_widget_set_sensitive (self->p_mic.button, idle ? cam_recorder_can_record_audio () : recording && self->rec_audio);
   gtk_widget_set_sensitive (self->p_timer.button, idle);
+  gtk_widget_set_sensitive (self->p_tune.button, idle);
   gtk_widget_set_sensitive (self->p_settings.button, idle);
 }
 
@@ -780,8 +1004,15 @@ on_settings_closed (CamSettings *page, CamView *self)
 }
 
 static void
+on_tune (NeoPressable *button, CamView *self)
+{
+  tune_show (self, TRUE);
+}
+
+static void
 on_settings (NeoPressable *button, CamView *self)
 {
+  tune_show (self, FALSE);
   slide_pro (self, FALSE);
   self->in_settings = TRUE;
   /* the settings activity has the status bar */
@@ -796,6 +1027,8 @@ on_settings (NeoPressable *button, CamView *self)
 static void
 on_pro (NeoPressable *button, CamView *self)
 {
+  if (!self->pro_open)
+    tune_show (self, FALSE);
   slide_pro (self, !self->pro_open);
 }
 
@@ -993,6 +1226,8 @@ bind_camera (CamView *self)
   apply_zoom (self, 1, FALSE);
   cam_pipeline_set_scanning (self->pipeline, FALSE);
   g_message ("camera: %s (%s) at %d×%d", self->camera->id, facing_name (self->camera->facing), width, height);
+  apply_tuning (self);
+  tune_sync (self);
   cam_pipeline_start (self->pipeline, self->camera->id, width, height);
 }
 
@@ -1048,6 +1283,15 @@ select_camera (CamView *self, CamFacing facing)
 }
 
 static void
+use_camera (CamView *self, CamCamera *camera)
+{
+  self->camera = camera;
+  self->facing = camera->facing;
+  update_lenses (self);
+  update_flash (self);
+}
+
+static void
 on_flip (CamFlip *flip, CamView *self)
 {
   CamFacing next = self->facing;
@@ -1069,7 +1313,7 @@ on_flip (CamFlip *flip, CamView *self)
     return;
   cam_flip_spin (flip);
   select_camera (self, next);
-  g_settings_set_string (self->settings, "last-camera-facing", facing_name (self->facing));
+  remember_camera (self);
   update_controls (self);
   bind_camera (self);
 }
@@ -1089,6 +1333,8 @@ set_mode (CamView *self, CamMode mode, gboolean animate)
       return;
     }
   self->mode = mode;
+  if (mode == CAM_MODE_SCAN)
+    tune_show (self, FALSE);
   g_settings_set_string (self->settings, "last-camera-mode", names[mode]);
   cam_mode_selector_set_mode (CAM_MODE_SELECTOR (self->modes), mode, animate);
   slide_pro (self, FALSE);
@@ -1710,6 +1956,27 @@ place_island (CamView *self, int vf_w, int vf_h)
   gtk_widget_allocate (self->island, w, h, -1, t);
 }
 
+/* over the lower edge of the picture (not of the viewfinder, whose black bands the 4:3 picture leaves) */
+static void
+place_tune (CamView *self, int vf_w, int vf_h)
+{
+  graphene_rect_t picture;
+  int w, h;
+  double x, bottom;
+
+  if (!gtk_widget_get_visible (self->tune_panel))
+    return;
+  cam_viewfinder_get_picture (CAM_VIEWFINDER (self->viewfinder), &picture);
+  if (picture.size.width <= 0)
+    picture = GRAPHENE_RECT_INIT (0, 0, vf_w, vf_h);
+  x = picture.origin.x;
+  bottom = MIN (vf_h, picture.origin.y + picture.size.height);
+  gtk_widget_measure (self->tune_panel, GTK_ORIENTATION_HORIZONTAL, -1, NULL, &w, NULL, NULL);
+  w = MIN (w, (int) picture.size.width - 2 * CAM_TUNE_MARGIN);
+  gtk_widget_measure (self->tune_panel, GTK_ORIENTATION_VERTICAL, w, NULL, &h, NULL, NULL);
+  place (self->tune_panel, x + (picture.size.width - w) / 2.0, bottom - h - CAM_TUNE_MARGIN, w, h);
+}
+
 /* the landscape layout: what the portrait one puts left to right in a bar goes top to bottom in its column, the
  * end buttons the same distances in from the top and the bottom (flash and flip at the top, pro and the gallery at
  * the bottom), the shutter in the middle 16 dp from the preview as it is 16 dp under it upright */
@@ -1733,6 +2000,7 @@ allocate_landscape (CamView *self, int width, int height)
   if (gtk_widget_get_visible (self->zoom_slider))
     place (self->zoom_slider, (vf_w - CAM_ZOOM_SLIDER_W) / 2.0, height - CAM_ZOOM_SLIDER_H, CAM_ZOOM_SLIDER_W,
            CAM_ZOOM_SLIDER_H);
+  place_tune (self, vf_w, height);
   /* the pro row along the preview's bottom, sliding down off it as it hides */
   if (gtk_widget_get_visible (self->pro_row))
     gtk_widget_allocate (self->pro_row, vf_w, (int) ceil (pro_h), -1,
@@ -1797,6 +2065,7 @@ cam_view_size_allocate (GtkWidget *widget, int width, int height, int baseline)
   if (gtk_widget_get_visible (self->zoom_slider))
     place (self->zoom_slider, (width - CAM_ZOOM_SLIDER_W) / 2.0, vf_h - CAM_ZOOM_SLIDER_H, CAM_ZOOM_SLIDER_W,
            CAM_ZOOM_SLIDER_H);
+  place_tune (self, width, vf_h);
   /* the pro row: its bottom on the secondary bar's top, sliding down by its height as it hides */
   if (gtk_widget_get_visible (self->pro_row))
     gtk_widget_allocate (self->pro_row, width, (int) ceil (pro_h), -1,
@@ -1853,6 +2122,7 @@ cam_view_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
   gtk_widget_snapshot_child (widget, self->countdown, snapshot);
   gtk_widget_snapshot_child (widget, self->island, snapshot);
   gtk_widget_snapshot_child (widget, self->zoom_slider, snapshot);
+  gtk_widget_snapshot_child (widget, self->tune_panel, snapshot);
   gtk_widget_snapshot_child (widget, self->pro_row, snapshot);
   if (is_landscape (width, height))
     {
@@ -1939,6 +2209,8 @@ cam_view_dispose (GObject *object)
   g_clear_handle_id (&self->duration_timer, g_source_remove);
   g_clear_handle_id (&self->start_timer, g_source_remove);
   g_clear_handle_id (&self->flash_timer, g_source_remove);
+  tune_flush (self);
+  g_clear_pointer (&self->tune_id, g_free);
   g_clear_pointer (&self->zoom_anim, neo_anim_free);
   g_clear_pointer (&self->pro_anim, neo_anim_free);
   while ((child = gtk_widget_get_first_child (GTK_WIDGET (self))))
@@ -2005,6 +2277,13 @@ build (CamView *self)
   gtk_widget_set_parent (self->zoom_slider, widget);
   g_signal_connect (self->zoom_slider, "changed", G_CALLBACK (on_slider_changed), self);
 
+  self->tune_panel = cam_tune_panel_new ();
+  gtk_widget_set_visible (self->tune_panel, FALSE);
+  gtk_widget_set_parent (self->tune_panel, widget);
+  g_signal_connect (self->tune_panel, "changed", G_CALLBACK (on_tune_changed), self);
+  g_signal_connect (self->tune_panel, "reset", G_CALLBACK (on_tune_reset), self);
+  g_signal_connect (self->tune_panel, "done", G_CALLBACK (on_tune_done), self);
+
   /* the pro row: 16 dp spacers, 96 dp buttons, 8 dp over and under, scrolling sideways without a scrollbar */
   gtk_widget_set_margin_top (row, CAM_PRO_ROW_PAD_V);
   gtk_widget_set_margin_bottom (row, CAM_PRO_ROW_PAD_V);
@@ -2018,6 +2297,7 @@ build (CamView *self)
   pro_button (self, &self->p_mic, row, G_CALLBACK (on_mic));
   pro_button (self, &self->p_timer, row, G_CALLBACK (on_timer));
   pro_button (self, &self->p_grid, row, G_CALLBACK (on_grid));
+  pro_button (self, &self->p_tune, row, G_CALLBACK (on_tune));
   pro_button (self, &self->p_settings, row, G_CALLBACK (on_settings));
   spacer = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
   gtk_widget_set_size_request (spacer, CAM_PRO_ROW_SPACER, -1);
@@ -2092,6 +2372,7 @@ static void
 restore (CamView *self)
 {
   g_autofree char *facing = g_settings_get_string (self->settings, "last-camera-facing");
+  g_autofree char *camera_id = g_settings_get_string (self->settings, "last-camera-id");
   g_autofree char *mode = g_settings_get_string (self->settings, "last-camera-mode");
   g_autofree char *grid = g_settings_get_string (self->settings, "last-grid-mode");
   g_autofree char *aspect = g_settings_get_string (self->settings, "aspect-ratio");
@@ -2111,6 +2392,14 @@ restore (CamView *self)
   self->mode = last;
   select_camera (self, g_str_equal (facing, "front") ? CAM_FACING_FRONT
                        : g_str_equal (facing, "external") ? CAM_FACING_EXTERNAL : CAM_FACING_BACK);
+  /* the lens that was in use, if it is still there and shown */
+  for (guint i = 0; camera_id[0] && i < self->cameras->len; i++)
+    {
+      CamCamera *camera = self->cameras->pdata[i];
+
+      if (!g_strcmp0 (camera->id, camera_id) && !camera_hidden (self, camera))
+        use_camera (self, camera);
+    }
   /* VIDEO without an encoder that can record falls back to PHOTO */
   if ((last == CAM_MODE_VIDEO && cam_encoder_get () && !can_record (self))
       || !cam_mode_selector_is_available (CAM_MODE_SELECTOR (self->modes), last))

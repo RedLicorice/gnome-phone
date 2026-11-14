@@ -38,6 +38,8 @@ struct _CamPipeline {
   guint         first_pending;  /* the generation whose first frame the probe looks out for, 0 none */
   CamFrameFunc  rec_func;
   gpointer      rec_data;
+  gboolean      tone_wanted, tone_applied;   /* the Soft ISP's picture tuning, and whether it was ever sent */
+  double        tone[3];                     /* gamma, contrast, saturation */
 
   /* the worker's own */
   char         *cur_camera;
@@ -107,6 +109,44 @@ static gboolean
 src_has (CamPipeline *self, const char *property)
 {
   return self->src && g_object_class_find_property (G_OBJECT_GET_CLASS (self->src), property);
+}
+
+/* The tuning goes to the live source (the controls are controllable properties: they act on the next requests, the
+ * stream goes on). Without a tuning wanted the properties are left alone, unless one was sent before: they stay on
+ * the element across cameras, so that is when the neutral values go out. */
+static void
+apply_tone (CamPipeline *self)
+{
+  const char *const names[] = { "gamma", "contrast", "saturation" };
+  double values[3] = { 1, 1, 1 };
+  gboolean wanted;
+
+  g_mutex_lock (&self->lock);
+  wanted = self->tone_wanted;
+  if (wanted)
+    memcpy (values, self->tone, sizeof values);
+  if (!wanted && !self->tone_applied)
+    {
+      g_mutex_unlock (&self->lock);
+      return;
+    }
+  self->tone_applied = wanted;
+  g_mutex_unlock (&self->lock);
+  for (int i = 0; i < 3; i++)
+    if (src_has (self, names[i]))
+      g_object_set (self->src, names[i], (float) values[i], NULL);
+}
+
+void
+cam_pipeline_set_tone (CamPipeline *self, gboolean enabled, double gamma, double contrast, double saturation)
+{
+  g_mutex_lock (&self->lock);
+  self->tone_wanted = enabled;
+  self->tone[0] = gamma;
+  self->tone[1] = contrast;
+  self->tone[2] = saturation;
+  g_mutex_unlock (&self->lock);
+  apply_tone (self);
 }
 
 static void
@@ -187,6 +227,7 @@ run_request (gpointer job, gpointer data)
       else
         set_state_wait (self, GST_STATE_READY);
       apply_caps (self, width, height);
+      apply_tone (self);
       /* asked for on every start; what the camera answers (it stays manual without AF) tells has_af */
       if (src_has (self, "af-mode"))
         g_object_set (self->src, "af-mode", AF_MODE_CONTINUOUS, NULL);

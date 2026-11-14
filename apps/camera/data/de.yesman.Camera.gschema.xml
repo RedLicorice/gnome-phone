@@ -8,6 +8,34 @@
       <default>'back'</default>
       <summary>The facing last used: back, front or external</summary>
     </key>
+    <key name="last-camera-id" type="s">
+      <default>''</default>
+      <summary>The libcamera id of the camera last used (empty: the main camera of last-camera-facing)</summary>
+    </key>
+    <!-- not in Aperture: the lens bar of a phone with several back cameras. The labels are the lens bar's order and
+         text (libcamera reports no focal length to compute a zoom ratio from); a camera that is not listed follows
+         them under its sensor's name. The ids are the devicetree paths of the POCO X3 NFC (WirePlumber's
+         60-poco-cameras.conf names the same five). -->
+    <key name="lens-labels" type="a(ss)">
+      <default>[('/base/soc@0/cci@ac4b000/i2c-bus@0/camera@21', '0.5×'),
+                ('/base/soc@0/cci@ac4a000/i2c-bus@0/camera@1a', '1×'),
+                ('/base/soc@0/cci@ac4b000/i2c-bus@0/camera@38', 'Macro'),
+                ('/base/soc@0/cci@ac4a000/i2c-bus@1/camera@10', '1×'),
+                ('/base/soc@0/cci@ac4a000/i2c-bus@1/camera@3c', 'Depth')]</default>
+      <summary>Ordered lens bar labels by libcamera camera id</summary>
+    </key>
+    <key name="hidden-cameras" type="as">
+      <default>['/base/soc@0/cci@ac4a000/i2c-bus@1/camera@3c']</default>
+      <summary>Camera ids left out of the lens bar (the OV02B1B depth sensor is a mono 2 MP helper, not a lens)</summary>
+    </key>
+    <!-- Per camera picture tuning (the viewfinder's tuning sheet), shared with Minerva's eyes (minerva_eyes/camera.py).
+         The Soft ISP's Gamma, Contrast and Saturation controls of libcamerasrc, keyed by libcamera camera id. A camera
+         with no entry is left as libcamera has it. The front camera (S5K3T2) is seeded with what tools/camera found
+         against its washed-out AGC; "Reset" in the sheet returns to this value. -->
+    <key name="tuning" type="a{s(ddd)}">
+      <default>{'/base/soc@0/cci@ac4a000/i2c-bus@1/camera@10': (1.8, 1.3, 1.0)}</default>
+      <summary>Gamma, contrast and saturation per camera id</summary>
+    </key>
     <key name="last-camera-mode" type="s">
       <default>'photo'</default>
       <summary>The mode last used: photo, video or qr</summary>

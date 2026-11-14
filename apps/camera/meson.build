@@ -23,7 +23,7 @@ executable('neo-camera',
            'src/cam-main.c', 'src/cam-window.c', 'src/cam-devices.c', 'src/cam-encoder.c', 'src/cam-pipeline.c',
            'src/cam-sensors.c', 'src/cam-recorder.c', 'src/cam-photo.c', 'src/cam-storage.c', 'src/cam-sounds.c',
            'src/cam-widgets.c', 'src/cam-mode-selector.c', 'src/cam-viewfinder.c', 'src/cam-qr-sheet.c',
-           'src/cam-settings.c', 'src/cam-dialogs.c', resources,
+           'src/cam-settings.c', 'src/cam-dialogs.c', 'src/cam-tune.c', 'src/cam-tone.c', resources,
            dependencies: deps, install: true)
 
 configure_file(input: 'data/de.yesman.Camera.service.in', output: 'de.yesman.Camera.service',
@@ -40,3 +40,8 @@ gnome.post_install(glib_compile_schemas: true, gtk_update_icon_cache: true, upda
 # the QR classifier, without GTK's display
 test('qr-classify', executable('test-qr', 'tests/test-qr.c', 'src/cam-qr-sheet.c',
                                include_directories: 'src', dependencies: deps))
+
+# the per-camera tuning storage, on GSettings' memory backend (compiles the schema itself)
+test('tone', executable('test-tone', 'tests/test-tone.c', 'src/cam-tone.c', include_directories: 'src',
+                        dependencies: deps, build_by_default: false),
+     env: {'CAM_SCHEMA_DIR': meson.current_source_dir() / 'data'})

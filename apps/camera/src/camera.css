@@ -45,6 +45,37 @@ window.neo.cam-window {
   color: #444444;
 }
 
+/* --- the tuning sheet: over the lower viewfinder, black 60 % like the pro row, so the picture shows through */
+.cam-tune {
+  background-color: rgba(0, 0, 0, 0.6);
+  border-radius: 16px;
+  padding: 8px 8px;
+}
+
+.cam-tune-title {
+  font-family: "Droid Sans Mono", "Noto Mono", monospace;
+  font-size: 12px;
+  font-weight: bold;
+  color: #ffffff;
+  margin-bottom: 4px;
+}
+
+.cam-tune-label {
+  font-family: "Droid Sans Mono", "Noto Mono", monospace;
+  font-size: 12px;
+  color: #ffffff;
+}
+
+.cam-tune-button {
+  background: none;
+  border: none;
+  box-shadow: none;
+  color: @neo_secondary;
+  font-weight: bold;
+  min-height: 40px;
+  padding: 0 16px;
+}
+
 /* --- the toast (Android 16's text toast, still:camera-toast-in-use-over-lens): a pill 20 dp from the sides,
  * the app icon 16 dp in, the text after a 10 dp gap */
 .cam-toast {

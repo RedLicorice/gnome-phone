@@ -68,6 +68,12 @@ void          cam_pipeline_set_zoom       (CamPipeline *self, double zoom);
 gboolean      cam_pipeline_has_af         (CamPipeline *self);
 void          cam_pipeline_refocus        (CamPipeline *self);
 
+/* The picture tuning of the camera in use (libcamera's Gamma, Contrast, Saturation), live and kept across restarts and
+ * camera changes. @enabled FALSE: none wanted (the camera stays as libcamera has it, after a tuned one it is
+ * neutral). */
+void          cam_pipeline_set_tone       (CamPipeline *self, gboolean enabled, double gamma, double contrast,
+                                           double saturation);
+
 /* the clock both this pipeline and a recorder run on, and this one's base time (to turn a frame's time into the
  * recorder's) */
 GstClock     *cam_pipeline_get_clock      (CamPipeline *self);

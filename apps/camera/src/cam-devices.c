@@ -192,6 +192,12 @@ cam_camera_pick_size (CamCamera *camera, int aw, int ah, int pixels, int *width,
         continue;
       if ((gint64) w * ah != (gint64) h * aw)
         continue;
+      /* libcamera lists 1400×1050 for every camera, and the soft ISP's GPU debayer then fails ("debayerGPU failed", no
+       * frame, and libcamera asserts when the stream is stopped, taking the app with it); every size it does debayer
+       * has a width that is a multiple of 16. The 1.9 MP sensors of the macro and depth cameras list nothing above
+       * 1400×1050, so they come out at 1152×864. */
+      if (w % 16)
+        continue;
       /* nearest to the target in the ratio of areas, either way */
       double score = fabs (log ((double) w * h / pixels));
       if (score < best_score)

@@ -813,12 +813,26 @@ G_DEFINE_FINAL_TYPE (CamLens, cam_lens, GTK_TYPE_WIDGET)
 
 static guint lens_clicked;
 
+/* the pill's width: the 32 dp circle, wider for a label that does not fit ("Macro") */
+static double
+lens_pill_width (GtkWidget *widget, const char *text)
+{
+  g_autoptr(PangoLayout) layout = make_layout (widget, text, CAM_DP_LENS_TEXT, 800);
+  int w;
+
+  pango_layout_get_pixel_size (layout, &w, NULL);
+  return MAX (CAM_LENS_BUTTON, w + 2 * CAM_LENS_PAD);
+}
+
 static void
 cam_lens_measure (GtkWidget *widget, GtkOrientation orientation, int for_size, int *min, int *nat, int *min_base,
                   int *nat_base)
 {
   /* 32 dp and LensSelectorLayout's 5 px margins: 35⅓, rounded up; the pill is drawn centred at its exact size */
-  *min = *nat = (int) ceil (CAM_LENS_BUTTON + 2 * CAM_LENS_MARGIN);
+  double pill = orientation == GTK_ORIENTATION_HORIZONTAL ? lens_pill_width (widget, CAM_LENS (widget)->text)
+                                                          : CAM_LENS_BUTTON;
+
+  *min = *nat = (int) ceil (pill + 2 * CAM_LENS_MARGIN);
 }
 
 static void
@@ -835,8 +849,10 @@ cam_lens_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
       GskRoundedRect pill;
       GdkRGBA fill = neo_color (NEO_SECONDARY_CONTAINER);
 
-      gsk_rounded_rect_init_from_rect (&pill, &GRAPHENE_RECT_INIT ((w - CAM_LENS_BUTTON) / 2, (h - CAM_LENS_BUTTON) / 2,
-                                                                   CAM_LENS_BUTTON, CAM_LENS_BUTTON),
+      double pw = lens_pill_width (widget, self->text);
+
+      gsk_rounded_rect_init_from_rect (&pill, &GRAPHENE_RECT_INIT ((w - pw) / 2, (h - CAM_LENS_BUTTON) / 2, pw,
+                                                                   CAM_LENS_BUTTON),
                                        CAM_LENS_RADIUS);
       gtk_snapshot_push_rounded_clip (snapshot, &pill);
       gtk_snapshot_append_color (snapshot, &fill, &pill.bounds);
