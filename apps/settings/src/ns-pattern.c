@@ -101,6 +101,11 @@ typedef struct {
   gboolean        fp_claimed;
   gboolean        fp_listening;
   int             fp_misses;
+  gboolean        fp_matched;   /* a finger matched while the PAM check of the secret was running */
+  /* references: the dialog's own (dropped in on_closed) and one per PAM check in flight (check_thread) */
+  int             refs;
+  gboolean        closed;
+  gboolean        checking;
 } PatternDialog;
 
 
@@ -452,7 +457,11 @@ on_fp_status (GDBusConnection *bus, const char *sender, const char *path, const 
     return;
   g_variant_get (params, "(&sb)", &result, &done);
   if (g_str_equal (result, "verify-match")) {
-    finish (pd, TRUE);
+    /* the secret is being checked on a thread that writes to the dialog when it ends: on_checked finishes */
+    if (pd->checking)
+      pd->fp_matched = TRUE;
+    else
+      finish (pd, TRUE);
     return;
   }
   if (g_str_equal (result, "verify-no-match")) {
@@ -660,19 +669,29 @@ check_thread (GTask *task, gpointer source, gpointer data, GCancellable *cancell
 }
 
 
+static void pd_unref (PatternDialog *pd);
+
 static void
 on_checked (GObject *source, GAsyncResult *res, gpointer data)
 {
   PatternDialog *pd = data;
+  gboolean ok = g_task_propagate_boolean (G_TASK (res), NULL);
 
+  pd->checking = FALSE;
+  /* the dialog went away meanwhile (its parent closed): nothing left to write to */
+  if (pd->closed) {
+    pd_unref (pd);
+    return;
+  }
   adw_dialog_set_can_close (pd->dialog, TRUE);
   gtk_widget_set_sensitive (pd->cancel, TRUE);
   gtk_widget_set_sensitive (pd->pad, TRUE);
-  if (g_task_propagate_boolean (G_TASK (res), NULL)) {
+  if (ok || (pd->verify && pd->fp_matched)) {
     if (pd->verify)
       finish (pd, TRUE);
     else
       set_stage (pd, STAGE_DRAW);
+    pd_unref (pd);
     return;
   }
   memset (pd->current, 0, sizeof pd->current);
@@ -682,6 +701,7 @@ on_checked (GObject *source, GAsyncResult *res, gpointer data)
                                                                        : "That is not your current PIN.");
   clear_typed (pd);
   gtk_widget_queue_draw (pd->area);
+  pd_unref (pd);
 }
 
 
@@ -690,6 +710,8 @@ check_current (PatternDialog *pd)
 {
   g_autoptr (GTask) task = g_task_new (NULL, NULL, on_checked, pd);
 
+  pd->refs++;
+  pd->checking = TRUE;
   g_strlcpy (pd->current, pd->current_is_pattern ? pd->seq : typed_text (pd), sizeof pd->current);
   gtk_widget_set_sensitive (pd->next, FALSE);
   gtk_widget_set_sensitive (pd->cancel, FALSE);
@@ -973,16 +995,26 @@ on_cancel (PatternDialog *pd)
 
 
 static void
-on_closed (PatternDialog *pd)
+pd_unref (PatternDialog *pd)
 {
-  fp_stop (pd);
-  if (!pd->done && pd->callback)
-    pd->callback (FALSE, pd->user_data);
+  if (--pd->refs > 0)
+    return;
   g_free (pd->reason);
   memset (pd->current, 0, sizeof pd->current);
   memset (pd->first, 0, sizeof pd->first);
   memset (pd->typed, 0, sizeof pd->typed);
   g_free (pd);
+}
+
+
+static void
+on_closed (PatternDialog *pd)
+{
+  fp_stop (pd);
+  if (!pd->done && pd->callback)
+    pd->callback (FALSE, pd->user_data);
+  pd->done = pd->closed = TRUE;
+  pd_unref (pd);
 }
 
 
@@ -994,6 +1026,7 @@ present (GtkWidget *parent, gboolean pin, gboolean verify, const char *title, co
   GtkWidget *box, *buttons, *toolbar, *header;
   GtkGesture *drag;
 
+  pd->refs = 1;
   pd->callback = callback;
   pd->user_data = user_data;
   pd->pin = pin;
