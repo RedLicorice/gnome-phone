@@ -183,7 +183,7 @@ def main():
 
     l4 = blank()
     cb = corner_bracket()
-    for fx, fy, x, y in ((False, False, 190, 190), (True, False, SW - 190, 190), (False, True, 190, SH - 190),
+    for fx, fy, x, y in ((False, False, 190, 300), (True, False, SW - 190, 300), (False, True, 190, SH - 190),
                          (True, True, SW - 190, SH - 190)):
         place(l4, scaled(cb, 0.85), DEPTHS[4], x, y, w=330, flip_x=fx, flip_y=fy)
     hud(l4)

@@ -103,10 +103,10 @@ export function bodyFamilies() {
     return body ? `${body}, ` : '';
 }
 
-// The Renaissance theme's gilded edge for a surface's St style string (one physical pixel at the phone's scale, a gold
-// hairline); '' in the stock look
+// The Renaissance theme's hairline edge for a surface's St style string (one physical pixel at the phone's scale, a
+// silver hairline: gold is kept for focus and accents); '' in the stock look
 export function gild(alpha = 0.4) {
-    return isRenaissance() ? ` border: ${(1 / SCALE).toFixed(3)}px solid rgba(217, 178, 106, ${alpha});` : '';
+    return isRenaissance() ? ` border: ${(1 / SCALE).toFixed(3)}px solid rgba(176, 181, 194, ${alpha});` : '';
 }
 
 // Data text (the status bar clock) in a mono face in the Renaissance theme; Pango falls to the stock face without it
