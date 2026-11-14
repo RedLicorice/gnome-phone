@@ -83,6 +83,7 @@ window.ns-ren .ns-li-last { border-bottom-left-radius: 14px; border-bottom-right
 window.ns-ren .ns-big, window.ns-ren .ns-huge, window.ns-ren .ns-head, window.ns-ren .ns-big-title {
   font-family: "Michelangelus", "Cinzel", serif; font-weight: 700; color: #f3dc9f; letter-spacing: 0.5px; }
 window.ns-ren .ns-group-title { color: #d9b26a; font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 2px; }
+window.ns-ren .ns-title, window.ns-ren label.title, window.ns-ren row { color: #f0e6d0; }
 window.ns-ren .ns-sub, window.ns-ren .ns-note { color: alpha(#f0e6d0, 0.6); }
 window.ns-ren .ns-card separator, window.ns-ren .ns-li > separator { background-color: alpha(#d9b26a, 0.16); }
 window.ns-ren .ns-accent { color: #d9b26a; }
