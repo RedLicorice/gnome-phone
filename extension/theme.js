@@ -24,6 +24,17 @@ export function isRenaissance() {
     return themeName() === 'renaissance';
 }
 
+// Font chain of a role ('display' | 'body' | 'mono') from the setting, as a Pango family list; '' when the role keeps
+// the stock face. Callers append the stock family, so a missing font never blanks text. Read at shell start like the
+// rest of the shell's theme.
+export function fontChain(role) {
+    try {
+        return settings?.get_string(`font-${role}`).trim() ?? '';
+    } catch (e) {
+        return '';
+    }
+}
+
 // The theme's wallpaper (a Neo parallax set) and icon pack (both if installed) take the place of the ones in use while
 // the look is on; the old ones are kept in previous-wallpaper / previous-icon-pack and put back when the look goes.
 // Follows the setting live.

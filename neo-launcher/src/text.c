@@ -126,6 +126,24 @@ face_get (TextFont *f, int i)
   return fc;
 }
 
+bool
+text_family_installed (const char *family)
+{
+  FcPattern *pat = FcPatternCreate ();
+  FcPatternAddString (pat, FC_FAMILY, (const FcChar8 *) family);
+  FcConfigSubstitute (NULL, pat, FcMatchPattern);
+  FcDefaultSubstitute (pat);
+  FcResult res;
+  FcPattern *match = FcFontMatch (NULL, pat, &res);
+  FcChar8 *got = NULL;
+  bool ok = match && FcPatternGetString (match, FC_FAMILY, 0, &got) == FcResultMatch && got &&
+                g_ascii_strcasecmp ((const char *) got, family) == 0;
+  if (match)
+    FcPatternDestroy (match);
+  FcPatternDestroy (pat);
+  return ok;
+}
+
 TextFont *
 text_font (const char *family, int weight, float px)
 {

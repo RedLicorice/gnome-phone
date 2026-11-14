@@ -3,7 +3,7 @@
 // font families.
 import Cogl from 'gi://Cogl';
 
-import {isRenaissance} from './theme.js';
+import {fontChain, isRenaissance} from './theme.js';
 import {SCALE, sp} from './units.js';
 
 // [r, g, b] 0..255; roles are the dark scheme
@@ -23,6 +23,8 @@ const STOCK = {
     neutral1_500_l4: [11, 13, 14],          // neutral1_500 re-lit to L* 4
     neutral1_500_l6: [17, 21, 22],          // ... to L* 6, fitted to the measured cards and inactive tiles
     notificationScrim: [5, 28, 28],         // fitted: the stack backdrop measures (11, 33, 35)
+    silver: [190, 200, 202],                // stock stand-ins: the Renaissance hairline colours
+    silverDim: [109, 119, 121],
     white: [255, 255, 255],
     black: [0, 0, 0],
 };
@@ -45,6 +47,8 @@ const RENAISSANCE = {
     neutral1_500_l4: [9, 8, 14],
     neutral1_500_l6: [16, 15, 26],
     notificationScrim: [10, 8, 28],
+    silver: [176, 181, 194],                // #B0B5C2 hairline ornament (tools/theme/palette.json)
+    silverDim: [110, 114, 128],             // #6E7280
     white: [255, 255, 255],
     black: [0, 0, 0],
 };
@@ -90,6 +94,15 @@ export const SHADE_PANEL = over([Color.accent1_800, 0.32],
 
 const FAMILY = 'Google Sans Flex';
 
+// The theme's font chain for a role (fallback when the setting is absent), and the body chain as a prefix
+export function chain(role, fallback) {
+    return fontChain(role) || fallback;
+}
+export function bodyFamilies() {
+    const body = fontChain('body');
+    return body ? `${body}, ` : '';
+}
+
 // The Renaissance theme's gilded edge for a surface's St style string (one physical pixel at the phone's scale, a gold
 // hairline); '' in the stock look
 export function gild(alpha = 0.4) {
@@ -98,13 +111,13 @@ export function gild(alpha = 0.4) {
 
 // Data text (the status bar clock) in a mono face in the Renaissance theme; Pango falls to the stock face without it
 export function dataFont(sizeSp, wght) {
-    return isRenaissance() ? `JetBrains Mono, ${FAMILY} ${wght >= 600 ? 'Bold ' : ''}${sp(sizeSp).toFixed(3)}px` : null;
+    return isRenaissance() ? `${chain('mono', 'JetBrains Mono')}, ${FAMILY} ${wght >= 600 ? 'Bold ' : ''}${sp(sizeSp).toFixed(3)}px` : null;
 }
 
 // The Renaissance theme sets big text (clocks) in Michelangelus; where it is not installed Pango falls to the stock face
 const DISPLAY_FROM_SP = 24;
 export function displayFont(sizeSp, wght) {
-    return `Michelangelus, ${FAMILY} ${wght >= 600 ? 'Bold ' : ''}${sp(sizeSp).toFixed(3)}px`;
+    return `${chain('display', 'Michelangelus')}, ${FAMILY} ${wght >= 600 ? 'Bold ' : ''}${sp(sizeSp).toFixed(3)}px`;
 }
 
 // A Pango font description for a Clutter.Text: size in sp, the variable axes as Android's variable-* families set
@@ -112,7 +125,7 @@ export function displayFont(sizeSp, wght) {
 export function font(sizeSp, wght, {wdth = 100, rond = 100, opsz = sizeSp} = {}) {
     if (isRenaissance() && sizeSp >= DISPLAY_FROM_SP)
         return displayFont(sizeSp, wght);
-    return `${FAMILY} ${sp(sizeSp).toFixed(3)}px @wght=${wght},wdth=${wdth},ROND=${rond},opsz=${opsz}`;
+    return `${isRenaissance() ? bodyFamilies() : ''}${FAMILY} ${sp(sizeSp).toFixed(3)}px @wght=${wght},wdth=${wdth},ROND=${rond},opsz=${opsz}`;
 }
 
 // The M3 type scale (sp, weight) of the roles SystemUI uses; *Emphasized are the variable-*-emphasized families

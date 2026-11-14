@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <json-glib/json-glib.h>
 #include <math.h>
+#include <pango/pangocairo.h>
 #include <sys/utsname.h>
 #include <unistd.h>
 #include <xf86drm.h>
@@ -617,6 +618,60 @@ timeout_picked (GtkWidget *row, guint i, gpointer session)
   g_settings_set_uint (session, "idle-delay", timeouts[i]);
 }
 
+static int
+name_cmp (gconstpointer a, gconstpointer b)
+{
+  return g_ascii_strcasecmp (a, b);
+}
+
+/* A font role of the theme: "Theme default" (the schema's chain), every installed family, and the current chain when it
+ * is a custom one set by hand. The picked family is written alone; libneo and the shell append the stock fallback. The
+ * lists belong to the row (the choice keeps pointers), so they are leaked with the page: a few kB. */
+static void
+font_row (GtkWidget *g, GSettings *look, const char *title, const char *key, gboolean can_default)
+{
+  GSettingsSchema *schema = NULL;
+  g_object_get (look, "settings-schema", &schema, NULL);
+  GSettingsSchemaKey *k = g_settings_schema_get_key (schema, key);
+  GVariant *def = g_settings_schema_key_get_default_value (k);
+  g_autofree char *current = g_settings_get_string (look, key);
+
+  PangoFontMap *map = pango_cairo_font_map_get_default ();
+  PangoFontFamily **fams;
+  int n;
+  pango_font_map_list_families (map, &fams, &n);
+  GPtrArray *names = g_ptr_array_new ();
+  for (int i = 0; i < n; i++)
+    g_ptr_array_add (names, (gpointer) pango_font_family_get_name (fams[i]));
+  g_ptr_array_sort_values (names, name_cmp);
+
+  GPtrArray *values = g_ptr_array_new (), *labels = g_ptr_array_new ();
+  g_ptr_array_add (values, g_variant_dup_string (def, NULL));
+  g_ptr_array_add (labels, g_strdup (can_default ? "Theme default" : "Stock face"));
+  gboolean found = !g_strcmp0 (current, values->pdata[0]);
+  for (guint i = 0; i < names->len; i++) {
+    if (!*(char *) names->pdata[i] || !g_strcmp0 (names->pdata[i], "Sans") || !g_strcmp0 (names->pdata[i], "Serif"))
+      continue;
+    g_ptr_array_add (values, g_strdup (names->pdata[i]));
+    g_ptr_array_add (labels, g_strdup (names->pdata[i]));
+    if (!g_strcmp0 (current, names->pdata[i]))
+      found = TRUE;
+  }
+  if (!found) {
+    g_ptr_array_add (values, g_strdup (current));
+    g_ptr_array_add (labels, g_strdup (*current ? current : "Stock face"));
+  }
+  g_ptr_array_add (values, NULL);
+  g_ptr_array_add (labels, NULL);
+  ns_row_choice (g, title, look, key, (const char *const *) values->pdata, (const char *const *) labels->pdata);
+
+  g_free (fams);
+  g_ptr_array_free (names, TRUE);
+  g_variant_unref (def);
+  g_settings_schema_key_unref (k);
+  g_settings_schema_unref (schema);
+}
+
 void
 ns_page_display (GtkWidget *row, gpointer data)
 {
@@ -630,6 +685,14 @@ ns_page_display (GtkWidget *row, gpointer data)
     static const char *const looks[] = { "default", "renaissance", NULL };
     static const char *const look_labels[] = { "Stock", "Cyberpunk Renaissance", NULL };
     ns_row_choice (g, "Look", look, "name", looks, look_labels);
+    GSettingsSchema *schema = NULL;
+    g_object_get (look, "settings-schema", &schema, NULL);
+    if (g_settings_schema_has_key (schema, "font-display")) {
+      font_row (g, look, "Display font", "font-display", TRUE);
+      font_row (g, look, "Body font", "font-body", FALSE);
+      font_row (g, look, "Mono font", "font-mono", TRUE);
+    }
+    g_settings_schema_unref (schema);
   }
   dark_row (g, iface);
   GSettings *color = ns_page_settings (page, "org.gnome.settings-daemon.plugins.color");

@@ -111,7 +111,27 @@ home_layout (void)
   H.page = CLAMP (H.page, 0, n_pages () - 1);
   H.scroll = H.page * H.pitch;
   if (!H.time_font) {
-    H.time_font = text_font_axes ("Google Sans Flex", 600, dp (CLOCK_TIME_DP), "opsz=144,wdth=86");
+    /* the optional Renaissance look (setting de.yesman.GnomePhone.Theme name) sets the clock in the first installed
+     * family of the font-display chain (any font installed with tools/phone/install-fonts.sh); read when the launcher
+     * starts. Without the look, or with none of the chain installed, the stock face. */
+    g_autofree char *family = NULL;
+    g_autoptr (GSettingsSchema) schema = g_settings_schema_source_lookup (g_settings_schema_source_get_default (),
+                                                                         "de.yesman.GnomePhone.Theme", TRUE);
+    if (schema) {
+      g_autoptr (GSettings) theme = g_settings_new_full (schema, NULL, NULL);
+      g_autofree char *name = g_settings_get_string (theme, "name");
+      if (g_strcmp0 (name, "renaissance") == 0 && g_settings_schema_has_key (schema, "font-display")) {
+        g_autofree char *chain = g_settings_get_string (theme, "font-display");
+        g_auto (GStrv) names = g_strsplit (chain, ",", -1);
+        for (int i = 0; names[i] && !family; i++) {
+          g_strstrip (names[i]);
+          if (*names[i] && text_family_installed (names[i]))
+            family = g_strdup (names[i]);
+        }
+      }
+    }
+    H.time_font = family ? text_font (family, 700, dp (CLOCK_TIME_DP))
+                         : text_font_axes ("Google Sans Flex", 600, dp (CLOCK_TIME_DP), "opsz=144,wdth=86");
     H.date_font = text_font_axes ("Google Sans Flex", 700, dp (CLOCK_DATE_DP), "opsz=18,ROND=100");
   }
   home_clock_tick ();

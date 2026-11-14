@@ -3,7 +3,7 @@
  *
  * Michelangelus has no distribution licence: it is installed on the device from the owner's own copy, never shipped
  * here. Where it is absent the chain falls to Cinzel, then to the stock face, so the theme still reads. Nothing in
- * this file animates: idle costs no CPU or GPU. Gold hairlines frame surfaces (a gilded edge); cyan is only an
+ * this file animates: idle costs no CPU or GPU. Silver hairlines (1px) are the ornament; gold is for focus and accents only; cyan is only an
  * edge light on focus. */
 
 @define-color neo_gold #d9b26a;
@@ -11,16 +11,18 @@
 @define-color neo_cyan #38e8ff;
 @define-color neo_magenta #ff3bd4;
 @define-color neo_lapis #23418f;
+@define-color neo_silver #b0b5c2;       /* tools/theme/palette.json is canonical */
+@define-color neo_silver_dim #6e7280;
 @define-color neo_terracotta #e0936f;
 
-/* --- type: Michelangelus for titles, the stock sans for reading */
+/* --- type: the families come from the settings font-display / font-body / font-mono (neo-style.c writes them
+ * into a sheet after this one); only weights and colours are here */
 
 .neo-display-large,
 .neo-headline-large,
 .neo-title-large,
 .neo-app-bar-title,
 .neo-dialog-title {
-  font-family: "Michelangelus", "Cinzel", "Neo Roboto", serif;
   font-weight: 700;
   letter-spacing: 0.5px;
   color: @neo_gold_hi;
@@ -31,48 +33,46 @@
 
 /* mono for data (numbers, codes, times in lists) wherever an app marks them tabular */
 .neo-tabular {
-  font-family: "JetBrains Mono", "Share Tech Mono", monospace;
   font-weight: 500;
 }
 
-/* --- gilded edges */
+/* --- hairlines: fine silver line-work (engraving), gold only where something is active */
 
 .neo-app-bar {
-  border-bottom: 1px solid alpha(@neo_gold, 0.45);
-  box-shadow: 0 1px 10px alpha(@neo_cyan, 0.10);
+  border-bottom: 1px solid alpha(@neo_silver, 0.30);
 }
 
 .neo-nav-bar {
-  border-top: 1px solid alpha(@neo_gold, 0.45);
-  box-shadow: 0 -1px 10px alpha(@neo_cyan, 0.10);
+  border-top: 1px solid alpha(@neo_silver, 0.30);
 }
 
 .neo-card {
-  border-radius: 12px;
-  box-shadow: inset 0 0 0 1px alpha(@neo_gold, 0.30);
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px alpha(@neo_silver, 0.22);
 }
 
+/* a dialog: hairline, a gap, a second hairline (an engraved double rule) */
 .neo-dialog {
-  border-radius: 14px;
-  box-shadow: inset 0 0 0 1px alpha(@neo_gold, 0.65), inset 0 0 0 4px @neo_surface_container_highest,
-              inset 0 0 0 5px alpha(@neo_gold, 0.25), 0 0 24px alpha(@neo_cyan, 0.14);
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px alpha(@neo_silver, 0.55), inset 0 0 0 4px @neo_surface_container_highest,
+              inset 0 0 0 5px alpha(@neo_silver, 0.20);
 }
 
-.neo-dialog.flush { box-shadow: inset 0 0 0 1px alpha(@neo_gold, 0.45); }
+.neo-dialog.flush { box-shadow: inset 0 0 0 1px alpha(@neo_silver, 0.40); }
 
 .neo-snackbar {
   border-radius: 6px;
-  box-shadow: inset 0 0 0 1px alpha(@neo_gold, 0.45), 0 0 12px alpha(@neo_cyan, 0.12);
+  box-shadow: inset 0 0 0 1px alpha(@neo_silver, 0.40);
 }
 
 .neo-nav-indicator {
   border-radius: 8px;
-  box-shadow: inset 0 0 0 1px alpha(@neo_gold, 0.55);
+  box-shadow: inset 0 0 0 1px alpha(@neo_gold, 0.60);
 }
 
 .neo-scrim { background-color: rgba(4, 3, 10, 0.72); }
 
-/* --- text buttons and fields: gold, with a neon edge on focus */
+/* --- text buttons and fields: gold, with a neon edge on focus (the only glow left) */
 
 .neo-text-button { color: @neo_gold; }
 
