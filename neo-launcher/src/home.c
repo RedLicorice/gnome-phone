@@ -111,18 +111,7 @@ home_layout (void)
   H.page = CLAMP (H.page, 0, n_pages () - 1);
   H.scroll = H.page * H.pitch;
   if (!H.time_font) {
-    /* the optional Renaissance look (setting de.yesman.GnomePhone.Theme name) sets the clock in Michelangelus, where
-     * that font is installed; read when the launcher starts */
-    g_autoptr (GSettingsSchema) schema = g_settings_schema_source_lookup (g_settings_schema_source_get_default (),
-                                                                         "de.yesman.GnomePhone.Theme", TRUE);
-    gboolean ren = FALSE;
-    if (schema) {
-      g_autoptr (GSettings) theme = g_settings_new_full (schema, NULL, NULL);
-      g_autofree char *name = g_settings_get_string (theme, "name");
-      ren = g_strcmp0 (name, "renaissance") == 0 && text_family_installed ("Michelangelus");
-    }
-    H.time_font = ren ? text_font ("Michelangelus", 700, dp (CLOCK_TIME_DP))
-                      : text_font_axes ("Google Sans Flex", 600, dp (CLOCK_TIME_DP), "opsz=144,wdth=86");
+    H.time_font = text_font_axes ("Google Sans Flex", 600, dp (CLOCK_TIME_DP), "opsz=144,wdth=86");
     H.date_font = text_font_axes ("Google Sans Flex", 700, dp (CLOCK_DATE_DP), "opsz=18,ROND=100");
   }
   home_clock_tick ();
