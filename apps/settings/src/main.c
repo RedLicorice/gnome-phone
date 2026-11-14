@@ -292,7 +292,8 @@ static const struct {
   { "display", ns_page_display }, { "displays", ns_page_display }, { "compositor", ns_page_display },
   { "night-light", ns_page_night_light }, { "nightlight", ns_page_night_light },
   { "lockscreen", ns_page_lock_screen }, { "lock-screen", ns_page_lock_screen }, { "screen-lock", ns_page_lock_screen },
-  { "keyboard", ns_page_keyboard }, { "osk", ns_page_keyboard }, { "mouse", ns_page_mouse },
+  { "keyboard", ns_page_keyboard }, { "osk", ns_page_keyboard }, { "touch-keyboard", ns_page_touch_keyboard },
+  { "mouse", ns_page_mouse },
   /* "privacy" comes from the location tile only */
   { "privacy", ns_page_location }, { "location", ns_page_location },
   { "online-accounts", ns_page_accounts }, { "accounts", ns_page_accounts },

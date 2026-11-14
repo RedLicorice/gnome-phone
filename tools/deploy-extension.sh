@@ -15,6 +15,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 : "${PHONE_HOST:?set PHONE_HOST in .env}" "${PHONE_USER:?set PHONE_USER in .env}" "${PHONE_PASSWORD:?set PHONE_PASSWORD in .env}"
 : "${PHONE_EXT_DIR:=/usr/share/gnome-shell/extensions/gnome-phone@yesman.de}"
 : "${PHONE_SESSION_SERVICE:=gdm}"
+: "${PHONE_SCHEMA_DIR:=/usr/share/glib-2.0/schemas}"
 
 export PHONE_PASSWORD DEPLOY_ASKPASS=1 SSH_ASKPASS="$root/tools/deploy-extension.sh" SSH_ASKPASS_REQUIRE=force DISPLAY=${DISPLAY:-x}
 remote() { setsid -w ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 "$PHONE_USER@$PHONE_HOST" "$@"; }
@@ -28,6 +29,12 @@ tar -C "$root/extension" --exclude=meson.build -cf - . | remote "rm -rf $stage &
 backup=/home/$PHONE_USER/.cache/gnome-phone-backup-$stamp
 echo "== installing into $PHONE_EXT_DIR (backup: $backup)"
 remote "sudo -S -p '' sh -ec 'cp -a $PHONE_EXT_DIR $backup && cp -a $stage/. $PHONE_EXT_DIR/ && chown -R root:root $PHONE_EXT_DIR'; rm -rf $stage" <<<"$PHONE_PASSWORD"
+
+# the extension's GSettings schemas go where Neo Settings finds them too (the package installs them there)
+if compgen -G "$root/extension/schemas/*.gschema.xml" >/dev/null; then
+    echo "== installing the extension's schemas into $PHONE_SCHEMA_DIR"
+    remote "sudo -S -p '' sh -ec 'cp $PHONE_EXT_DIR/schemas/*.gschema.xml $PHONE_SCHEMA_DIR/ && glib-compile-schemas $PHONE_SCHEMA_DIR'" <<<"$PHONE_PASSWORD"
+fi
 
 if [ "${1:-}" = --no-restart ]; then echo "== files in place, not restarting"; exit 0; fi
 

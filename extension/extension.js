@@ -19,6 +19,7 @@ import {Keyguard} from './keyguard.js';
 import {NoWindowMipmaps} from './mipmaps.js';
 import {AndroidKeyboard} from './osk.js';
 import {TouchFocusKeyboard} from './oskfocus.js';
+import {TouchKeyboard} from './hkeyboard.js';
 import {overWindows} from './scanout.js';
 import {Power} from './power.js';
 import {PowerMenu} from './powermenu.js';
@@ -54,6 +55,13 @@ export default class GnomePhoneExtension extends Extension {
         } catch (e) {
             logError(e, 'gnome-phone: the keyboard for a tapped text field');
             this._touchFocusKeyboard = null;
+        }
+        // Hacker's Keyboard's full layout and behaviour on the on-screen keyboard; without it the shell's own keys
+        try {
+            this._touchKeyboard = new TouchKeyboard();
+        } catch (e) {
+            logError(e, 'gnome-phone: the touch keyboard');
+            this._touchKeyboard = null;
         }
 
         // docked to a display: GNOME's own desktop there, and none of the phone's UI (dock.js)
@@ -175,6 +183,8 @@ export default class GnomePhoneExtension extends Extension {
         this._keptThroughLock = false;
         this._androidKeyboard?.destroy();
         this._androidKeyboard = null;
+        this._touchKeyboard?.destroy();
+        this._touchKeyboard = null;
         this._touchFocusKeyboard?.destroy();
         this._touchFocusKeyboard = null;
         this._desktop?.destroy();

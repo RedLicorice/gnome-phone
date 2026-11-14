@@ -407,6 +407,71 @@ ns_page_keyboard (GtkWidget *row, gpointer data)
                    "screen-keyboard-enabled");
     ns_note (c, "Typing on the touchscreen opens the on-screen keyboard either way.");
   }
+  GtkWidget *g = ns_group (c, NULL);
+  ns_row_on_activate (ns_row (g, NULL, NULL, "Touch keyboard", "Size • Look • Typing • Gestures"),
+                      ns_page_touch_keyboard, NULL);
   layouts_rows (page, c);
+  ns_push (page);
+}
+
+/* an integer key over a wide range as a slider that shows its value */
+static void
+int_slider (GtkWidget *g, const char *title, GSettings *s, const char *key, int lo, int hi, int step)
+{
+  GtkWidget *scale;
+  ns_row_scale (g, title, NULL, lo, hi, step, &scale);
+  gtk_scale_set_draw_value (GTK_SCALE (scale), TRUE);
+  gtk_scale_set_digits (GTK_SCALE (scale), 0);
+  gtk_scale_set_value_pos (GTK_SCALE (scale), GTK_POS_RIGHT);
+  g_settings_bind (s, key, gtk_range_get_adjustment (GTK_RANGE (scale)), "value", G_SETTINGS_BIND_DEFAULT);
+}
+
+/* The touch keyboard of the gnome-phone extension: its schema comes with the extension package. */
+void
+ns_page_touch_keyboard (GtkWidget *row, gpointer data)
+{
+  static const char *const styles[] = { "dark", "light", "black", "material", NULL };
+  static const char *const style_labels[] = { "Dark", "Light", "Black", "Material", NULL };
+  static const char *const swipes[] = { "none", "close", "extension", "settings", "height-up", "height-down",
+                                        "lang-prev", "lang-next", "emoji", NULL };
+  static const char *const swipe_labels[] = { "Nothing", "Close keyboard", "Function key row", "Settings", "Taller",
+                                              "Shorter", "Previous language", "Next language", "Emoji", NULL };
+  GtkWidget *c;
+  AdwNavigationPage *page = ns_page_new ("Touch keyboard", &c);
+  GSettings *s = ns_page_settings (page, "de.yesman.GnomePhone.Keyboard");
+  if (!s) {
+    ns_note (c, "The touch keyboard is not installed");
+    ns_push (page);
+    return;
+  }
+  GtkWidget *g = ns_group (c, NULL);
+  ns_row_switch (g, "Use the touch keyboard", NULL, s, "enabled");
+  g = ns_group (c, "Size");
+  int_slider (g, "Height, portrait (%)", s, "height-portrait", 15, 75, 1);
+  int_slider (g, "Height, landscape (%)", s, "height-landscape", 15, 75, 1);
+  int_slider (g, "Number row height (%)", s, "top-row-scale", 50, 100, 5);
+  ns_row_switch (g, "Function key row", NULL, s, "extension-row");
+  int_slider (g, "Bottom padding (px)", s, "bottom-padding", 0, 48, 1);
+  g = ns_group (c, "Look");
+  ns_row_choice (g, "Style", s, "style", styles, style_labels);
+  ns_row_spin (g, "Key gap (px)", s, "key-gap", 0, 12);
+  ns_row_spin (g, "Key radius (px)", s, "key-radius", 0, 24);
+  ns_row_switch (g, "Raised keys", NULL, s, "key-borders");
+  int_slider (g, "Label size (%)", s, "label-scale", 50, 200, 5);
+  g = ns_group (c, "Typing");
+  ns_row_switch (g, "Key preview", NULL, s, "key-preview");
+  int_slider (g, "Long press (ms)", s, "long-press-ms", 100, 2000, 50);
+  int_slider (g, "Repeat delay (ms)", s, "repeat-delay-ms", 100, 1000, 50);
+  int_slider (g, "Repeat interval (ms)", s, "repeat-interval-ms", 20, 200, 10);
+  ns_row_switch (g, "Vibrate on keypress", NULL, s, "haptics");
+  int_slider (g, "Vibration (ms)", s, "haptic-ms", 5, 100, 1);
+  ns_row_spin (g, "Touch offset (px)", s, "touch-offset", 0, 20);
+  ns_row_spin (g, "Hysteresis (px)", s, "hysteresis", 0, 30);
+  g = ns_group (c, "Gestures");
+  ns_row_choice (g, "Swipe up", s, "swipe-up", swipes, swipe_labels);
+  ns_row_choice (g, "Swipe down", s, "swipe-down", swipes, swipe_labels);
+  ns_row_choice (g, "Swipe left", s, "swipe-left", swipes, swipe_labels);
+  ns_row_choice (g, "Swipe right", s, "swipe-right", swipes, swipe_labels);
+  ns_row_switch (g, "Slide on space moves the cursor", NULL, s, "space-cursor");
   ns_push (page);
 }

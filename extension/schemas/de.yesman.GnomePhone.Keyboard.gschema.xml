@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The touch keyboard (hkeyboard.js): Hacker's Keyboard's full layout and behaviour on GNOME Shell's on-screen
+     keyboard. Neo Settings' "Touch keyboard" page edits these keys; the shell follows them live. Ranges and defaults
+     follow Hacker's Keyboard (res/xml/prefs*.xml) where it has the setting. -->
+<schemalist>
+  <enum id="de.yesman.GnomePhone.Keyboard.Style">
+    <value nick="dark" value="0"/>
+    <value nick="light" value="1"/>
+    <value nick="black" value="2"/>
+    <value nick="material" value="3"/>
+  </enum>
+  <enum id="de.yesman.GnomePhone.Keyboard.SwipeAction">
+    <value nick="none" value="0"/>
+    <value nick="close" value="1"/>
+    <value nick="extension" value="2"/>
+    <value nick="settings" value="3"/>
+    <value nick="height-up" value="4"/>
+    <value nick="height-down" value="5"/>
+    <value nick="lang-prev" value="6"/>
+    <value nick="lang-next" value="7"/>
+    <value nick="emoji" value="8"/>
+  </enum>
+
+  <schema id="de.yesman.GnomePhone.Keyboard" path="/de/yesman/GnomePhone/keyboard/">
+    <key name="enabled" type="b">
+      <default>true</default>
+      <summary>Use the touch keyboard</summary>
+      <description>Off: GNOME Shell's own on-screen keyboard.</description>
+    </key>
+
+    <!-- size and layout -->
+    <key name="height-portrait" type="i">
+      <range min="15" max="75"/>
+      <default>35</default>
+      <summary>Keyboard height in portrait, percent of the screen height</summary>
+    </key>
+    <key name="height-landscape" type="i">
+      <range min="15" max="75"/>
+      <default>55</default>
+      <summary>Keyboard height in landscape, percent of the screen height</summary>
+    </key>
+    <key name="top-row-scale" type="i">
+      <range min="50" max="100"/>
+      <default>100</default>
+      <summary>Height of the number row, percent of a row</summary>
+    </key>
+    <key name="extension-row" type="b">
+      <default>false</default>
+      <summary>Show the F1-F12 row above the number row</summary>
+    </key>
+    <key name="bottom-padding" type="i">
+      <range min="0" max="48"/>
+      <default>0</default>
+      <summary>Empty space under the keys, pixels</summary>
+    </key>
+
+    <!-- look -->
+    <key name="style" enum="de.yesman.GnomePhone.Keyboard.Style">
+      <default>'dark'</default>
+      <summary>Colors of the keys</summary>
+    </key>
+    <key name="key-gap" type="i">
+      <range min="0" max="12"/>
+      <default>3</default>
+      <summary>Space between keys, pixels (taps in it still hit the key)</summary>
+    </key>
+    <key name="key-radius" type="i">
+      <range min="0" max="24"/>
+      <default>6</default>
+      <summary>Corner radius of the keys, pixels</summary>
+    </key>
+    <key name="key-borders" type="b">
+      <default>true</default>
+      <summary>Draw the keys as raised buttons; off: flat labels</summary>
+    </key>
+    <key name="label-scale" type="i">
+      <range min="50" max="200"/>
+      <default>100</default>
+      <summary>Size of the key labels, percent</summary>
+    </key>
+
+    <!-- feel -->
+    <key name="key-preview" type="b">
+      <default>true</default>
+      <summary>Show the pressed key enlarged above the finger</summary>
+    </key>
+    <key name="long-press-ms" type="i">
+      <range min="100" max="2000"/>
+      <default>400</default>
+      <summary>Long press delay for the alternate characters, milliseconds</summary>
+    </key>
+    <key name="repeat-delay-ms" type="i">
+      <range min="100" max="1000"/>
+      <default>400</default>
+      <summary>Hold time before a repeatable key repeats, milliseconds</summary>
+    </key>
+    <key name="repeat-interval-ms" type="i">
+      <range min="20" max="200"/>
+      <default>50</default>
+      <summary>Interval of the key repeat, milliseconds</summary>
+    </key>
+    <key name="haptics" type="b">
+      <default>true</default>
+      <summary>Vibrate on key press</summary>
+    </key>
+    <key name="haptic-ms" type="i">
+      <range min="5" max="100"/>
+      <default>12</default>
+      <summary>Vibration length, milliseconds</summary>
+    </key>
+    <key name="touch-offset" type="i">
+      <range min="0" max="20"/>
+      <default>5</default>
+      <summary>Move touches up by this many pixels (fingers land below the key they aim at)</summary>
+    </key>
+    <key name="hysteresis" type="i">
+      <range min="0" max="30"/>
+      <default>8</default>
+      <summary>A sliding finger leaves its key only this many pixels past the edge</summary>
+    </key>
+
+    <!-- gestures -->
+    <key name="swipe-up" enum="de.yesman.GnomePhone.Keyboard.SwipeAction">
+      <default>'extension'</default>
+      <summary>Swipe up over the keyboard</summary>
+    </key>
+    <key name="swipe-down" enum="de.yesman.GnomePhone.Keyboard.SwipeAction">
+      <default>'close'</default>
+      <summary>Swipe down over the keyboard</summary>
+    </key>
+    <key name="swipe-left" enum="de.yesman.GnomePhone.Keyboard.SwipeAction">
+      <default>'none'</default>
+      <summary>Swipe left over the keyboard</summary>
+    </key>
+    <key name="swipe-right" enum="de.yesman.GnomePhone.Keyboard.SwipeAction">
+      <default>'none'</default>
+      <summary>Swipe right over the keyboard</summary>
+    </key>
+    <key name="space-cursor" type="b">
+      <default>true</default>
+      <summary>Slide along the space bar to move the cursor</summary>
+    </key>
+  </schema>
+</schemalist>

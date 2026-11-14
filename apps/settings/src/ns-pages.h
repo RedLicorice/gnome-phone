@@ -37,6 +37,7 @@ void ns_page_app (const char *id);
 /* ns-shell.c: the lock screen (gnome-phone's keyguard), the on-screen keyboard (GNOME Shell's) */
 void ns_page_lock_screen (GtkWidget *row, gpointer data);
 void ns_page_keyboard (GtkWidget *row, gpointer data);
+void ns_page_touch_keyboard (GtkWidget *row, gpointer data);
 
 /* ns-privacy.c */
 void ns_page_privacy (GtkWidget *row, gpointer data);
