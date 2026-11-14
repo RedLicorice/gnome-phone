@@ -109,8 +109,8 @@ export class StackModel {
 
     // ---- windows -----------------------------------------------------------------------------------------------
 
-    // A new task window of app: the owner who asked for it, else the user. parent: the window it came from when
-    // the shell knows (the one in front when it appeared); a claim's own "from" wins.
+    // A new task window of app: the owner who asked for it, else the user. parent: the window a user's window came
+    // from when the shell knows (the one in front when it appeared); a claim's own "from" replaces it.
     assign(winId, app, parent = 0) {
         const now = this._now();
         this._claims = this._claims.filter(c => c.until > now);
@@ -119,7 +119,9 @@ export class StackModel {
         const owner = claim ? claim.owner : USER;
         this._owner.set(winId, owner);
         this._app.set(winId, app);
-        const from = claim?.from || parent;
+        // an agent's window comes from the window it named, or from none: the window that happens to be in front
+        // is no sign of where the agent's app came from
+        const from = claim ? claim.from : parent;
         if (from && from !== winId && this._owner.has(from))
             this._edge('opened_from', from, winId, 1);
         return owner;

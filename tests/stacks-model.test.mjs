@@ -196,7 +196,10 @@ test('graph: opened-from by the claim or by the front window, switches counted, 
     model.claim(M, 'a.desktop', {from: 2});
     assert.equal(model.assign(3, 'a.desktop', 1), 'minerva');     // the claim's from wins over the front window
     model.claim(B, 'b.desktop');
-    model.assign(4, 'b.desktop', 3);                               // bob's, came from minerva's
+    model.assign(4, 'b.desktop', 3);                               // bob's: the front window is no sign of where from
+    assert.equal(model.graph(C).edges.some(e => e.to === 4), false);
+    model.claim(B, 'c.desktop', {from: 4});
+    model.assign(5, 'c.desktop');                                  // bob's, from his own first
     model.switched(1, 2);
     model.switched(1, 2);
     model.switched(2, 2);                                          // not a move
@@ -207,12 +210,12 @@ test('graph: opened-from by the claim or by the front window, switches counted, 
         {kind: 'opened_from', from: 1, to: 2, n: 1},
         {kind: 'opened_from', from: 2, to: 3, n: 1},
         {kind: 'switched', from: 1, to: 2, n: 2}]);
-    const b = model.graph(B);                                      // bob sees only himself: no edge
-    assert.deepEqual(b.nodes.map(n => n.id), [4]);
-    assert.deepEqual(b.edges, []);
+    const b = model.graph(B);                                      // bob sees only himself: the edge between his own
+    assert.deepEqual(b.nodes.map(n => n.id), [4, 5]);
+    assert.deepEqual(b.edges, [{kind: 'opened_from', from: 4, to: 5, n: 1}]);
     assert.equal(model.graph(C).edges.length, 4);
     model.release(2);
-    assert.deepEqual(model.graph(C).edges, [{kind: 'opened_from', from: 3, to: 4, n: 1}]);
+    assert.deepEqual(model.graph(C).edges, [{kind: 'opened_from', from: 4, to: 5, n: 1}]);
 });
 
 test('graph: a claim may only name a window the agent can see; locked, the user\'s windows are hidden', () => {
