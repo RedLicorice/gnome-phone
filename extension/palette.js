@@ -30,7 +30,7 @@ const STOCK = {
 };
 
 // The optional Renaissance look ("Cyberpunk meets Italian Renaissance", theme.js): the same roles, OLED black with a
-// lapis cast, gold leaf for primary, parchment text, neon cyan as the electric edge. Mirrors libneo's palette.
+// lapis cast, gold leaf for primary, parchment text, amber (the camera eye) as the only warm edge light. Mirrors libneo's palette.
 const RENAISSANCE = {
     primary: [217, 178, 106],               // gold leaf #D9B26A
     onPrimary: [42, 29, 4],
@@ -41,7 +41,7 @@ const RENAISSANCE = {
     surfaceContainerHighest: [33, 31, 49],
     onSurface: [240, 230, 208],             // parchment
     onSurfaceVariant: [189, 178, 153],
-    tertiary: [56, 232, 255],               // neon cyan
+    tertiary: [255, 159, 46],                // amber, the Kiroshi eye
     accent1_100: [243, 220, 159],           // light gold
     accent1_800: [18, 26, 66],              // lapis night
     neutral1_500_l4: [9, 8, 14],

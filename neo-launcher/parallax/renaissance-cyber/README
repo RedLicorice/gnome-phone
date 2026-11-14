@@ -1,11 +1,12 @@
 renaissance-cyber: a parallax set for the Neo launcher, the wallpaper of the optional Renaissance look ("Cyberpunk
-meets Italian Renaissance"). Original procedural art, drawn by tools/parallax-renaissance/build_renaissance.py; no
-third-party material.
+meets Italian Renaissance"). Drawn by tools/parallax-renaissance/build_renaissance.py from: a granite statue owl of
+Minerva (AI generated for the owner with Nano Banana 2.1 on Vertex, 2026-11-14), a gear ring and corner brackets
+(same), and Leonardo's Vitruvian Man (public domain, Wikimedia Commons), lifted to line-work and glitch-sliced.
 
 Layers, back to front (depth in parallax.json):
-  layer0.jpg  -0.60  the night: lapis gradient, gold dust, armillary rings, a faint cyan perspective floor
-  layer1.png  -0.25  Vitruvian circle and square, golden pentagon, graduated ticks, cyan nodes and HUD arcs
-  layer2.png   0.10  the arcade: round arches on a dark lapis wall, gold edge, cyan inner line
-  layer3.png   0.55  the owl of Minerva framed by laurel
-  layer4.png   1.00  glitch bars, HUD corner brackets, soft gold motes
-wallpaper.jpg is the set flattened at rest (1080x2400); preview.jpg is 512x512.
+  layer0.jpg  -0.60  OLED night, a cool glow behind the statue, silver dotwork
+  layer1.png  -0.25  the gear ring (granite egg-and-dart rim, platinum numerals, gold gears), dimmed
+  layer2.png   0.10  the Vitruvian Man in silver line-work, cut into glitch strips, one amber edge
+  layer3.png   0.55  the granite owl cut open to platinum, gold wire and gears; Kiroshi camera eyes
+  layer4.png   1.00  granite-and-platinum corner brackets, HUD microtext
+wallpaper.jpg is the set flattened at rest (1080x2400); preview.jpg is 540x1200.
