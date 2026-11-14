@@ -9,6 +9,10 @@
     <value nick="black" value="2"/>
     <value nick="material" value="3"/>
   </enum>
+  <enum id="de.yesman.GnomePhone.Keyboard.Mode">
+    <value nick="compact" value="0"/>
+    <value nick="full" value="1"/>
+  </enum>
   <enum id="de.yesman.GnomePhone.Keyboard.SwipeAction">
     <value nick="none" value="0"/>
     <value nick="close" value="1"/>
@@ -29,6 +33,19 @@
     </key>
 
     <!-- size and layout -->
+    <key name="mode" enum="de.yesman.GnomePhone.Keyboard.Mode">
+      <default>'compact'</default>
+      <summary>Layout: compact (letters, digits and symbols on their own pages) or Hacker's Keyboard's full one</summary>
+    </key>
+    <key name="bar" type="b">
+      <default>true</default>
+      <summary>The bar over the keys: the layout switch, word suggestions, Esc, Tab, Ctrl, Alt, the arrows</summary>
+    </key>
+    <key name="bar-scale" type="i">
+      <range min="50" max="120"/>
+      <default>80</default>
+      <summary>The bar's height, in percent of a row of keys</summary>
+    </key>
     <key name="height-portrait" type="i">
       <range min="15" max="75"/>
       <default>35</default>

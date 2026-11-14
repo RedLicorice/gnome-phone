@@ -24,6 +24,36 @@ export function load(language) {
     return data;
 }
 
+// the compact layout's pages (letters, sym, sym2) for a language: hklayouts/compact.json, whose keys without a popup
+// take the full layout's alternates for the same label (è é under e, the digits under the top row)
+export function compactFor(language) {
+    const id = `compact:${language}`;
+    let pages = cache.get(id);
+    if (!pages) {
+        const full = load(language).layouts;
+        const popups = new Map();
+        for (const row of [...full.full, ...full.full_fn]) {
+            for (const k of row.keys) {
+                if (!k.code && k.label && k.popup && !popups.has(k.label))
+                    popups.set(k.label, k.popup);
+            }
+        }
+        const fill = k => !k.code && !k.spacer && !k.popup && popups.has(k.label) ? {...k, popup: popups.get(k.label)} : k;
+        pages = Object.fromEntries(Object.entries(load('compact').layouts).map(([name, rows]) =>
+            [name, rows.map(row => ({...row, keys: row.keys.map(fill)}))]));
+        cache.set(id, pages);
+    }
+    return pages;
+}
+
+// the bar over the keys while no word is being typed: Hacker's controls a compact layout lacks
+export const BAR_CONTROLS = [
+    {code: 'escape', label: 'Esc'}, {code: 'tab'}, {code: 'ctrl', label: 'Ctrl'}, {code: 'alt', label: 'Alt'},
+    {code: 'left', label: '◁', repeat: true}, {code: 'down', label: '▽', repeat: true},
+    {code: 'up', label: '△', repeat: true}, {code: 'right', label: '▷', repeat: true},
+    {code: 'emoji'}, {code: 'settings'}, {code: 'hide'},
+];
+
 // special keys: what they send (a keyval), or how they act
 export const KEYVALS = {
     tab: Clutter.KEY_Tab, return: Clutter.KEY_Return, escape: Clutter.KEY_Escape, delete: Clutter.KEY_Delete,
@@ -45,7 +75,8 @@ export const CURSOR = new Set(['up', 'down', 'left', 'right', 'home', 'end', 'pa
 
 export const ICONS = {
     backspace: 'osk-delete-symbolic', return: 'osk-enter-symbolic', shift: 'osk-shift-symbolic',
-    menu: 'osk-emoji-picker-symbolic', settings: 'emblem-system-symbolic',
+    menu: 'osk-emoji-picker-symbolic', settings: 'emblem-system-symbolic', emoji: 'osk-emoji-picker-symbolic',
+    hide: 'osk-hide-symbolic', mode: 'input-keyboard-symbolic',
 };
 
 export const LABELS = {tab: '⇥', space: '', meta: '❖', fn: 'Fn'};

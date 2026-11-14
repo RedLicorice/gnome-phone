@@ -12,7 +12,7 @@ import * as KeyboardUI from 'resource:///org/gnome/shell/ui/keyboard.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as InputSourceManager from 'resource:///org/gnome/shell/ui/status/keyboard.js';
 
-import {languageFor, load} from './hkeyboard/layout.js';
+import {compactFor, languageFor, load} from './hkeyboard/layout.js';
 import {KeyboardStyle} from './hkeyboard/style.js';
 import {KeyboardView} from './hkeyboard/view.js';
 import {openSettings} from './settings.js';
@@ -22,7 +22,7 @@ const STOCK_PURPOSES = new Set([
     Clutter.InputContentPurpose.DIGITS, Clutter.InputContentPurpose.NUMBER, Clutter.InputContentPurpose.PHONE,
 ]);
 // settings that change the rows, or only the keys' placement
-const REBUILD = new Set(['extension-row', 'top-row-scale']);
+const REBUILD = new Set(['extension-row', 'top-row-scale', 'mode', 'bar', 'bar-scale']);
 const HEIGHT = new Set(['height-portrait', 'height-landscape']);
 
 export class TouchKeyboard {
@@ -39,8 +39,18 @@ export class TouchKeyboard {
         const proto = KeyboardUI.Keyboard.prototype;
         const orig = this._orig = {
             _updateKeys: proto._updateKeys, _setActiveLevel: proto._setActiveLevel,
-            _relayout: proto._relayout, open: proto.open,
+            _relayout: proto._relayout, open: proto.open, addSuggestion: proto.addSuggestion,
+            resetSuggestions: proto.resetSuggestions, setSuggestionsVisible: proto.setSuggestionsVisible,
         };
+        // the input method's suggestions go to the bar over our keys, the shell's own row stays hidden meanwhile
+        for (const name of ['addSuggestion', 'resetSuggestions', 'setSuggestionsVisible']) {
+            proto[name] = function (...args) {
+                const view = this._hkView;
+                if (view && this._currentPage === view)
+                    return view[name](...args);
+                return orig[name].call(this, ...args);
+            };
+        }
         proto._updateKeys = function () {
             if (self._wanted(this)) {
                 try {
@@ -115,7 +125,7 @@ export class TouchKeyboard {
         let view = keyboard._hkView;
         if (view?.language !== language) {
             view?.destroy();
-            view = new KeyboardView(load(language), this._settings);
+            view = new KeyboardView(load(language), compactFor(language), this._settings);
             view.language = language;
             view.connect('action', (_v, action) => this._action(keyboard, action));
             view.connect('destroy', () => {
@@ -143,6 +153,7 @@ export class TouchKeyboard {
         keyboard._modifiers.clear();
         keyboard._modifierKeys.clear();
         keyboard._currentPage = view;
+        keyboard._suggestions?.hide();
         view.show();
         keyboard._updateCurrentPageVisible();
         // a ratio that never narrows the keys (AspectContainer centers a page narrower than the keyboard)
@@ -159,6 +170,7 @@ export class TouchKeyboard {
         if (keyboard._currentPage === view)
             keyboard._currentPage = null;
         keyboard._latched = false;
+        keyboard._suggestions?.show();
         view.hide();
     }
 

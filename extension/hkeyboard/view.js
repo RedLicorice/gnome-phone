@@ -5,6 +5,11 @@
 // swipe actions. Shift, Ctrl, Alt and Meta are sticky: a tap holds them for the next key, a second tap locks them, a
 // finger kept on one applies it to the keys typed meanwhile (a chord).
 //
+// Over the keys sits a bar: the layout switch (full or compact), and the input method's word suggestions while a word
+// is typed, Hacker's controls (Esc, Tab, Ctrl, Alt, the arrows, emoji, settings, hide) otherwise. Its keys are keys
+// like the others, so they tick, repeat and stick the same way. The compact layout has three pages: letters, digits
+// with the common punctuation, and the other symbols.
+//
 // What the keys type goes out through the shell keyboard's own controller (KeyboardController: the input method, or
 // the virtual keyboard while a modifier is held), one item after the other.
 import Clutter from 'gi://Clutter';
@@ -15,7 +20,7 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import * as Haptics from '../haptics.js';
-import {CURSOR, ICONS, KEYVALS, LABELS, MODIFIERS} from './layout.js';
+import {BAR_CONTROLS, CURSOR, ICONS, KEYVALS, LABELS, MODIFIERS} from './layout.js';
 
 const SWIPE_MAX_MS = 400; // a swipe is fast; a slower move is a finger sliding between keys
 const OFF = 0, ONCE = 1, LOCKED = 2;
@@ -23,10 +28,18 @@ const OFF = 0, ONCE = 1, LOCKED = 2;
 export const KeyboardView = GObject.registerClass({
     Signals: {'action': {param_types: [GObject.TYPE_STRING]}},
 }, class KeyboardView extends St.Widget {
-    // @data a language's layouts (layout.js load()); @settings the keyboard's Gio.Settings
-    _init(data, settings) {
+    // @data a language's full layouts (layout.js load()); @compact its compact pages (compactFor());
+    // @settings the keyboard's Gio.Settings
+    _init(data, compact, settings) {
         super._init({style_class: 'hk-view', reactive: true, x_expand: true, y_expand: true});
         this._data = data;
+        this._compact = compact;
+        this._page = 'letters';
+        this._suggestions = []; // {text, callback}, the input method's candidates in its order
+        this._suggestionsVisible = false;
+        this._barId = 0;
+        this._barPending = false;
+        this._units = 1;
         this._settings = settings;
         this.controller = null; // KeyboardController, set by the keyboard that shows this view
         this.keyboard = null; // the shell's Keyboard
@@ -53,8 +66,14 @@ export const KeyboardView = GObject.registerClass({
         this.connect('button-release-event', (_a, event) => this._onEvent(event));
         this.connect('motion-event', (_a, event) => this._onEvent(event));
         this.connect('notify::mapped', () => {
-            if (!this.mapped)
-                this._cancelAll();
+            if (this.mapped)
+                return;
+            this._cancelAll();
+            // the next field starts on the letters
+            if (this._page !== 'letters') {
+                this._page = 'letters';
+                this._build();
+            }
         });
         this.connect('destroy', () => this._onDestroy());
 
@@ -63,17 +82,21 @@ export const KeyboardView = GObject.registerClass({
 
     // ---- layout ----
 
+    _compactMode() {
+        return this._settings.get_string('mode') === 'compact';
+    }
+
     _rows() {
+        if (this._compactMode())
+            return this._compact[this._page];
         const layout = this._data.layouts[this._fn ? 'full_fn' : 'full'];
         const extension = this._settings.get_boolean('extension-row');
         return layout.filter(row => extension || !row.extension);
     }
 
-    // the number of rows in height units (the top row may be shorter), for the stylesheet's label size
+    // the keyboard's height in rows (the bar and the top rows may be shorter), for the stylesheet's label size
     rowUnits() {
-        const rows = this._rows();
-        const scale = this._settings.get_int('top-row-scale') / 100;
-        return rows.length - (rows[0]?.extension ? 2 : 1) * (1 - scale);
+        return this._units;
     }
 
     _build() {
@@ -81,31 +104,98 @@ export const KeyboardView = GObject.registerClass({
         for (const key of this._keys)
             key.actor.destroy();
         this._keys = [];
-        const scale = this._settings.get_int('top-row-scale') / 100;
+        // the full layout's extension row and number row take the top row scale
+        const scale = this._compactMode() ? 1 : this._settings.get_int('top-row-scale') / 100;
+        this._barUnits = this._settings.get_boolean('bar') ? this._settings.get_int('bar-scale') / 100 : 0;
         const rows = this._rows();
-        let y = 0;
+        let y = this._barUnits;
         rows.forEach((row, r) => {
-            // the extension row and the number row take the top row scale
             const h = (rows[0].extension ? r < 2 : r === 0) ? scale : 1;
             let x = 0;
             for (const def of row.keys) {
-                this._keys.push(this._makeKey(def, x, y, def.width, h));
+                if (!def.spacer)
+                    this._keys.push(this._makeKey(def, x, y, def.width, h));
                 x += def.width;
             }
             y += h;
         });
         this._units = y;
+        this._buildBar();
+    }
+
+    // the bar's keys: the layout switch, then the suggestions (the best one in the middle) or the controls
+    _buildBar() {
+        for (const key of this._keys.filter(k => k.bar))
+            key.actor.destroy();
+        this._keys = this._keys.filter(k => !k.bar);
+        if (this._barUnits) {
+            const words = this._suggestionsVisible ? this._suggestions.slice(0, 3) : [];
+            const defs = words.length
+                ? (words.length === 3 ? [words[1], words[0], words[2]] : words).map(w =>
+                    ({code: 'suggestion', label: w.text, callback: w.callback}))
+                : BAR_CONTROLS;
+            const width = 0.9 / defs.length;
+            this._keys.push(this._makeKey({code: 'mode'}, 0, 0, 0.1, this._barUnits, true));
+            defs.forEach((def, i) =>
+                this._keys.push(this._makeKey(def, 0.1 + i * width, 0, width, this._barUnits, true)));
+        }
         this._relabel();
         this.queue_relayout();
     }
 
-    _makeKey(def, x, y, w, h) {
+    // the bar again after the suggestions changed, once they are all in; a finger on the bar keeps it until it lifts
+    _queueBar() {
+        if (this._barId)
+            return;
+        this._barId = GLib.idle_add_once(GLib.PRIORITY_DEFAULT, () => {
+            this._barId = 0;
+            if ([...this._touches.values()].some(t => t.key.bar))
+                this._barPending = true;
+            else
+                this._buildBar();
+        });
+    }
+
+    _barReleased() {
+        if (this._barPending && ![...this._touches.values()].some(t => t.key.bar)) {
+            this._barPending = false;
+            this._buildBar();
+        }
+    }
+
+    // the input method's word suggestions (Keyboard.addSuggestion and the others, as ibusCandidatePopup calls them)
+    resetSuggestions() {
+        this._suggestions = [];
+        this._queueBar();
+    }
+
+    addSuggestion(text, callback) {
+        this._suggestions.push({text, callback});
+        this._suggestionsVisible = true;
+        this._queueBar();
+    }
+
+    setSuggestionsVisible(visible) {
+        this._suggestionsVisible = visible;
+        this._queueBar();
+    }
+
+    _setPage(page) {
+        this._page = page;
+        this._build();
+    }
+
+    _makeKey(def, x, y, w, h, bar = false) {
         const code = def.code;
         const mod = !!code && code !== 'space';
-        const actor = new St.Bin({
-            style_class: `hk-key${mod ? ' hk-mod' : ''}${code === 'space' ? ' hk-space' : ''}`,
-            reactive: false,
-        });
+        const classes = ['hk-key'];
+        if (mod)
+            classes.push('hk-mod');
+        if (code === 'space')
+            classes.push('hk-space');
+        if (bar)
+            classes.push(code === 'suggestion' ? 'hk-bar hk-suggestion' : 'hk-bar');
+        const actor = new St.Bin({style_class: classes.join(' '), reactive: false});
         const icon = ICONS[code];
         let label = null;
         if (icon) {
@@ -116,7 +206,7 @@ export const KeyboardView = GObject.registerClass({
         }
         this.add_child(actor);
         // Hacker's Keyboard's popup lists lowercase alternates; shifted, they go upper case
-        return {def, code, actor, label, mod, rect: {x, y, w, h}, box: null};
+        return {def, code, actor, label, mod, bar, rect: {x, y, w, h}, box: null};
     }
 
     _shifted() {
@@ -127,6 +217,8 @@ export const KeyboardView = GObject.registerClass({
         const {def, code} = key;
         if (code === 'space')
             return this._data.locale === 'it' ? 'Italiano' : 'English';
+        if (code === 'mode')
+            return '';
         if (code)
             return def.label ?? LABELS[code] ?? code;
         const label = def.label ?? '';
@@ -178,7 +270,8 @@ export const KeyboardView = GObject.registerClass({
 
     // ---- touch ----
 
-    _keyAt(x, y, current) {
+    // the key under a point, among the bar's keys or the others (@bar): a touch stays on the part it began on
+    _keyAt(x, y, current, bar) {
         const hyst = this._settings.get_int('hysteresis');
         if (current?.box) {
             const b = current.box;
@@ -188,7 +281,7 @@ export const KeyboardView = GObject.registerClass({
         let best = null, bestDist = Infinity;
         for (const key of this._keys) {
             const b = key.box;
-            if (!b)
+            if (!b || key.bar !== bar)
                 continue;
             if (x >= b.x1 && x < b.x2 && y >= b.y1 && y < b.y2)
                 return key;
@@ -246,11 +339,12 @@ export const KeyboardView = GObject.registerClass({
                 other.done = true;
             }
         }
-        const offset = this._settings.get_int('touch-offset');
-        const key = this._keyAt(x, y - offset, null);
+        const bar = !!this._barUnits && this._keys.some(k => k.bar && k.box && y < k.box.y2);
+        const offset = bar ? 0 : this._settings.get_int('touch-offset');
+        const key = this._keyAt(x, y - offset, null, bar);
         if (!key)
             return;
-        const touch = {key, x0: x, y0: y, t0: time, done: false, repeated: false, popup: null, cursor: null};
+        const touch = {key, bar, x0: x, y0: y, t0: time, done: false, repeated: false, popup: null, cursor: null};
         this._touches.set(slot, touch);
         if (key.code in MODIFIERS) {
             this._held.set(key.code, {chorded: false, before: this._mods[key.code]});
@@ -282,8 +376,8 @@ export const KeyboardView = GObject.registerClass({
                 return;
             }
         }
-        const offset = this._settings.get_int('touch-offset');
-        const key = this._keyAt(x, y - offset, touch.key);
+        const offset = touch.bar ? 0 : this._settings.get_int('touch-offset');
+        const key = this._keyAt(x, y - offset, touch.key, touch.bar);
         if (key && key !== touch.key && !(touch.key.code in MODIFIERS)) {
             this._release(touch);
             touch.key = key;
@@ -299,6 +393,14 @@ export const KeyboardView = GObject.registerClass({
         this._touches.delete(slot);
         const {key} = touch;
         this._release(touch);
+        if (touch.bar) {
+            if (!touch.done && key.code in MODIFIERS)
+                this._endModifier(key, false);
+            else if (!touch.done && !touch.repeated)
+                this._type(key);
+            this._barReleased();
+            return;
+        }
         if (touch.done)
             return;
         if (touch.popup) {
@@ -336,6 +438,8 @@ export const KeyboardView = GObject.registerClass({
             this._held.delete(touch.key.code);
             this._relabel();
         }
+        if (touch.bar)
+            this._barReleased();
     }
 
     _cancelAll() {
@@ -575,7 +679,20 @@ export const KeyboardView = GObject.registerClass({
             this._select = !this._select;
             return this._relabel();
         case 'menu':
+        case 'emoji':
             return this.emit('action', 'emoji');
+        case 'hide':
+            return this.emit('action', 'close');
+        case 'mode':
+            return this._settings.set_string('mode', this._compactMode() ? 'full' : 'compact');
+        case 'sym':
+        case 'sym2':
+            return this._setPage(code);
+        case 'abc':
+            return this._setPage('letters');
+        case 'suggestion':
+            this._takeModifiers(false);
+            return this._queue(() => key.def.callback?.());
         case 'settings':
             return this.emit('action', 'settings');
         case 'backspace':
@@ -627,6 +744,9 @@ export const KeyboardView = GObject.registerClass({
     }
 
     _onDestroy() {
+        if (this._barId)
+            GLib.source_remove(this._barId);
+        this._barId = 0;
         this._cancelAll();
         this._preview.destroy();
         this._popup.destroy();

@@ -430,6 +430,8 @@ int_slider (GtkWidget *g, const char *title, GSettings *s, const char *key, int 
 void
 ns_page_touch_keyboard (GtkWidget *row, gpointer data)
 {
+  static const char *const modes[] = { "compact", "full", NULL };
+  static const char *const mode_labels[] = { "Compact", "Full (Hacker's Keyboard)", NULL };
   static const char *const styles[] = { "dark", "light", "black", "material", NULL };
   static const char *const style_labels[] = { "Dark", "Light", "Black", "Material", NULL };
   static const char *const swipes[] = { "none", "close", "extension", "settings", "height-up", "height-down",
@@ -446,10 +448,14 @@ ns_page_touch_keyboard (GtkWidget *row, gpointer data)
   }
   GtkWidget *g = ns_group (c, NULL);
   ns_row_switch (g, "Use the touch keyboard", NULL, s, "enabled");
+  g = ns_group (c, "Layout");
+  ns_row_choice (g, "Layout", s, "mode", modes, mode_labels);
+  ns_row_switch (g, "Bar over the keys", "Suggestions • Esc, Tab, Ctrl, Alt • Arrows", s, "bar");
+  int_slider (g, "Bar height (%)", s, "bar-scale", 50, 120, 5);
   g = ns_group (c, "Size");
   int_slider (g, "Height, portrait (%)", s, "height-portrait", 15, 75, 1);
   int_slider (g, "Height, landscape (%)", s, "height-landscape", 15, 75, 1);
-  int_slider (g, "Number row height (%)", s, "top-row-scale", 50, 100, 5);
+  int_slider (g, "Number row height, full layout (%)", s, "top-row-scale", 50, 100, 5);
   ns_row_switch (g, "Function key row", NULL, s, "extension-row");
   int_slider (g, "Bottom padding (px)", s, "bottom-padding", 0, 48, 1);
   g = ns_group (c, "Look");

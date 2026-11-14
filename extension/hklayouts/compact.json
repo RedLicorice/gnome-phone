@@ -1,0 +1,91 @@
+{
+ "notice": "The touch keyboard's compact layout: four rows, letters and two symbol pages, as phone keyboards lay them out. Keys without a popup take the full layout's alternates for the same label (layout.js compactFor). Widths are fractions of the keyboard's width; a spacer only takes room.",
+ "layouts": {
+  "letters": [
+   {"keys": [
+    {"label": "q", "width": 0.1}, {"label": "w", "width": 0.1}, {"label": "e", "width": 0.1},
+    {"label": "r", "width": 0.1}, {"label": "t", "width": 0.1}, {"label": "y", "width": 0.1},
+    {"label": "u", "width": 0.1}, {"label": "i", "width": 0.1}, {"label": "o", "width": 0.1},
+    {"label": "p", "width": 0.1}
+   ]},
+   {"keys": [
+    {"spacer": true, "width": 0.05},
+    {"label": "a", "width": 0.1}, {"label": "s", "width": 0.1}, {"label": "d", "width": 0.1},
+    {"label": "f", "width": 0.1}, {"label": "g", "width": 0.1}, {"label": "h", "width": 0.1},
+    {"label": "j", "width": 0.1}, {"label": "k", "width": 0.1}, {"label": "l", "width": 0.1},
+    {"spacer": true, "width": 0.05}
+   ]},
+   {"keys": [
+    {"code": "shift", "width": 0.15},
+    {"label": "z", "width": 0.1}, {"label": "x", "width": 0.1}, {"label": "c", "width": 0.1},
+    {"label": "v", "width": 0.1}, {"label": "b", "width": 0.1}, {"label": "n", "width": 0.1},
+    {"label": "m", "width": 0.1},
+    {"code": "backspace", "repeat": true, "width": 0.15}
+   ]},
+   {"keys": [
+    {"code": "sym", "label": "?123", "width": 0.15},
+    {"label": ",", "popup": [";", ":", "'", "\"", "!", "?"], "width": 0.1},
+    {"code": "space", "width": 0.5},
+    {"label": ".", "popup": ["…", "!", "?", "-", "@", "/"], "width": 0.1},
+    {"code": "return", "width": 0.15}
+   ]}
+  ],
+  "sym": [
+   {"keys": [
+    {"label": "1", "width": 0.1}, {"label": "2", "width": 0.1}, {"label": "3", "width": 0.1},
+    {"label": "4", "width": 0.1}, {"label": "5", "width": 0.1}, {"label": "6", "width": 0.1},
+    {"label": "7", "width": 0.1}, {"label": "8", "width": 0.1}, {"label": "9", "width": 0.1},
+    {"label": "0", "width": 0.1}
+   ]},
+   {"keys": [
+    {"label": "@", "width": 0.1}, {"label": "#", "width": 0.1}, {"label": "€", "popup": ["$", "£", "¥", "¢"], "width": 0.1},
+    {"label": "_", "width": 0.1}, {"label": "&", "width": 0.1}, {"label": "-", "popup": ["–", "—", "·"], "width": 0.1},
+    {"label": "+", "popup": ["±"], "width": 0.1}, {"label": "(", "popup": ["[", "{", "<"], "width": 0.1},
+    {"label": ")", "popup": ["]", "}", ">"], "width": 0.1}, {"label": "/", "popup": ["\\"], "width": 0.1}
+   ]},
+   {"keys": [
+    {"code": "sym2", "label": "=\\<", "width": 0.15},
+    {"label": "*", "width": 0.1}, {"label": "\"", "popup": ["«", "»", "“", "”"], "width": 0.1},
+    {"label": "'", "popup": ["‘", "’", "`"], "width": 0.1}, {"label": ":", "width": 0.1},
+    {"label": ";", "width": 0.1}, {"label": "!", "popup": ["¡"], "width": 0.1},
+    {"label": "?", "popup": ["¿"], "width": 0.1},
+    {"code": "backspace", "repeat": true, "width": 0.15}
+   ]},
+   {"keys": [
+    {"code": "abc", "label": "ABC", "width": 0.15},
+    {"label": ",", "width": 0.1},
+    {"code": "space", "width": 0.5},
+    {"label": ".", "popup": ["…"], "width": 0.1},
+    {"code": "return", "width": 0.15}
+   ]}
+  ],
+  "sym2": [
+   {"keys": [
+    {"label": "~", "width": 0.1}, {"label": "`", "width": 0.1}, {"label": "|", "width": 0.1},
+    {"label": "•", "width": 0.1}, {"label": "√", "width": 0.1}, {"label": "π", "width": 0.1},
+    {"label": "÷", "width": 0.1}, {"label": "×", "width": 0.1}, {"label": "§", "width": 0.1},
+    {"label": "∆", "width": 0.1}
+   ]},
+   {"keys": [
+    {"label": "£", "width": 0.1}, {"label": "$", "width": 0.1}, {"label": "¥", "width": 0.1},
+    {"label": "^", "width": 0.1}, {"label": "°", "width": 0.1}, {"label": "=", "width": 0.1},
+    {"label": "{", "width": 0.1}, {"label": "}", "width": 0.1}, {"label": "\\", "width": 0.1},
+    {"label": "%", "popup": ["‰"], "width": 0.1}
+   ]},
+   {"keys": [
+    {"code": "sym", "label": "?123", "width": 0.15},
+    {"label": "©", "width": 0.1}, {"label": "®", "width": 0.1}, {"label": "™", "width": 0.1},
+    {"label": "[", "width": 0.1}, {"label": "]", "width": 0.1}, {"label": "<", "width": 0.1},
+    {"label": ">", "width": 0.1},
+    {"code": "backspace", "repeat": true, "width": 0.15}
+   ]},
+   {"keys": [
+    {"code": "abc", "label": "ABC", "width": 0.15},
+    {"label": ",", "width": 0.1},
+    {"code": "space", "width": 0.5},
+    {"label": ".", "popup": ["…"], "width": 0.1},
+    {"code": "return", "width": 0.15}
+   ]}
+  ]
+ }
+}

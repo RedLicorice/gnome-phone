@@ -53,6 +53,13 @@ export class KeyboardStyle {
 .hk-key:checked { background-color: -st-accent-color; color: #ffffff; }
 .hk-key.hk-locked { background-color: -st-accent-color; color: #ffffff; border: 2px solid #ffffff; }
 .hk-key StIcon { icon-size: ${Math.round(font * 1.1)}px; color: ${p.text}; }
+.hk-key.hk-bar { background-color: transparent; box-shadow: none; font-size: ${Math.round(font * 0.62)}px;
+  font-weight: normal; color: ${p.text}; }
+.hk-key.hk-bar:active { background-color: ${p.pressed}; }
+.hk-key.hk-bar:checked { background-color: -st-accent-color; color: #ffffff; }
+.hk-key.hk-bar.hk-locked { background-color: -st-accent-color; color: #ffffff; border: 2px solid #ffffff; }
+.hk-key.hk-bar StIcon { icon-size: ${Math.round(font * 0.85)}px; }
+.hk-key.hk-suggestion { font-size: ${Math.round(font * 0.78)}px; }
 .hk-preview { background-color: ${p.pop}; color: ${p.text}; border-radius: ${radius + 4}px;
   font-size: ${font * 2}px; font-weight: bold; box-shadow: 0 2px 6px 0 rgba(0, 0, 0, 0.4); }
 .hk-popup { background-color: ${p.pop}; border-radius: ${radius + 4}px; padding: 4px; spacing: 2px;
