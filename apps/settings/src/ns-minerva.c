@@ -499,7 +499,7 @@ chain_fill (Mn *m)
 static const struct {
   const char *id, *label;
 } stt_engines[] = {
-  { "claude", "Claude (your subscription)" }, { "elevenlabs", "ElevenLabs" }, { "openrouter", "OpenRouter" },
+  { "claude", "Claude" }, { "elevenlabs", "ElevenLabs" }, { "openrouter", "OpenRouter" },
 };
 
 static const char *
