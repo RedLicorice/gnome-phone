@@ -706,7 +706,7 @@ fill_voiceprint (Mn *m)
   g_autofree char *need = g_strdup_printf ("%d", (int) json_object_get_int_member_with_default (vp, "need", 0));
   g_string_replace (t, "{got}", got, 0);
   g_string_replace (t, "{need}", need, 0);
-  ns_row_value_set (m->vp_info, t->str);
+  ns_row_set_subtitle (m->vp_info, t->str);
   for (guint i = 0; i < m->vp_actions->len; i++) {
     GtkWidget *row = m->vp_actions->pdata[i];
     const char *when = g_object_get_data (G_OBJECT (row), "mn-when");
@@ -895,10 +895,9 @@ mn_free (Mn *m)
   g_free (m);
 }
 
-/* Minerva > Prompt: the wake word and reply groups come with the status (data), then the editors (ns-prompt.c) */
-static void ns_page_prompt (GtkWidget *row, gpointer data);
-
-static void
+/* Minerva > Prompt (`--page prompt`): the wake word and reply groups come with the status (data), then the editors
+ * (ns-prompt.c) */
+void
 ns_page_prompt (GtkWidget *row, gpointer data)
 {
   GtkWidget *c;

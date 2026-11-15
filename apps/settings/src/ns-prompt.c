@@ -83,7 +83,6 @@ msg_new (GtkWidget *group)
   GtkWidget *l = gtk_label_new ("");
   gtk_label_set_wrap (GTK_LABEL (l), TRUE);
   gtk_label_set_xalign (GTK_LABEL (l), 0);
-  gtk_label_set_selectable (GTK_LABEL (l), TRUE);
   gtk_widget_set_visible (l, FALSE);
   ns_row_widget (group, NULL, l);
   return l;
@@ -245,7 +244,6 @@ ns_prompt_build (GtkWidget *content, GObject *owner, JsonObject *ui)
   p->preview = gtk_label_new (ui_str (p, "state", "preview_empty"));
   gtk_label_set_wrap (GTK_LABEL (p->preview), TRUE);
   gtk_label_set_xalign (GTK_LABEL (p->preview), 0);
-  gtk_label_set_selectable (GTK_LABEL (p->preview), TRUE);
   ns_row_widget (g, NULL, p->preview);
   /* Anteprima fills the preview label itself: its own handler, the answer is text, not a message */
   button (p, g, ui_str (p, "state", "preview"), FALSE,

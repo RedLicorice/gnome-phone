@@ -75,6 +75,7 @@ void ns_page_scale_row (GtkWidget *group);
  * installed */
 void     ns_page_minerva (GtkWidget *row, gpointer data);
 void     ns_page_api_keys (GtkWidget *row, gpointer data);
+void     ns_page_prompt (GtkWidget *row, gpointer data);
 /* ns-prompt.c: the system prompt and state template editors of Minerva > Prompt; `ui` is `prompt_ui` of the status */
 void     ns_prompt_build (GtkWidget *content, GObject *owner, JsonObject *ui);
 /* a page of the models `minerva-config` offers, the current one marked; `picked` gets the model id (the source the
