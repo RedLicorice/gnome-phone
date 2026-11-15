@@ -38,12 +38,19 @@ endforeach
 
 executable('neo-launcher',
   'src/main.c', 'src/vk.c', 'src/gfx.c', 'src/wl.c', 'src/text.c', 'src/image.c', 'src/parallax.c', 'src/apps.c',
-  'src/icons.c', 'src/model.c', 'src/tiles.c', 'src/home.c', 'src/drawer.c', 'src/nav.c',
+  'src/icons.c', 'src/search.c', 'src/model.c', 'src/tiles.c', 'src/home.c', 'src/drawer.c', 'src/nav.c',
   'src/popup.c', 'src/drag.c',
   proto_src,
   include_directories: include_directories('src', 'shaders'),
   dependencies: deps,
   install: true)
+
+# the search client's test CLI: asks the GNOME search providers on the session bus, no launcher needed
+executable('neo-search-cli', 'src/search.c', 'src/search-cli.c',
+  include_directories: include_directories('src'),
+  dependencies: [dependency('glib-2.0'), dependency('gio-unix-2.0')],
+  install: true,
+  install_dir: get_option('libexecdir') / 'neo-launcher')
 
 # the launcher's settings (de.yesman.neo), which the gnome-phone extension and Neo Settings read too
 install_data('data/de.yesman.neo.gschema.xml', install_dir: get_option('datadir') / 'glib-2.0' / 'schemas')
