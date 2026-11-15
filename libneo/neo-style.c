@@ -347,13 +347,15 @@ neo_theme_map_rgba (const GdkRGBA *c)
   if (!look)
     return *c;
   double h, l, s;
-  GdkRGBA out = { 0, 0, 0, c->alpha };
+  GdkRGBA out = *c;
   rgb_to_hls (c->red, c->green, c->blue, &h, &l, &s);
   double deg = h * 360;
   if (look->day)
     {
       /* by day the apps' dark surfaces turn light and their light text dark (same hue families): neutrals invert
-       * their lightness, dark teal (bars, containers) turns pale gold, pastel teal (FABs, accents) turns deep gold */
+       * their lightness, dark teal (bars, containers) turns pale gold, pastel teal (FABs, accents) turns deep gold.
+       * A fill is the surface of the label or the glyph drawn on it, so whatever shade the app gave it, by day it
+       * ends light: the labels are day ink (gen_app_overrides.py solves them against this). */
       if (s < 0.14)
         {
           if (l > 0.93)
@@ -365,15 +367,17 @@ neo_theme_map_rgba (const GdkRGBA *c)
           else
             hls_to_rgb (225. / 360, l * 0.85, 0.06, &out);
         }
-      else if (deg >= 140 && deg <= 230 && s < 0.95)
+      else if (deg >= 140 && deg <= 230)
         {
           if (l < 0.42)
             hls_to_rgb (41. / 360, 0.97 - l * 0.45, 0.45, &out);
           else
             hls_to_rgb (38. / 360, 0.62 - (MIN (l, 0.78) - 0.42) * 0.55, 0.52, &out);
         }
-      else
-        return *c;
+      out.alpha = c->alpha;
+      rgb_to_hls (out.red, out.green, out.blue, &h, &l, &s);
+      if (l < 0.80)
+        hls_to_rgb (h, 0.80 + (1 - l) * 0.10, s, &out);
       out.alpha = c->alpha;
       return out;
     }
@@ -388,15 +392,13 @@ neo_theme_map_rgba (const GdkRGBA *c)
       else
         hls_to_rgb (41. / 360, l * 0.9, 0.10, &out);
     }
-  else if (deg >= 140 && deg <= 230 && s < 0.95)
+  else if (deg >= 140 && deg <= 230)
     {
       if (l < 0.42)
         hls_to_rgb (224. / 360, l * 0.85, 0.52, &out);
       else
         hls_to_rgb (41. / 360, MIN (l, 0.78), 0.55, &out);
     }
-  else
-    return *c;
   out.alpha = c->alpha;
   return out;
 }

@@ -3,10 +3,11 @@
 entry.nb-url-entry > text > placeholder, entry.nb-find-entry > text > placeholder { color: #938c7b; }
 .nb-pin-hint { color: alpha(#ccc3af, 0.7); }
 .nb-pin-button { background-color: #e6d2a8; }
-.nb-pin-button-text { color: #151322; }
-window.nb .neo-snackbar-text { color: #151322; }
+.nb-pin-button-text { color: #7970af; }
+window.nb .neo-snackbar-text { color: #7970af; }
+.nb-fav-dark-text { color: #7a7a7a; }
 .nb-fav-light-text { color: #f0e6d0; }
-.nb-download-glyph { color: #726b5d; }
+.nb-download-glyph { color: #837b6b; }
 .nb-tab-card-thumb { background-color: #f0e6d0; }
 /* calculator/src/calculator.css */
 .calc-licenses-page { background-color: #f0e6d0; }
@@ -16,31 +17,56 @@ window.nb .neo-snackbar-text { color: #151322; }
 neo-dialog-scrim.cal-alerts > .neo-dialog.flush { background-color: #12101c; }
 .cal-alerts-title { color: #cba34d; }
 .cal-alerts-title-divider { background-color: #cba34d; }
+.cal-alerts-divider { background-color: rgba(240, 230, 208, 0.12); }
 .cal-alert-title { color: #f0e6d0; }
 .cal-alert-when, .cal-alert-where { color: #958e7e; }
 .cal-alert-repeat { color: #958e7e; }
+.cal-alert-row.past .cal-alert-title, .cal-alert-row.past .cal-alert-when, .cal-alert-row.past .cal-alert-where, .cal-alert-row.past .cal-alert-repeat { color: rgba(149, 142, 126, 0.861); }
 .cal-alerts-button { color: #f0e6d0; }
 /* calendar/src/calendar-pickers.css */
 /* calendar/src/calendar-recurrence.css */
-.cal-recur-end-date { color: #746d5f; }
+.cal-recur-end-date { color: #7f7868; }
 /* calendar/src/calendar-search.css */
 /* calendar/src/calendar.css */
+.cal-fab { color: #f0e6d0; }
+.cal-info-title { color: #f0e6d0; }
+.cal-info-when, .cal-info-where { color: #f0e6d0; }
+.cal-info-repeat { color: rgba(240, 230, 208, 0.7); }
 /* camera/src/camera.css */
-.cam-mode-label { color: #1e1b30; }
+.cam-mode-label { color: #7b72b0; }
 .cam-mode-label.selected { color: #f0e6d0; }
-.cam-duration { background-color: #e95950; color: #f0e6d0; }
+.cam-duration { color: #261e0c; }
 .cam-pro-label { color: #f0e6d0; }
-.cam-pro-label:disabled { color: #1e1b30; }
+.cam-pro-label:disabled { color: #7b72b0; }
 .cam-tune-title { color: #f0e6d0; }
 .cam-tune-label { color: #f0e6d0; }
 .cam-toast { background-color: #0c0a13; }
 .cam-toast-text { color: #f0e6d0; }
-neo-snackbar-host.cam-snackbar .neo-snackbar-text { color: #0e162b; }
+neo-snackbar-host.cam-snackbar .neo-snackbar-text { color: #5a79c9; }
 .cam-screen-flash { background-color: #f0e6d0; }
 /* clock/src/clock.css */
+.body { color: #f0e6d0; }
+.alarm-time { color: #f0e6d0; }
+.ringtone image { color: #f0e6d0; }
+.no-alarms { color: alpha(#f0e6d0, 0.3); }
+.main-clock { color: #f0e6d0; }
+.next-alarm { color: #f0e6d0; }
+.timer-close { color: #f0e6d0; }
+.lap-time { color: #f0e6d0; }
+.primary-label { color: #f0e6d0; }
+.world-clock-time { color: #f0e6d0; }
+.clock-settings-button { color: #f0e6d0; }
 .clock-bar.cities .clock-bar-icon { color: #8c8473; }
+.city-index { color: #f0e6d0; }
+.city-header { color: #f0e6d0; }
 .city-fast-track { background-color: #151321; }
 .settings-divider { background-color: #110f1b; }
+.settings-volume-icon { color: #f0e6d0; }
+.ringtone-row.selected { background-color: rgba(240, 230, 208, 0.08); }
+.ringtone-icon { color: #f0e6d0; }
+.ringtone-add { color: #7a7a7a; }
+window.neo.clock-screensaver { background-color: #000000; }
+.saver-time { color: #f0e6d0; }
 /* contacts/src/contacts.css */
 window.ct-window, ct-page, .ct-ed-content, .ct-filter, .ct-settings, .ct-picker { background-color: #0c0a13; }
 .ct-toolbar { background-color: #213367; }
@@ -51,12 +77,14 @@ window.ct-window, ct-page, .ct-ed-content, .ct-filter, .ct-settings, .ct-picker 
 .ct-search-bar { background-color: #0c0b13; }
 .ct-search-bar .ct-icon-button image { color: #eae6de; }
 .ct-search-entry { color: #ded8cb; caret-color: #d4b269; }
-.ct-search-entry > placeholder { color: #756e60; }
+.ct-search-entry > placeholder { color: #807969; }
 .ct-selection-bar { background-color: #0f0d18; }
 .ct-selection-bar .ct-icon-button image { color: #eae6de; }
+.ct-selection-count { color: rgba(240, 230, 208, 0.875); }
 .ct-selection-add label { color: #d4b269; }
 .ct-list-header { background-color: #0c0a13; }
 .ct-list-header-text { color: #928b7a; }
+.ct-empty-text { color: rgba(240, 230, 208, 0.54); }
 .ct-empty-button label { color: #d4b269; }
 .ct-no-results, .ct-picker-empty { color: #928b7a; }
 .ct-fab image { color: #f0e6d0; }
@@ -73,13 +101,15 @@ window.ct-window, ct-page, .ct-ed-content, .ct-filter, .ct-settings, .ct-picker 
 .ct-qc-card { background-color: #0c0b13; }
 .ct-qc-entry-header { color: #ded8cb; }
 .ct-qc-entry-sub, .ct-qc-entry-text { color: #928b7a; }
-.ct-qc-entry.add .ct-qc-entry-header, .ct-qc-entry.add image { color: #726b5d; }
+.ct-qc-entry.add .ct-qc-entry-header, .ct-qc-entry.add image { color: #837b6b; }
 .ct-qc-actions .ct-icon-button image { color: #f0e6d0; }
 .ct-ed-text { color: #ded8cb; caret-color: #d4b269; }
-.ct-ed-input { border-bottom: 1px solid #726b5d; }
-.ct-ed-input:focus-within { border-bottom: 2px solid #213367; }
-.ct-ed-spinner > box { border-bottom: 1px solid #726b5d; }
+.ct-ed-text > placeholder, .ct-ed-hint { color: rgba(240, 230, 208, 0.55); }
+.ct-ed-input { border-bottom: 1px solid ##726b5d; }
+.ct-ed-input:focus-within { border-bottom: 2px solid ##213367; }
+.ct-ed-spinner > box { border-bottom: 1px solid ##726b5d; }
 .ct-ed-spinner-text { color: #ded8cb; }
+.ct-ed-spinner.empty .ct-ed-spinner-text, .ct-ed-spinner > box.empty .ct-ed-spinner-text { color: rgba(240, 230, 208, 0.55); }
 .ct-ed-delete image { color: #999283; }
 .ct-ed-chevron image { color: #e9e5dd; }
 .ct-ed-account-type { color: #ded8cb; }
@@ -93,6 +123,7 @@ window.ct-window, ct-page, .ct-ed-content, .ct-filter, .ct-settings, .ct-picker 
 .ct-filter-divider { background-color: #0a0910; }
 .ct-picker-create-text { color: #ddd7ca; }
 .ct-popup { background-color: #0e0c16; }
+.ct-popup-text { color: rgba(240, 230, 208, 0.871); }
 .ct-dialog { background-color: #0c0b13; }
 .ct-dialog-title { color: #e2ddd2; }
 .ct-dialog-message { color: #e2ddd2; }
@@ -102,17 +133,19 @@ window.ct-window, ct-page, .ct-ed-content, .ct-filter, .ct-settings, .ct-picker 
 .ct-radio-off { color: #9e9889; }
 .ct-filter .ct-radio-off { color: #eae6de; }
 .ct-dialog-entry { color: #e2ddd2; caret-color: #e6d2a8; }
-.ct-dialog-entry:focus-within { border-bottom: 2px solid #e6d2a8; }
+.ct-dialog-entry:focus-within { border-bottom: 2px solid ##e6d2a8; }
+.ct-dialog-entry > placeholder { color: rgba(240, 230, 208, 0.53); }
 .ct-date-include { color: #e2ddd2; }
 .ct-snackbar { background-color: #161423; }
 /* dialer/src/dialer.css */
 window.neo.dialer, .dialer-page { background-color: #0c0a13; }
 .dialpad-icon { color: #e6d2a8; }
+.dial-icon, .end-call-icon { color: #7a7a7a; }
 .dialer-icon { color: #f0e6d0; }
 .search-bar-icon { color: #f0e6d0; }
 .dialer-primary-text { color: #e6d2a8; }
 .recents-divider { background-color: #191627; }
-.dialer-search-field { color: #2d2746; caret-color: #e6d2a8; }
+.dialer-search-field { color: #7f73b1; caret-color: #e6d2a8; }
 .dialer-search-field > placeholder { color: #847d6c; }
 .dialer-empty-image { color: #cbc1ad; }
 .dialer-empty-text { color: #a19b8c; }
@@ -151,20 +184,25 @@ window.neo.dialer, .dialer-page { background-color: #0c0a13; }
 .settings-dialog .neo-text-button { color: #d4b269; }
 .dialer-toolbar-title { color: #e6d2a8; }
 .details-incoming { color: #c69939; }
-.details-outgoing { color: #294081; }
+.details-outgoing { color: #5a77cb; }
+.details-missed { color: #d54737; }
 .stats-header { color: #a19b8c; }
 .stats-card { background-color: #110f1a; }
 .stats-card-title { color: #e6d2a8; }
-.stats-incoming { color: #284080; }
-.stats-outgoing { color: #1f3162; }
+.stats-incoming { color: #5877cb; }
+.stats-outgoing { color: #5a78cb; }
+.stats-missed { color: #d4493a; }
 .stats-blocked { color: #f0e6d0; }
 /* files/src/files.css */
 window.fm-window, .fm-home, .fm-browser, .fm-remote-page, .fm-settings { background-color: #08070d; }
 .fm-toolbar { background-color: #0e0c16; }
-.fm-toolbar.fm-cab { background-color: #0d1428; box-shadow: inset 0 -2.67px #cba34d; }
+.fm-toolbar.fm-cab { background-color: #0d1428; box-shadow: inset 0 -2.67px ##cba34d; }
 .fm-title { color: #f0e6d0; }
 .fm-icon-button image { color: #f0e6d0; }
+.fm-icon-button:disabled image { color: rgba(240, 230, 208, 0.55); }
 .fm-search-entry { color: #f0e6d0; caret-color: #d7b874; }
+.fm-search-entry placeholder, .fm-search-entry text placeholder { color: rgba(240, 230, 208, 0.55); }
+.fm-search-entry selection { background-color: rgba(215, 184, 116, 0.4); }
 .fm-search-spinner { color: #d7b874; }
 .fm-pathbar { background-color: #0e0c16; }
 .fm-crumb-chevron { color: #877f6e; }
@@ -173,7 +211,7 @@ window.fm-window, .fm-home, .fm-browser, .fm-remote-page, .fm-settings { backgro
 .fm-free { color: #f0e6d0; }
 .fm-up image { color: #d2cab9; }
 .fm-list-view { background-color: #08070d; }
-.fm-row { border-bottom: 1px solid #110f1b; }
+.fm-row { border-bottom: 1px solid ##110f1b; }
 .fm-row.selected { background-color: #19274e; }
 .fm-row-name { color: #ded8cb; }
 .fm-row-sub, .fm-row-where { color: #a19a8c; }
@@ -181,18 +219,18 @@ window.fm-window, .fm-home, .fm-browser, .fm-remote-page, .fm-settings { backgro
 .fm-grid-tile.selected { background-color: #19274e; }
 .fm-grid-tile-name { color: #ded8cb; }
 .fm-list-message { color: #ded8cb; }
-.fm-bottom { background-color: #0d1428; box-shadow: inset 0 2.67px #cba34d; }
+.fm-bottom { background-color: #0d1428; box-shadow: inset 0 2.67px ##cba34d; }
 .fm-bottom-icon { color: #f0e6d0; }
 .fm-bottom-text { color: #f0e6d0; }
 .fm-tile-name { color: #ded8cb; }
 .fm-tile-info { color: #a19a8c; }
-.fm-remote-footer { border-bottom: 1px solid #161322; }
+.fm-remote-footer { border-bottom: 1px solid ##161322; }
 .fm-footer-text { color: #ded8cb; }
 .fm-footer-plus { color: #ded8cb; }
 .fm-remote-more image { color: #a19a8c; }
 .fm-drawer-sheet { background-color: #0f0d18; }
 .fm-nav-tabs { background-color: #12101c; }
-.fm-nav-tab image { color: #26223c; }
+.fm-nav-tab image { color: #7b71af; }
 .fm-nav-tab.selected image { color: #e5e1d7; }
 .fm-nav-name { color: #e5e0d6; }
 .fm-nav-description, .fm-nav-path, .fm-nav-path-main { color: #7f7768; }
@@ -204,22 +242,29 @@ window.fm-window, .fm-home, .fm-browser, .fm-remote-page, .fm-settings { backgro
 .fm-nav-more image { color: #9b9485; }
 .fm-nav-band { background-color: #151322; }
 .fm-nav-band-text { color: #e5e0d6; }
+.fm-nav-empty { color: rgba(229, 224, 214, 0.6); }
 .fm-text-button label { color: #d7b874; }
+.fm-text-button:disabled label { color: rgba(215, 184, 116, 0.65); }
 .fm-check-text { color: #f0e6d0; }
 .fm-view-type-icon { color: #f0e6d0; }
 .fm-entry, .neo-entry.fm-entry { color: #f0e6d0; caret-color: #d7b874; }
-.neo-entry.fm-entry:focus-within { border-bottom-color: #d7b874; }
+.neo-entry.fm-entry:focus-within { border-bottom-color: ##d7b874; }
+.neo-entry.fm-entry placeholder, .neo-entry.fm-entry text placeholder { color: rgba(240, 230, 208, 0.55); }
+.neo-entry.fm-entry selection { background-color: rgba(215, 184, 116, 0.4); }
 .fm-window .neo-dialog { background-color: #1e1a2e; }
 .fm-window .neo-dialog .neo-text-button { color: #d7b874; }
 .fm-dialog-title { color: #f0e6d0; }
+.fm-dialog-message { color: rgba(240, 230, 208, 0.7); }
 .fm-dialog-count { color: #a19a8c; }
 .fm-dialog-subtitle { color: #d7b874; }
 .fm-form-label { color: #f0e6d0; }
 .fm-list-dialog-text { color: #f0e6d0; }
-.fm-scan-line { box-shadow: inset 0 -1px #28233f; }
+.fm-scan-line { box-shadow: inset 0 -1px ##28233f; }
 .fm-scan-name { color: #e3ded3; }
+.fm-scan-empty { color: rgba(240, 230, 208, 0.6); }
 .fm-property-label, .fm-property-value { color: #a19a8c; }
 .fm-progress-percent { color: #f0e6d0; }
+.fm-progress-text { color: rgba(240, 230, 208, 0.7); }
 .fm-conflict-button { background-color: #d7b874; }
 .fm-conflict-button label { color: #0a1021; }
 .fm-popup { background-color: #1e1a2e; }
@@ -241,23 +286,36 @@ window.fm-window, .fm-home, .fm-browser, .fm-remote-page, .fm-settings { backgro
 .msg-row-name.unread, .msg-row-snippet.unread { color: #e2dcd1; }
 .msg-blocked-name { color: #b4afa4; }
 .msg-blocked-unblock { color: #e6d2a8; }
+.msg-fab-label { color: #7a7a7a; }
+.msg-fab-content { color: #7a7a7a; }
 .msg-empty-text { color: #979080; }
-.outgoing .msg-message-text { color: #161423; }
+.outgoing .msg-message-text { color: #7b73af; }
+.outgoing .msg-message-status { color: #7b73af; }
 .incoming .msg-message-text { color: #f0e6d0; }
+.incoming .msg-message-status { color: rgba(240, 230, 208, 0.6); }
+.msg-message-status.failed { color: rgba(255, 0, 0, 0.95); }
 .selected .msg-message-text, .selected .msg-message-status { color: #f0e6d0; }
 .msg-compose-field { background-color: #2a2541; }
 .msg-compose-text { color: #f0e6d0; caret-color: #f0e6d0; }
+.msg-compose-text selection { background-color: rgba(230, 210, 168, 0.4); }
+.msg-compose-hint { color: rgba(240, 230, 208, 0.52); }
 .msg-send { color: #f0e6d0; }
 .msg-counter { color: #aca69a; }
 .msg-picker-field { color: #f0e6d0; caret-color: #f0e6d0; }
+.msg-picker-field > placeholder { color: rgba(240, 230, 208, 0.627); }
 .msg-picker-tabs { background-color: #213367; }
+.msg-picker-tab { color: rgba(240, 230, 208, 0.55); }
 .msg-picker-tab.selected { color: #e6d2a8; }
 .msg-picker-underline { background-color: #f0e6d0; }
 .msg-picker-letter { color: #e6d2a8; }
 .msg-picker-name { color: #b4afa4; }
 .msg-picker-number { color: #958e7e; }
+.msg-picker-type { color: rgba(240, 230, 208, 0.541); }
 .popup-menu { background-color: #0c0b13; }
+.popup-menu-text { color: rgba(240, 230, 208, 0.871); }
 .msg-window .neo-dialog { background-color: #0c0a13; }
+.msg-window .neo-dialog-title { color: rgba(240, 230, 208, 0.87); }
+.msg-window .neo-dialog-message { color: rgba(240, 230, 208, 0.87); }
 .msg-window .neo-dialog .neo-text-button { color: #d4b269; }
 .msg-window .neo-snackbar { background-color: #161423; }
 .msg-window .neo-snackbar-text { color: #f0e6d0; }
@@ -266,8 +324,34 @@ window.fm-window, .fm-home, .fm-browser, .fm-remote-page, .fm-settings { backgro
 .msg-options-divider { background-color: #1e1a2e; }
 .msg-options-title, .msg-person-name { color: #b4afa4; }
 .msg-person-number { color: #958e7e; }
+.msg-pref-title { color: rgba(240, 230, 208, 0.87); }
+.msg-pref-summary { color: rgba(240, 230, 208, 0.6); }
 .msg-pref-category { color: #e6d2a8; }
+.msg-add-contact-name { color: rgba(240, 230, 208, 0.54); }
+/* settings/src/style.css */
+.ns-root, .ns-window { background-color: #f0e6d0; }
+.ns-card { background-color: #f0e6d0; }
+window.ns-dark .ns-card { background-color: #0c0b13; }
+.ns-icon { color: #f0e6d0; }
+.ns-blue { background-color: #d0ac5e; }
+.ns-grey { background-color: #756e60; }
+.ns-accent { color: #d0ac5e; }
+.ns-parallax-card.ns-picked .ns-parallax-thumb { border-color: ##d0ac5e; }
+.ns-accent-blue { background: #cba44e; }
+.ns-accent-teal { background: #283f7f; }
+.ns-accent-slate { background: #c79c3e; }
+.ns-li { background-color: #f0e6d0; }
+window.ns-dark .ns-li { background-color: #0c0b13; }
+window.ns-window { --dialog-bg-color: ##f0e6d0; --accent-bg-color: ##d0ac5e; --accent-fg-color: ##f0e6d0; --accent-color: ##c89e43; --destructive-fg-color: ##f0e6d0; }
+window.ns-window.ns-dark { --dialog-bg-color: ##12101c; --dialog-fg-color: ##f0e6d0; --accent-color: ##dfc793; }
 /* weather/src/style.css */
-window.wx { background-color: #1a2953; }
+window.wx { color: #f0e6d0; background-color: #1a2953; }
+.wx-bar button { color: #f0e6d0; }
 .wx-card { background-color: alpha(#152142, 0.72); }
+.wx-card separator { background-color: alpha(#f0e6d0, 0.25); }
+.wx-dim { color: alpha(#f0e6d0, 0.75); }
+.wx-small { color: alpha(#f0e6d0, 0.85); }
+.wx-yesterday { color: alpha(#f0e6d0, 0.75); }
+.wx-hour { color: alpha(#f0e6d0, 0.85); }
+.wx-credit { color: alpha(#f0e6d0, 0.5); }
 .wx-moon { color: #e6d2a8; }
