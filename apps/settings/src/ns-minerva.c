@@ -22,6 +22,7 @@ struct Mn {
   GtkWidget *chain, *stt, *notes;       /* rebuilt on every refresh (no pickers inside) */
   GtkWidget *stt_timeout;               /* the cloud recognizers' time limit row */
   GtkWidget *voice_id, *voice_cap, *budget_g, *spent; /* rows updated in place */
+  GtkWidget *events, *bypass;           /* the events daemon's day: tokens used, and today's bypass switch */
   GPtrArray *caps;                      /* the budget rows: each has its brain.conf key in "mn-key" */
   char      *cap_key;                   /* the budget in money: what the spent line is compared with */
   JsonObject *st;                       /* the last status */
@@ -266,6 +267,32 @@ field_row (Mn *m, GtkWidget *group, const char *title, const char *key)
   GtkWidget *row = ns_row_value (group, title, "", FALSE, field_entered, f);
   g_object_set_data_full (G_OBJECT (row), "mn-field", f, (GDestroyNotify) field_free);
   return row;
+}
+
+/* Today's events bypass: the daemon owns it (its state file), the page only asks `minerva-config events-bypass`,
+ * which talks to it over D-Bus. Setting it back relocks the day. */
+static void
+bypass_done (Mn *m, JsonObject *root, const char *err, gpointer data)
+{
+  m->busy = FALSE;
+  if (err) {
+    g_autofree char *t = g_strdup_printf ("Not saved: %s", err);
+    say (m, t, TRUE);
+  }
+  mn_refresh (m);
+}
+
+static void
+bypass_toggled (GtkWidget *sw, GParamSpec *pspec, gpointer data)
+{
+  Mn *m = data;
+  if (ns_switch_syncing (sw) || m->busy)
+    return;
+  m->busy = TRUE;
+  say (m, "Applying…", FALSE);
+  const char *const args[] = { "events-bypass", gtk_switch_get_active (GTK_SWITCH (sw)) ? "on" : "off",
+                              "--json", NULL };
+  mn_run (m, args, bypass_done, NULL);
 }
 
 /* ---- the fallback chain ---- */
@@ -577,6 +604,20 @@ update_fields (Mn *m)
   fill_value (m->stt_timeout, setting (m, "voice.stt_timeout_s"));
   for (guint i = 0; i < m->caps->len; i++)
     fill_value (m->caps->pdata[i], setting (m, g_object_get_data (m->caps->pdata[i], "mn-key")));
+  JsonObject *ev = obj_of (m->st, "events");
+  if (ev && m->events) {
+    int used = (int) json_object_get_int_member (ev, "used");
+    int budget = (int) json_object_get_int_member (ev, "budget");
+    int online = (int) json_object_get_int_member (ev, "online_daily");
+    int online_used = (int) json_object_get_int_member (ev, "online_used");
+    g_autofree char *t = g_strdup_printf ("%d of %d tokens%s • face online %d/%d • %s", used, budget,
+                                         json_object_get_boolean_member (ev, "bypass") ? " • bypassed" : "",
+                                         online_used, online,
+        json_object_get_boolean_member (ev, "running") ? "service running" : "service not running");
+    ns_row_set_subtitle (m->events, t);
+    if (m->bypass)
+      ns_switch_quiet (ns_row_get_switch (m->bypass), json_object_get_boolean_member (ev, "bypass"));
+  }
   JsonObject *b = obj_of (m->st, "budget");
   const char *cap = m->cap_key ? setting (m, m->cap_key) : "";
   if (b && json_object_has_member (b, "usage_usd") && !json_node_is_null (json_object_get_member (b, "usage_usd"))) {
@@ -714,6 +755,10 @@ build_rows (Mn *m)
     if (!m->cap_key && json_object_get_boolean_member (o, "money"))
       m->cap_key = g_strdup (str_of (o, "key"));
   }
+  m->events = ns_row_info (m->budget_g, "Events today", "");
+  m->bypass = ns_row_switch (m->budget_g, "Bypass the events limit today",
+                             "The events keep reaching her until tomorrow, whatever the quota says", NULL, NULL);
+  g_signal_connect (ns_row_get_switch (m->bypass), "notify::active", G_CALLBACK (bypass_toggled), m);
   m->spent = ns_row_info (m->budget_g, "Spent this month", "");
 }
 
