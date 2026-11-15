@@ -96,7 +96,10 @@ on_scan (GSimpleAction *action, GVariant *parameter, gpointer data)
   GtkWindow *window = gtk_application_get_active_window (GTK_APPLICATION (data));
 
   if (window)
-    cam_window_show_scan (window);
+    {
+      cam_window_show_scan (window);
+      gtk_window_present (window);   /* a running Camera comes to the front: the tap must show something */
+    }
   else
     {
       cam_window_set_start_scan (TRUE);
