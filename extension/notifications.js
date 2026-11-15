@@ -18,7 +18,9 @@ import {animate, animateSpring, Animator, bezier, clamp, FAST_OUT_LINEAR_IN, FAS
     lerp, splineFling, Spring, VelocityTracker} from './motion.js';
 import {magnetic} from './magnetic.js';
 import {RoundRect} from './roundrect.js';
-import {Color, cogl, font, gild, rgba, SurfaceEffect} from './palette.js';
+import {bindColor, Color, font, gild, restyleActor, rgba, SurfaceEffect} from './palette.js';
+import {owlIcon} from './owl.js';
+import {isRenaissance} from './theme.js';
 import {openSettings} from './settings.js';
 import {symbolicIcon} from './statusbar.js';
 import {px, SCALE, SCREEN_H, SCREEN_W} from './units.js';
@@ -68,8 +70,6 @@ const PILL_W = 78;
 const PILL_H = 54;
 const PILL_ICON = 48;                   // 16 sp
 const PILL_TOUCH = 48;                  // the button's 16 dp padding around the pill
-const PILL_FILL = [41, 53, 55];         // surface_effect_3 flattened on the card (measured)
-const GLYPH_COLOR = [13, 26, 27];       // a circle's glyph is punched out in the card's colour (measured)
 const PRESS_ALPHA = 0.1;
 
 // --- the "Silent" header and the footer (spec §4.5, §4.6)
@@ -118,7 +118,7 @@ const fadeIn = p => ALPHA_IN(clamp((p - 0.5) / 0.5));
 const fadeOut = p => 1 - ALPHA_OUT(clamp(p / 0.5));
 
 function makeText(fontName, color, params = {}) {
-    return new Clutter.Text({font_name: fontName, color: cogl(color), ...params});
+    return bindColor(new Clutter.Text({font_name: fontName, ...params}), color);
 }
 
 // a text's natural width, screen px
@@ -247,7 +247,7 @@ function plainBody(notification) {
 // circle's glyph is punched out in it (@glyph)
 export const Row = GObject.registerClass(
 class Row extends St.Widget {
-    constructor(stack, notification, {card = SurfaceEffect[1], glyph = GLYPH_COLOR} = {}) {
+    constructor(stack, notification, {card = SurfaceEffect[1], glyph = Color.glyph} = {}) {
         super({reactive: true, width: px(ROW_W), height: px(MIN_H)});
         this._stack = stack;
         this.notification = notification;
@@ -314,17 +314,28 @@ class Row extends St.Widget {
             height: px(PILL_H + 2 * PILL_TOUCH),
         });
         const pillBox = new St.Widget({width: px(PILL_W + 2 * PILL_TOUCH), height: px(PILL_H + 2 * PILL_TOUCH)});
+        // surface_effect_3 flattened on the card (measured)
+        const pillStyle = () => `background-color: ${rgba(Color.pill)}; border-radius: ${px(PILL_H / 2).toFixed(2)}px;${gild()}`;
         const pillBg = new St.Widget({
             x: px(PILL_TOUCH), y: px(PILL_TOUCH), width: px(PILL_W), height: px(PILL_H),
-            style: `background-color: ${rgba(PILL_FILL)}; border-radius: ${px(PILL_H / 2).toFixed(2)}px;${gild()}`,
+            style: pillStyle(),
         });
         this._chevron = new VectorIcon('ic_notification_2025_expand', px(PILL_ICON), Color.onSurface);
         this._chevron.set_position(px((PILL_W - PILL_ICON) / 2), px((PILL_H - PILL_ICON) / 2));
         pillBg.add_child(this._chevron);
+        this._pillBg = pillBg;
         pillBox.add_child(pillBg);
         this._pill.set_child(pillBox);
         this._pill.connect('clicked', () => this._stack.toggleExpanded(this));
         this._content.add_child(this._pill);
+
+        // the look is live: what was copied into styles and fills follows (texts and icons are bound or Canvases)
+        restyleActor(this, () => {
+            this._pillBg.style = pillStyle();
+            this._iconKey = null;       // the circle's colours are in its style
+            this._updateIcon();
+            this._applyCard();
+        });
 
         // swiped sideways it goes (SwipeHelper, the magnetic path: magnetic.js)
         const swipe = new Clutter.PanGesture({
@@ -446,11 +457,17 @@ class Row extends St.Widget {
         const source = n.source;
         const app = source?.app ?? source?._app ?? null;
         const gicon = n.gicon ?? source?.icon ?? null;
-        const key = app ? `app:${app.get_id()}` : gicon?.to_string() ?? '';
+        // the Minerva agent's notifications carry the owl alone in the Renaissance looks
+        const owl = isRenaissance() && /minerva/i.test(app?.get_id() ?? source?.title ?? '');
+        const key = (owl ? 'owl:' : '') + (app ? `app:${app.get_id()}` : gicon?.to_string() ?? '');
         if (key === this._iconKey)
             return;
         this._iconKey = key;
         this._iconBox.destroy_all_children();
+        if (owl) {
+            this._iconBox.add_child(owlIcon(px(ICON)));
+            return;
+        }
 
         const symbolic = app ? null : symbolicIcon(gicon ?? new Gio.ThemedIcon({name: 'dialog-information'}));
         if (symbolic) {
@@ -885,8 +902,12 @@ class Footer extends St.Widget {
             can_focus: true,
             button_mask: St.ButtonMask.PRIMARY,
             accessible_name: name,
-            style: `background-color: ${rgba(...SurfaceEffect[1])}; ` +
-                `border-radius: ${px(FOOTER_PILL_H / 2).toFixed(2)}px;`,
+        });
+        const style = () => `background-color: ${rgba(...SurfaceEffect[1])}; ` +
+            `border-radius: ${px(FOOTER_PILL_H / 2).toFixed(2)}px;`;
+        button.style = style();
+        restyleActor(button, () => {
+            button.style = style();
         });
         // centred at its own size, not stretched over the pill
         child.x_align = Clutter.ActorAlign.CENTER;

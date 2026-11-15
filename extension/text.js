@@ -8,7 +8,7 @@ import Pango from 'gi://Pango';
 import PangoCairo from 'gi://PangoCairo';
 
 import {Canvas} from './icons.js';
-import {bodyFamilies, chain, setSource} from './palette.js';
+import {bodyFamilies, chain, restyleActor, setSource} from './palette.js';
 import {SCALE, screenPixels, sp} from './units.js';
 import {isRenaissance} from './theme.js';
 
@@ -39,6 +39,11 @@ class AndroidText extends Canvas {
         super();
         this._sizePx = sp(sizeSp) * SCALE;
         this._font = description(this._sizePx, wght, {wdth, rond, opsz}, sizeSp);
+        // the look is live: its faces (Michelangelus for big text) are chosen again, and the text measured again
+        restyleActor(this, () => {
+            this._font = description(this._sizePx, wght, {wdth, rond, opsz}, sizeSp);
+            this.setText(this._text);
+        });
         this._letterSpacing = letterSpacing;
         this._embolden = embolden ? fakeBoldWidth(this._sizePx) : 0;
         this._colour = colour;

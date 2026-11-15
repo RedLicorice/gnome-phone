@@ -17,6 +17,7 @@ import {KeyHaptics} from './keyhaptics.js';
 import {AppSwitchKey} from './keys.js';
 import {Keyguard} from './keyguard.js';
 import {NoWindowMipmaps} from './mipmaps.js';
+import {startLive, stopLive} from './palette.js';
 import {AndroidKeyboard} from './osk.js';
 import {TouchFocusKeyboard} from './oskfocus.js';
 import {TouchKeyboard} from './hkeyboard.js';
@@ -42,6 +43,9 @@ export default class GnomePhoneExtension extends Extension {
         const debug = GLib.build_filenamev([GLib.get_user_config_dir(), 'gnome-phone', 'debug']);
         if (GLib.file_test(debug, GLib.FileTest.EXISTS))
             global.context.unsafe_mode = true;
+
+        // the look (theme.js, palette.js) follows its settings from here until disable()
+        startLive();
 
         this._keepThroughLock();
 
@@ -259,5 +263,7 @@ export default class GnomePhoneExtension extends Extension {
         this._rotation = null;
         this._boost?.destroy();
         this._boost = null;
+        // last: the surfaces above drop their own callbacks as they go, this drops what is left and the settings' watch
+        stopLive();
     }
 }

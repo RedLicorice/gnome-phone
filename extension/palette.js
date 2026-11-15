@@ -17,6 +17,7 @@ import {px, SCALE, sp} from './units.js';
 const STOCK = {
     primary: [156, 207, 215],               // #9CCFD7, slider, active tiles, actions
     onPrimary: [13, 71, 78],                // #0D474E
+    primaryContainer: [16, 78, 86],         // the pressed PIN key
     surface: [10, 15, 16],                  // #0A0F10, volume pill
     surfaceContainerLow: [15, 21, 22],      // the power menu's panel: between surface and surfaceContainer, NOT measured
     surfaceContainer: [20, 27, 28],         // a heads-up's card: tone 9 at High's hue (2025 dark: 9, 12, 15), not measured
@@ -40,6 +41,9 @@ const STOCK = {
     pill: [41, 53, 55],                     // surface_effect_3 flattened on the card (measured)
     glyph: [13, 26, 27],                    // a circle's glyph is punched out in the card's colour (measured)
     dim: [0, 0, 0],                         // modal dim (power menu, camera sheet)
+    bar: [0, 0, 0],                         // the status bar's band over an app (day looks: light)
+    clock: [224, 224, 224],                 // the lock screen clock: a soft grey-white, the owner's choice (2026-11-04)
+    lockPill: [19, 27, 28],                 // the lock screen's notification pill
     hairline: [176, 181, 194],              // gilded edges (no edge in the stock look)
     effect0: [5, 54, 63],                   // = accent1_800
     effect1: [17, 21, 22],                  // = neutral1_500_l6
@@ -57,6 +61,7 @@ const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
 const LOOKS = {
     marble: {
         roles: {
+            primary_container: '#efe3c8',
             primary: '#9a6f2c',
             on_primary: '#ffffff',
             surface: '#f6f6f4',
@@ -94,6 +99,7 @@ const LOOKS = {
     },
     sea: {
         roles: {
+            primary_container: '#efe3c8',
             primary: '#9a6f2c',
             on_primary: '#ffffff',
             surface: '#f6efe2',
@@ -131,6 +137,7 @@ const LOOKS = {
     },
     forest: {
         roles: {
+            primary_container: '#2d3a2c',
             primary: '#e3c98a',
             on_primary: '#2a2008',
             surface: '#09110d',
@@ -167,6 +174,7 @@ const LOOKS = {
     },
     plum: {
         roles: {
+            primary_container: '#26242f',
             primary: '#d9b26a',
             on_primary: '#2a1d04',
             surface: '#08070d',
@@ -210,6 +218,7 @@ function resolve(look) {
     const colors = {
         primary: hex(r.primary),
         onPrimary: hex(r.on_primary),
+        primaryContainer: hex(r.primary_container),
         surface: hex(r.surface),
         surfaceContainerLow: hex(r.surface_container_low),
         surfaceContainer: hex(r.surface_container),
@@ -233,6 +242,9 @@ function resolve(look) {
         pill: hex(s.pill),
         glyph: hex(s.glyph),
         dim: hex(x.scrim),
+        bar: hex(look === 'marble' || look === 'sea' ? r.surface : '#000000'),
+        clock: hex(s.on_wall),
+        lockPill: hex(s.glyph),
         hairline: hex(s.hairline),
     };
     const effects = s.effects ?? [[s.accent1_800, 0.50], [s.neutral1_500_l6, 0.54], [s.accent1_100, 0.15],
@@ -322,6 +334,30 @@ export function offRestyle(owner) {
     restylers.delete(owner);
 }
 
+// A text's colour (a Cogl copy of @colour, which the look changes in place) follows the look
+export function bindColor(text, colour, alpha = 1) {
+    text.color = cogl(colour, alpha);
+    restyleActor(text, () => {
+        text.color = cogl(colour, alpha);
+    });
+    return text;
+}
+
+// A Clutter.Text's font (font(...args): the display and body chains of the theme) follows the look; @fn builds it
+export function bindFont(text, ...args) {
+    text.font_name = font(...args);
+    restyleActor(text, () => {
+        text.font_name = font(...args);
+    });
+    return text;
+}
+
+// For an actor: callback(look) on every look change until the actor is destroyed
+export function restyleActor(actor, callback) {
+    onRestyle(actor, callback);
+    actor.connect('destroy', () => offRestyle(actor));
+}
+
 function restyle(look) {
     apply(look);
     for (const [owner, callbacks] of [...restylers]) {
@@ -362,14 +398,15 @@ export function bodyFamilies() {
 }
 
 // The Renaissance theme's hairline edge for a surface's St style string (one physical pixel at the phone's scale, a
-// silver hairline: gold is kept for focus and accents); '' in the stock look
-export function gild(alpha = 0.4) {
+// hairline in the look's colour: gold is kept for focus and accents); '' in the stock look. @lift: a day look's cards
+// (the big, still ones) also get a soft shadow
+export function gild(alpha = 0.4, lift = false) {
     if (!activeLook)
         return '';
     const [r, g, b] = Color.hairline;
     const edge = ` border: ${(1 / SCALE).toFixed(3)}px solid rgba(${r}, ${g}, ${b}, ${(alpha * Color.hairlineScale).toFixed(3)});`;
-    // a day look's cards also lift off the light shade with a soft shadow (the mockup's .card)
-    return Color.shadow ? `${edge} box-shadow: 0 ${px(2).toFixed(2)}px ${px(8).toFixed(2)}px ${Color.shadow};` : edge;
+    // a day look's cards lift off the light shade with a soft shadow (the mockup's .card)
+    return lift && Color.shadow ? `${edge} box-shadow: 0 ${px(2).toFixed(2)}px ${px(8).toFixed(2)}px ${Color.shadow};` : edge;
 }
 
 // Data text (the status bar clock) in a mono face in the Renaissance theme; Pango falls to the stock face without it

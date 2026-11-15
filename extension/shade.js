@@ -17,7 +17,7 @@ import {animate, Animator, clamp, FAST_OUT_SLOW_IN, fling, lerp, MIN_FLING_VELOC
 import {NotificationStack} from './notifications.js';
 import {TickScale} from './ornament.js';
 import {isRenaissance} from './theme.js';
-import {Color, rgba, SHADE_PANEL} from './palette.js';
+import {Color, restyleActor, rgba, SHADE_PANEL} from './palette.js';
 import {QQS_HEIGHT, QSPanel} from './qs.js';
 import {wholeFrames} from './redraws.js';
 import {px, SCALE, SCREEN_H} from './units.js';
@@ -89,7 +89,7 @@ export const Shade = GObject.registerClass({
         this._tint = new St.Widget({
             width: this.width,
             height: this.height,
-            style: `background-color: ${rgba(SHADE_PANEL[0].map(Math.round), SHADE_PANEL[1])};`,
+            style: this._tintStyle(),
             opacity: 0,
         });
         this.add_child(this._tint);
@@ -98,20 +98,24 @@ export const Shade = GObject.registerClass({
         this.add_child(this._qs);
 
         // the notifications scrim: from stackY down, 32 dp top corners, accent1_800 α 0.5 · f
-        const r = px(SCRIM_RADIUS).toFixed(2);
         this._scrim = new St.Widget({
             width: this.width,
             height: px(SCREEN_H + SCRIM_RADIUS),
-            style: `background-color: ${rgba(Color.notificationScrim, 0.5)}; border-radius: ${r}px ${r}px 0 0;`,
+            style: this._scrimStyle(),
             opacity: 0,
         });
         this.add_child(this._scrim);
-        // the Renaissance look: a fine tick scale along the scrim's top edge, with a silver hairline above it
-        if (isRenaissance()) {
-            this._scrim.style += ` border-top: 1px solid ${rgba(Color.silverDim, 0.6)};`;
-            this._scrim.add_child(new TickScale(this.width));
-            this._scrim.get_last_child().set_position(0, px(6));
-        }
+        // the Renaissance looks: a fine tick scale along the scrim's top edge, with a silver hairline above it (kept
+        // hidden in the stock look; the look is live)
+        this._ticks = new TickScale(this.width);
+        this._ticks.set_position(0, px(6));
+        this._ticks.visible = isRenaissance();
+        this._scrim.add_child(this._ticks);
+        restyleActor(this, () => {
+            this._tint.style = this._tintStyle();
+            this._scrim.style = this._scrimStyle();
+            this._ticks.visible = isRenaissance();
+        });
 
         this._stack = new NotificationStack(this);
         this.add_child(this._stack);
@@ -626,6 +630,16 @@ export const Shade = GObject.registerClass({
             group.set_scale(zoom, zoom);
             group.set_translation((m.x + m.width / 2) * (1 - zoom), (m.y + m.height / 2) * (1 - zoom), 0);
         }
+    }
+
+    _tintStyle() {
+        return `background-color: ${rgba(SHADE_PANEL[0].map(Math.round), SHADE_PANEL[1])};`;
+    }
+
+    _scrimStyle() {
+        const r = px(SCRIM_RADIUS).toFixed(2);
+        return `background-color: ${rgba(Color.notificationScrim, 0.5)}; border-radius: ${r}px ${r}px 0 0;` +
+            (isRenaissance() ? ` border-top: 1px solid ${rgba(Color.silverDim, 0.6)};` : '');
     }
 
     _onDestroy() {

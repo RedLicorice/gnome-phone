@@ -2,6 +2,9 @@
 # The look machinery (theme.js, palette.js) on a memory GSettings backend, under plain gjs:
 #   extension/tests/theme-test.sh
 set -e
+# palette.js imports Cogl (mutter's typelib): without it there is nothing to run (meson: skipped)
+mutter=$(ls -d /usr/lib/*/mutter-* 2>/dev/null | head -1)
+{ [ -n "$mutter" ] && command -v glib-compile-schemas >/dev/null; } || { echo "skipped: no mutter typelibs or glib-compile-schemas"; exit 77; }
 here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/gnome-phone-theme-test.XXXXXX")
 trap 'rm -rf "$work"' EXIT
@@ -25,5 +28,5 @@ for pack in renaissance-day renaissance-night; do
     mkdir -p "$work/data/neo-launcher/iconpacks/$pack"; echo '{}' > "$work/data/neo-launcher/iconpacks/$pack/pack.json"
 done
 export GSETTINGS_BACKEND=memory GSETTINGS_SCHEMA_DIR="$work/schemas" XDG_DATA_HOME="$work/data" XDG_DATA_DIRS="$work/data"
-export GI_TYPELIB_PATH="$(ls -d /usr/lib/*/mutter-* 2>/dev/null | head -1):$GI_TYPELIB_PATH"
+export GI_TYPELIB_PATH="$mutter:$GI_TYPELIB_PATH"
 gjs -m "$here/theme.test.js"

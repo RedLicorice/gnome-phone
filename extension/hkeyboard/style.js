@@ -5,7 +5,8 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import St from 'gi://St';
 
-import {isRenaissance} from '../theme.js';
+import {offRestyle, onRestyle} from '../palette.js';
+import {currentLook} from '../theme.js';
 
 // background, key, modifier key, pressed key, label, preview/popup background
 const PALETTES = {
@@ -13,7 +14,11 @@ const PALETTES = {
     light: {bg: '#d1d3d9', key: '#ffffff', mod: '#b4b8c1', pressed: '#e6e7ea', text: '#151515', pop: '#f4f4f6'},
     black: {bg: '#000000', key: '#1c1c1e', mod: '#101011', pressed: '#3a3a3d', text: '#ffffff', pop: '#2a2a2d'},
     // the optional Renaissance look (theme.js): lapis-night keys with parchment labels, used for the default 'dark' style
-    renaissance: {bg: '#08070d', key: '#1d2142', mod: '#13121e', pressed: '#33407f', text: '#f0e6d0', pop: '#262b57'},
+    plum: {bg: '#08070d', key: '#1d2142', mod: '#13121e', pressed: '#33407f', text: '#f0e6d0', pop: '#262b57'},
+    // ... and the other looks of it: Carrara and sand by day, green-black marble by night
+    marble: {bg: '#e4e5e8', key: '#fafaf7', mod: '#d3d5da', pressed: '#ecdfc0', text: '#2b2c31', pop: '#ffffff'},
+    sea: {bg: '#ece3d2', key: '#fbf7ee', mod: '#ddd3bf', pressed: '#e8d8b0', text: '#2c2b29', pop: '#fffcf6'},
+    forest: {bg: '#09110d', key: '#182420', mod: '#0d1511', pressed: '#34543f', text: '#e6efe4', pop: '#1e2b25'},
     material: {bg: '#263238', key: '#37474f', mod: '#2c393f', pressed: '#4f636d', text: '#eceff1', pop: '#455a64'},
 };
 
@@ -35,12 +40,14 @@ export class KeyboardStyle {
             this._file = null;
             this.update(true);
         }, this);
+        // the look is live: the stylesheet is written again when the look (and so the palette) changes
+        onRestyle(this, () => this.update());
     }
 
     css() {
         const s = this._settings;
         const style = s.get_string('style');
-        const p = (isRenaissance() && style === 'dark' ? PALETTES.renaissance : PALETTES[style]) ?? PALETTES.dark;
+        const p = (currentLook() && style === 'dark' ? PALETTES[currentLook()] : PALETTES[style]) ?? PALETTES.dark;
         const row = this._rowHeight();
         const font = Math.max(8, Math.round(row * 0.42 * s.get_int('label-scale') / 100));
         const radius = s.get_int('key-radius');
@@ -100,6 +107,7 @@ export class KeyboardStyle {
     }
 
     destroy() {
+        offRestyle(this);
         this._context.disconnectObject(this);
         if (this._file)
             this._context.get_theme().unload_stylesheet(this._file);

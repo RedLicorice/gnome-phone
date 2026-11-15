@@ -17,7 +17,7 @@ import {raiseToTop} from './endmark.js';
 import {vibrate} from './haptics.js';
 import {Canvas, paintIcon, VectorIcon} from './icons.js';
 import {animate, animateSpring, bezier, clamp, EMPHASIZED_DECELERATE, lerp, Spring} from './motion.js';
-import {Color, gild, rgba, setSource} from './palette.js';
+import {Color, gild, restyleActor, rgba, setSource} from './palette.js';
 import {openSettings} from './settings.js';
 import {px, SCALE, SCREEN_H, screenPixels} from './units.js';
 
@@ -263,11 +263,15 @@ class VolumeDialog extends St.Widget {
         this._body = new St.Widget({
             x: px(PILL_X), y: px(BODY_TOP), width: px(PILL_W), height: px(PILL_BOTTOM - BODY_TOP),
             reactive: true,
-            style: `background-color: ${rgba(Color.surface)}; ` +
-                `border-radius: 0 0 ${px(PILL_RADIUS).toFixed(2)}px ${px(PILL_RADIUS).toFixed(2)}px;`,
+            style: this._bodyStyle(),
         });
         this.add_child(this._body);
         this._ringerBg = new St.Widget({x: px(PILL_X), width: px(PILL_W), reactive: true});
+        // the look is live: the pill's body, the ringer's cap and its buttons (the slider is a Canvas)
+        restyleActor(this._body, () => {
+            this._body.style = this._bodyStyle();
+            this._layoutRinger();
+        });
         this.add_child(this._ringerBg);
 
         this._slider = new VolumeSlider(this);
@@ -297,6 +301,9 @@ class VolumeDialog extends St.Widget {
             width: px(SETTINGS_RIPPLE), height: px(SETTINGS_RIPPLE),
             style: shapeStyle(Color.onSurface, SETTINGS_RIPPLE / 2, 0.1),
             opacity: 0,
+        });
+        restyleActor(ripple, () => {
+            ripple.style = shapeStyle(Color.onSurface, SETTINGS_RIPPLE / 2, 0.1);
         });
         const box = new St.Widget({width: px(BUTTON), height: px(BUTTON)});
         box.add_child(ripple);
@@ -642,6 +649,11 @@ class VolumeDialog extends St.Widget {
             });
         });
         this._layoutRinger();
+    }
+
+    _bodyStyle() {
+        return `background-color: ${rgba(Color.surface)}; ` +
+            `border-radius: 0 0 ${px(PILL_RADIUS).toFixed(2)}px ${px(PILL_RADIUS).toFixed(2)}px;`;
     }
 
     _styleRingerButton(b) {

@@ -4,7 +4,7 @@ import GObject from 'gi://GObject';
 import St from 'gi://St';
 
 import {ICONS} from './icondata.js';
-import {setSource} from './palette.js';
+import {restyleActor, setSource} from './palette.js';
 
 export function hasIcon(name) {
     return name in ICONS;
@@ -103,6 +103,8 @@ class Canvas extends St.DrawingArea {
     constructor(params) {
         super(params);
         this._width = this._height = -1;
+        // the look's colours changed in place (palette.js): paint again
+        restyleActor(this, () => this.queue_repaint());
     }
 
     vfunc_allocate(box) {

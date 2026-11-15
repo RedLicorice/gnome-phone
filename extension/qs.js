@@ -14,7 +14,7 @@ import * as SystemActions from 'resource:///org/gnome/shell/misc/systemActions.j
 import {addEndMark} from './endmark.js';
 import {Canvas, hasIcon, paintIcon, VectorIcon} from './icons.js';
 import {animate, animateSpring, clamp, lerp, Spring} from './motion.js';
-import {Color, cogl, font, gild, mix, rgba, setSource, SurfaceEffect} from './palette.js';
+import {bindColor, bindFont, Color, cogl, gild, mix, restyleActor, rgba, setSource, SurfaceEffect} from './palette.js';
 import {openSettings} from './settings.js';
 import {inkBox, SystemIcons} from './statusbar.js';
 import {px, screenPixels, SCALE, SCREEN_H, SCREEN_W} from './units.js';
@@ -76,13 +76,13 @@ const HEADER_FADE_IN = 0.58;
 const HEADER_DISPLACEMENT = 0.1066;
 
 // fonts fitted to the stills' pixels (Google Sans Flex, rounded)
-const TILE_LABEL_FONT = font(14, 600);              // variable-title-small-emphasized
-const TILE_SECONDARY_FONT = font(12, 500);          // label-medium
-const CLOCK_FONT = font(14, 650);                   // variable-body-medium-emphasized
-const CLOCK_BIG_FONT = font(14 * CLOCK_SCALE, 650, {opsz: 14});
-const DATE_FONT = font(14, 600);
-const CARRIER_FONT = font(14, 550);
-const BUILD_FONT = font(12, 500);
+const TILE_LABEL_FONT = [14, 600];              // variable-title-small-emphasized
+const TILE_SECONDARY_FONT = [12, 500];          // label-medium
+const CLOCK_FONT = [14, 650];                   // variable-body-medium-emphasized
+const CLOCK_BIG_FONT = [14 * CLOCK_SCALE, 650, {opsz: 14}];
+const DATE_FONT = [14, 600];
+const CARRIER_FONT = [14, 550];
+const BUILD_FONT = [12, 500];
 
 const CAP_HEIGHT = 0.73;                // cap height / em of the font (spec §4: 0.72-0.74)
 
@@ -217,11 +217,12 @@ class Tile extends St.Button {
         this._content = new St.Widget({x_expand: true, y_expand: true});
         this.set_child(this._content);
 
+        restyleActor(this, () => this._applyStyle());
         this._icon = new VectorIcon(spec.icon(state), px(this.wide ? LARGE_ICON : ICON), Color.onSurface);
         this._content.add_child(this._icon);
         if (this.wide) {
-            this._label = new Clutter.Text({font_name: TILE_LABEL_FONT, text: spec.label});
-            this._secondary = new Clutter.Text({font_name: TILE_SECONDARY_FONT});
+            this._label = bindFont(new Clutter.Text({text: spec.label}), ...TILE_LABEL_FONT);
+            this._secondary = bindFont(new Clutter.Text(), ...TILE_SECONDARY_FONT);
             this._content.add_child(this._label);
             this._content.add_child(this._secondary);
         }
@@ -297,7 +298,7 @@ class Tile extends St.Button {
 
     _applyStyle() {
         const {bg, fg} = this._colors();
-        this.style = `background-color: ${colorStyle(bg)}; border-radius: ${px(TILE_RADIUS).toFixed(2)}px;${gild()}`;
+        this.style = `background-color: ${colorStyle(bg)}; border-radius: ${px(TILE_RADIUS).toFixed(2)}px;${gild(0.4, true)}`;
         this._highlight.style = `background-color: ${rgba(Color.onSurface, 0.15)}; ` +
             `border-radius: ${px(TILE_RADIUS).toFixed(2)}px;`;
         this._icon.setColor(fg[0], fg[1]);
@@ -375,6 +376,7 @@ class BrightnessSlider extends St.Widget {
             x: px(AUTO_X), y: px((THUMB_H - AUTO_SIZE) / 2), width: px(AUTO_SIZE), height: px(AUTO_SIZE),
             reactive: true, can_focus: true, accessible_name: 'Adaptive brightness',
         });
+        restyleActor(this, () => this._styleAuto());
         this._autoIcon = new VectorIcon('ic_qs_brightness_auto_off', px(72), Color.onSurface);
         this._auto.set_child(this._autoIcon);
         this._auto.connect('clicked', () => {
@@ -543,6 +545,9 @@ class FooterButton extends St.Button {
             style: `background-color: ${colorStyle(bg)}; border-radius: ${px(FOOTER_BUTTON / 2)}px;`,
         });
         this.set_child(new VectorIcon(icon, px(FOOTER_ICON), fg));
+        restyleActor(this, () => {
+            this.style = `background-color: ${colorStyle(bg)}; border-radius: ${px(FOOTER_BUTTON / 2)}px;`;
+        });
     }
 });
 
@@ -554,10 +559,10 @@ class ShadeHeader extends St.Widget {
         super({width: px(SCREEN_W), height: px(260)});
         this._state = state;
 
-        this._clock = new Clutter.Text({font_name: CLOCK_FONT, color: cogl(Color.white)});
-        this._bigClock = new Clutter.Text({font_name: CLOCK_BIG_FONT, color: cogl(Color.white), visible: false});
-        this._date = new Clutter.Text({font_name: DATE_FONT, color: cogl(Color.white)});
-        this._carrier = new Clutter.Text({font_name: CARRIER_FONT, color: cogl(Color.white), opacity: 0});
+        this._clock = bindColor(bindFont(new Clutter.Text(), ...CLOCK_FONT), Color.onWall);
+        this._bigClock = bindColor(bindFont(new Clutter.Text({visible: false}), ...CLOCK_BIG_FONT), Color.onWall);
+        this._date = bindColor(bindFont(new Clutter.Text(), ...DATE_FONT), Color.onWall);
+        this._carrier = bindColor(bindFont(new Clutter.Text({opacity: 0}), ...CARRIER_FONT), Color.onWall);
         this._icons = new SystemIcons(state, {end: ICONS_QQS[0], centerY: ICONS_QQS[1], height: 116});
         for (const child of [this._icons, this._clock, this._bigClock, this._date, this._carrier])
             this.add_child(child);
@@ -672,8 +677,8 @@ class QSPanel extends St.Widget {
         // selectable: a Clutter.Text is by default, and a swipe closing the shade from this row painted the selection
         // over it, a pale box.
         const build = GLib.get_os_info('PRETTY_NAME') ?? 'GNOME';
-        this._build = new Clutter.Text({font_name: BUILD_FONT, color: cogl(Color.onSurface), text: build,
-            reactive: true, selectable: false});
+        this._build = bindColor(bindFont(new Clutter.Text({text: build, reactive: true, selectable: false}), ...BUILD_FONT),
+            Color.onSurface);
         const copy = new Clutter.ClickGesture();
         copy.connect('recognize', () => {
             St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, build);
