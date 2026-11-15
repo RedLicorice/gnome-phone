@@ -38,7 +38,7 @@
     </key>
     <key name="last-camera-mode" type="s">
       <default>'photo'</default>
-      <summary>The mode last used: photo, video or qr</summary>
+      <summary>The mode last used: photo, video, qr or night</summary>
     </key>
     <key name="last-grid-mode" type="s">
       <default>'off'</default>
