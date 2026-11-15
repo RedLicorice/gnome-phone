@@ -1,5 +1,6 @@
 /* neo-ripple: see neo-ripple.h. */
 #include "neo-ripple.h"
+#include "neo-style.h"
 
 #include <math.h>
 #include <string.h>
@@ -158,5 +159,8 @@ neo_ripple_snapshot (NeoRipple *ripple, GtkSnapshot *snapshot, const graphene_re
 GdkRGBA
 neo_ripple_default_color (void)
 {
+  /* white on the dark surfaces; a light look's ripple is ink, or it would not show on its pale cards */
+  if (neo_theme_is_day ())
+    return (GdkRGBA) { 0x2b / 255.f, 0x2c / 255.f, 0x31 / 255.f, 0.12f };
   return (GdkRGBA) { 1, 1, 1, 0.2f / 2 };
 }
