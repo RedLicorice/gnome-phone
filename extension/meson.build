@@ -20,6 +20,8 @@ if gjs.found()
   # the look: effective look over all settings, Color changed in place, the wallpaper and icon pack swaps (needs mutter's
   # Cogl typelib and glib-compile-schemas; the script skips otherwise)
   test('theme', find_program('bash'), args: [files('tests/theme-test.sh')])
+  # the lock screen's fingerprint states and words: plain data, no shell library to import
+  test('finger', gjs, args: ['-m', files('tests/finger.test.js')])
 endif
 
 # appmem.py runs as a program of its own (recents.js)

@@ -21,6 +21,8 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as Signals from 'resource:///org/gnome/shell/misc/signals.js';
 
 import {PatternView, PinView, Strings, touchSlot, tryAgainIn} from './bouncer.js';
+import {fingerState, FingerStrings} from './finger.js';
+import {FingerHint, FingerSensor} from './fingerhint.js';
 import {vibrate} from './haptics.js';
 import {Canvas, paintIcon} from './icons.js';
 import {animate, clamp, EMPHASIZED_ACCELERATE, FAST_OUT_SLOW_IN, lerp, LINEAR, MIN_FLING_VELOCITY,
@@ -42,10 +44,11 @@ const GP_AUTH = ['/usr/local/libexec/gp-auth', '/usr/libexec/gp-auth'];
 // A finger on the side sensor (gp-auth --fingerprint, pam_fprintd: one try per run) unlocks. The sensor is in the
 // power key and listens while the phone is locked, screen off too: with the screen off a result counts only with the
 // key's press that wakes the phone (Xiaomi's "press to unlock"), a touch in a pocket alone does nothing.
-// After this many misses only the PIN or pattern does, until it is used; after a restart and a Lockdown too.
-const FINGER_MAX_MISSES = 5;
-// a run that ends without a finger this soon found nothing to match with (no sensor, no prints, fprintd busy): not
-// started again until the screen next comes on
+// The miss limit, the re-arm retries and their delay are de.yesman.neo's (finger-max-misses, finger-retry-count,
+// finger-retry-delay-ms); after the misses only the PIN or pattern does, until it is used, and after a restart and a
+// Lockdown too. The screen shows which of those it is, on the right edge at the power key (finger.js, fingerhint.js).
+// a run that ends without a finger this soon found nothing to match with (no sensor, no prints, fprintd busy): the
+// re-arm is retried
 const FINGER_GAVE_UP_US = 3 * 1000 * 1000;
 // Android's biometric reject: two short buzzes
 const FINGER_MISS_BUZZ = [[1, 30], [0, 80], [1, 30]];
@@ -135,6 +138,12 @@ function neoSettings() {
     return schema ? new Gio.Settings({settings_schema: schema}) : null;
 }
 
+// an int of de.yesman.neo, 0 when the settings or the key are not there: a schema compiled before the key existed
+// would abort the shell on get_int
+function neoInt(settings, key) {
+    return settings?.settings_schema?.has_key(key) ? settings.get_int(key) : 0;
+}
+
 // One line of AndroidText placed by its ink: left at its logical start (or centred), its ink top at a y
 function placeText(text, {left, centre, inkTop}) {
     const x = centre !== undefined ? centre - text.textWidth / 2 : left;
@@ -209,6 +218,11 @@ export class Keyguard extends Signals.EventEmitter {
         this._finger = null;            // the running gp-auth --fingerprint
         this._fingerMisses = 0;
         this._fingerPending = null;     // a screen-off result waiting for the power key's press (wokeUp)
+        this._fingerRetries = 0;        // re-arms spent since the sensor last held the device
+        this._fingerRetryId = 0;
+        this._fingerSignal = '';        // the last fprintd VerifyStatus state, while it still says something
+        this._fingerHint = null;
+        this._fingerSensor = null;
         this._wokeByPressAt = 0;
         this._awake = true;             // the screen is on (power.js: goToSleep / wakeUp)
         // an app's window over the lock screen (setOccluded), and the other windows' actors hidden meanwhile
@@ -218,6 +232,13 @@ export class Keyguard extends Signals.EventEmitter {
         this._loadThrottle();
 
         this._build();
+        this._fingerSensor = new FingerSensor(state => {
+            // only a run the lock screen started says what this phone's sensor is doing
+            if (!this._finger)
+                return;
+            this._fingerSignal = state;
+            this._syncFingerHint();
+        });
         this._wallClock = new GnomeDesktop.WallClock({time_only: true});
         this._wallClock.connectObject('notify::clock', () => this._syncClock(), this);
         this._interface.connectObject('changed::clock-format', () => this._syncClock(),
@@ -252,6 +273,20 @@ export class Keyguard extends Signals.EventEmitter {
 
     get _secure() {
         return this._lockType !== 'swipe';
+    }
+
+    // the sensor's policy, from de.yesman.neo: no settings, no sensor (the schema is installed with the extension,
+    // and a schema too old to know a key reads as 0: no arming, never a crash)
+    get _fingerMaxMisses() {
+        return neoInt(this._neo, 'finger-max-misses');
+    }
+
+    get _fingerRetryCount() {
+        return neoInt(this._neo, 'finger-retry-count');
+    }
+
+    get _fingerRetryDelayMs() {
+        return neoInt(this._neo, 'finger-retry-delay-ms');
     }
 
     // --- the view
@@ -310,9 +345,14 @@ export class Keyguard extends Signals.EventEmitter {
         });
         this._indication = new AndroidText('', INDICATION_SIZE, INDICATION_WGHT, {colour: Color.onWall, opsz: 16});
         this._content.add_child(this._indication);
+        // the sensor's state, on the right edge at the power key (fingerhint.js)
+        this._fingerHint = new FingerHint();
+        this._content.add_child(this._fingerHint);
 
         this._bouncerBox = new St.Widget({width: monitor.width, height: monitor.height, opacity: 0, visible: false});
         this.actor.add_child(this._bouncerBox);
+        // the bouncer carries its own messages: the hint goes while it is up, and comes back with the lock screen
+        this._bouncerBox.connect('notify::visible', () => this._syncFingerHint());
         this.actor.add_child(new Clutter.Actor());
 
         // the look is live: what was copied into styles follows (the text and the lock icon are Canvases)
@@ -320,6 +360,7 @@ export class Keyguard extends Signals.EventEmitter {
             this._scrim.style = this._scrimStyle();
             this._pill.style = this._pillStyle();
             this._syncPill();
+            this._fingerHint?.restyle();
         });
 
         this._tracker = new VelocityTracker();
@@ -426,6 +467,7 @@ export class Keyguard extends Signals.EventEmitter {
         }
         this.showing = true;
         setLockedHint(true);
+        this._fingerSignal = '';
         this._unlocking?.stop();
         this._lockIcon.unlocked = !this._secure;
         this._syncClock();
@@ -539,31 +581,75 @@ export class Keyguard extends Signals.EventEmitter {
 
     get _fingerAllowed() {
         return this.showing && this._secure && !this._afterRestart && !this._lockedDown &&
-            !this._unlockingNow && !this.occludedBy && this._fingerMisses < FINGER_MAX_MISSES;
+            !this._unlockingNow && !this.occludedBy && !this._lockedOut &&
+            this._fingerMisses < this._fingerMaxMisses;
     }
 
+    // The hint is redrawn on the same call sites as the arming: every flag above is one of its states.
     _syncFinger() {
         if (this._fingerAllowed)
             this._startFinger();
         else
             this._stopFinger();
+        this._syncFingerHint();
+    }
+
+    // the sensor's state on the right edge, at the power key (finger.js says what each one means)
+    _syncFingerHint() {
+        if (!this._fingerHint)
+            return;
+        this._fingerHint.setState(fingerState({
+            secure: this._secure,
+            bouncer: this._bouncerBox?.visible ?? false,
+            lockedDown: this._lockedDown,
+            afterRestart: this._afterRestart,
+            lockedOut: this._lockedOut,
+            misses: this._fingerMisses,
+            max: this._fingerMaxMisses,
+            signal: this._fingerSignal,
+            armed: !!this._finger,
+        }), this._lockType === 'pattern' ? 'pattern' : 'pin');
+    }
+
+    // an arming that found no sensor is retried, as de.yesman.neo allows: fprintd off the bus, the device not
+    // claimed, the helper missing. Retries are not attempts: only a run's own miss counts against the limit.
+    _scheduleFingerRetry() {
+        if (this._fingerRetryId || !this._fingerAllowed || this._fingerRetries >= this._fingerRetryCount)
+            return;
+        this._fingerRetries++;
+        this._fingerRetryId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, this._fingerRetryDelayMs, () => {
+            this._fingerRetryId = 0;
+            // through the guard, which also redraws the hint
+            this._syncFinger();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _cancelFingerRetry() {
+        if (this._fingerRetryId)
+            GLib.source_remove(this._fingerRetryId);
+        this._fingerRetryId = 0;
     }
 
     async _startFinger() {
         if (this._finger)
             return;
         const helper = GP_AUTH.find(p => GLib.file_test(p, GLib.FileTest.IS_EXECUTABLE));
-        if (!helper)
+        if (!helper) {
+            this._scheduleFingerRetry();
             return;
+        }
         let proc;
         try {
             proc = Gio.Subprocess.new([helper, '--fingerprint'],
                 Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE);
         } catch (e) {
             logError(e, 'gnome-phone: gp-auth --fingerprint');
+            this._scheduleFingerRetry();
             return;
         }
         this._finger = proc;
+        this._fingerSensor?.start();
         const started = GLib.get_monotonic_time();
         try {
             await proc.wait_async(null);
@@ -579,6 +665,9 @@ export class Keyguard extends Signals.EventEmitter {
 
     // SIGINT: pam_fprintd stops the verify and lets the sensor go
     _stopFinger() {
+        this._cancelFingerRetry();
+        this._fingerRetries = 0;
+        this._fingerSignal = '';
         const proc = this._finger;
         this._finger = null;
         proc?.send_signal(2);
@@ -586,8 +675,10 @@ export class Keyguard extends Signals.EventEmitter {
 
     // @status: gp-auth --fingerprint's, 0 a match, 1 a miss, 3 no finger (timeout) or nothing to match, 2 PAM failed
     _fingerDone(status, usec) {
-        if (!this._fingerAllowed)
+        if (!this._fingerAllowed) {
+            this._syncFingerHint();
             return;
+        }
         // screen off: the result waits for the power key's press (wokeUp), a touch alone is neither a match nor a miss
         if (!this._awake && (status === 0 || status === 1)) {
             this._fingerPending = {status, usec, at: GLib.get_monotonic_time()};
@@ -596,6 +687,8 @@ export class Keyguard extends Signals.EventEmitter {
         }
         if (status === 0) {
             this._fingerMisses = 0;
+            this._fingerRetries = 0;
+            this._fingerSignal = '';
             if (this.bouncerShowing && this._bouncer)
                 this._bouncer.disappear(() => this._goingAway());
             else
@@ -604,15 +697,28 @@ export class Keyguard extends Signals.EventEmitter {
         }
         if (status === 1) {
             this._fingerMisses++;
+            this._fingerSignal = 'miss';
             vibrate(FINGER_MISS_BUZZ);
             if (this._bouncerActive && !this._lockedOut && !this._checking) {
-                this._bouncer.setMessage(this._fingerMisses < FINGER_MAX_MISSES ? 'Fingerprint not recognised'
-                    : 'Too many attempts', this._fingerMisses < FINGER_MAX_MISSES ? '' : this._strings.prompt);
+                this._bouncer.setMessage(this._fingerMisses < this._fingerMaxMisses ? FingerStrings.miss
+                    : FingerStrings.tooMany[this._lockType === 'pattern' ? 'pattern' : 'pin'],
+                this._fingerMisses < this._fingerMaxMisses ? '' : this._strings.prompt);
             }
-        } else if (usec < FINGER_GAVE_UP_US) {
+            // a rejected touch: armed again at once, at the miss limit or not (the guard says whether it may be)
+            this._syncFinger();
             return;
         }
-        this._syncFinger();
+        // no finger at all, or PAM could not run. A run that waited out its window held the sensor: it is re-armed
+        // now, and the retry budget starts again. One that ended at once never found the sensor: the budget pays.
+        if (status === 3 && usec >= FINGER_GAVE_UP_US) {
+            this._fingerRetries = 0;
+            this._fingerSignal = '';
+            this._syncFinger();
+            return;
+        }
+        this._fingerSignal = '';
+        this._scheduleFingerRetry();
+        this._syncFingerHint();
     }
 
     // --- the swipe up and the bouncer
@@ -983,6 +1089,8 @@ export class Keyguard extends Signals.EventEmitter {
         if (this._countdownId)
             GLib.source_remove(this._countdownId);
         this._countdownId = 0;
+        // the sensor is off while the PIN's own timeout runs
+        this._syncFinger();
         if (!this._bouncerActive)
             return;
         if (!this._lockedOut) {
@@ -994,6 +1102,8 @@ export class Keyguard extends Signals.EventEmitter {
             const left = Math.round((this._lockedUntil - Date.now()) / 1000);
             if (left <= 0 || !this._bouncerActive) {
                 this._countdownId = 0;
+                // the timeout is over: the sensor may hold the device again
+                this._syncFinger();
                 this._showPrompt();
                 this._bouncer?.setEnabled(true);
                 return GLib.SOURCE_REMOVE;
@@ -1131,6 +1241,7 @@ export class Keyguard extends Signals.EventEmitter {
     destroy() {
         offRestyle(this);
         this._stopFinger();
+        this._fingerSensor?.stop();
         this._settle?.stop();
         this._unlocking?.stop();
         wholeFrames(this, false);
