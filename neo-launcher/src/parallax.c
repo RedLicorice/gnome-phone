@@ -11,6 +11,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "chisel.h"
 #include "gfx.h"
 #include "image.h"
 
@@ -28,6 +29,10 @@
 #define REST_G 0.006
 #define REST_TICKS 60
 #define STILL 30            /* frames without a move: at rest, the idle poll takes over */
+/* the chisel light follows the tilt, and drifts by itself once the phone has been still this long (the mockup's 2.5 s);
+ * the drift is redrawn from a timer at this rate, only while the parallax runs (see chisel.h) */
+#define LIGHT_FOLLOW_US 2500000
+#define LIGHT_HZ 6
 
 typedef struct {
   char   *file;
@@ -61,6 +66,9 @@ struct Parallax {
   double      ox, oy, tx, ty;
   int         still;
   guint       idle;
+  Chisel     *chisel;       /* the marks drawn over the layers, if the set has them */
+  guint       chisel_timer;
+  gint64      last_move;    /* monotonic µs of the last tilt */
   void      (*wake) (void *data);
   void       *wake_data;
 };
@@ -221,6 +229,12 @@ ssc_stop (Parallax *p)
     ssc_owner = NULL;
 }
 
+static bool
+has_sensor (Parallax *p)
+{
+  return p->accel[0] || p->use_ssc;
+}
+
 static void
 find_accel (Parallax *p)
 {
@@ -332,6 +346,7 @@ step (Parallax *p)
     return false;
   p->ox = ox;
   p->oy = oy;
+  p->last_move = g_get_monotonic_time ();
   return true;
 }
 
@@ -359,15 +374,21 @@ parallax_tick (Parallax *p)
 {
   if (!p || !p->running)
     return false;
+  /* the light: where the tilt puts it, or drifting; a frame more while it still eases */
+  bool light = false;
+  if (p->chisel) {
+    gint64 now = g_get_monotonic_time ();
+    light = chisel_update (p->chisel, now, p->ox, p->oy, now - p->last_move < LIGHT_FOLLOW_US);
+  }
   if (p->still >= STILL)
-    return false;           /* the idle poll has it */
+    return light;           /* the idle poll has it */
   if (step (p)) {
     p->still = 0;
     return true;
   }
   if (++p->still == STILL) {
     set_rate (p, RATE_IDLE);
-    if (!p->idle)
+    if (!p->idle && has_sensor (p))
       p->idle = g_timeout_add (IDLE_MS, idle_poll, p);
   }
   return true;              /* a few more frames before it counts as still */
@@ -407,6 +428,9 @@ parallax_new (const char *dir, void (*wake) (void *data), void *data)
     l->depth = json_object_has_member (lo, "depth") ? json_object_get_double_member (lo, "depth") : 0;
     g_ptr_array_add (p->layers, l);
   }
+  if (json_object_has_member (o, "chisel"))
+    p->chisel = chisel_new (json_object_get_object_member (o, "chisel"), dir);
+  p->last_move = G_MININT64 / 2;       /* not tilted yet: the light drifts from the start */
   find_accel (p);
   return p;
 }
@@ -431,6 +455,9 @@ parallax_free (Parallax *p)
     return;
   if (p->idle)
     g_source_remove (p->idle);
+  if (p->chisel_timer)
+    g_source_remove (p->chisel_timer);
+  chisel_free (p->chisel);
   ssc_stop (p);
   set_rate (p, RATE_IDLE);
   g_ptr_array_unref (p->layers);
@@ -459,15 +486,31 @@ parallax_resize (Parallax *p, int w, int h, double scale)
     l->tex = pb ? image_texture (pb) : NULL;
     g_clear_object (&pb);
   }
-  g_message ("parallax: %u layers for %dx%d in %.0f ms", p->layers->len, w, h,
+  if (p->chisel)
+    chisel_load (p->chisel, w, h);
+  g_message ("parallax: %u layers%s for %dx%d in %.0f ms", p->layers->len, p->chisel ? " and chisel" : "", w, h,
              (g_get_monotonic_time () - t0) / 1000.0);
+}
+
+static gboolean
+chisel_timer (gpointer data)
+{
+  Parallax *p = data;
+  if (!p->running) {
+    p->chisel_timer = 0;
+    return G_SOURCE_REMOVE;
+  }
+  gint64 now = g_get_monotonic_time ();
+  if (chisel_update (p->chisel, now, p->ox, p->oy, now - p->last_move < LIGHT_FOLLOW_US) && p->wake)
+    p->wake (p->wake_data);
+  return G_SOURCE_CONTINUE;
 }
 
 void
 parallax_run (Parallax *p, bool run)
 {
-  if (!p || p->running == run || (!p->accel[0] && !p->use_ssc))
-    return;                 /* a still picture has no sensor to follow */
+  if (!p || p->running == run || (!has_sensor (p) && !p->chisel))
+    return;                 /* a still picture has no sensor to follow, and no light to move */
   p->running = run;
   p->still = 0;
   set_rate (p, run ? RATE_RUN : RATE_IDLE);
@@ -475,6 +518,12 @@ parallax_run (Parallax *p, bool run)
     ssc_start (p);
   else
     ssc_stop (p);
+  if (run && p->chisel && !p->chisel_timer)
+    p->chisel_timer = g_timeout_add (1000 / LIGHT_HZ, chisel_timer, p);
+  if (!run && p->chisel_timer) {
+    g_source_remove (p->chisel_timer);
+    p->chisel_timer = 0;
+  }
   if (!run && p->idle) {
     g_source_remove (p->idle);
     p->idle = 0;
@@ -496,5 +545,7 @@ parallax_draw (Parallax *p, float zoom)
     float dy = (float) (-p->oy * p->range * l->depth * p->scale);
     gfx_image (l->tex, -(l->margin + dx), -(l->margin + dy), l->tex->w, l->tex->h, 0, 1);
   }
+  if (p->chisel)
+    chisel_draw (p->chisel);
   gfx_restore ();
 }
