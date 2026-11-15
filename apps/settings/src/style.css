@@ -148,3 +148,7 @@ window.ns-ren dialog entry, window.ns-ren dialog passwordentry {
 window.ns-ren dialog entry:focus-within, window.ns-ren dialog passwordentry:focus-within {
   box-shadow: inset 0 0 0 1px @ns_gold, 0 0 8px alpha(@ns_amber, 0.5); }
 window.ns-ren dialog separator { background-color: alpha(@ns_silver, 0.25); }
+
+/* the multi-line editors of Minerva > Prompt (system prompt, state template) */
+.ns-editor-box { min-height: 220px; border-radius: 12px; }
+.ns-editor { font-family: monospace; padding: 8px; }

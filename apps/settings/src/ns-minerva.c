@@ -38,6 +38,7 @@ struct Mn {
   char      *claude_hint;               /* "signed in"…: asked of the Claude CLI once, when the page opens */
   gboolean   picks_built;               /* the pickers are built once: a refresh must not free what a picker page points to */
   gboolean   busy;
+  gboolean   groups_only;               /* the Prompt page: just the data-driven groups and the editors */
 };
 
 /* ---- running minerva-config (ns-mc.c) ---- */
@@ -843,6 +844,16 @@ status_done (Mn *m, JsonObject *root, const char *err, gpointer data)
   if (m->st)
     json_object_unref (m->st);
   m->st = json_object_ref (root);
+  if (m->groups_only) {
+    if (!m->picks_built) {
+      m->picks_built = TRUE;
+      build_groups (m);
+      ns_prompt_build (m->sg_box, G_OBJECT (m->page), obj_of (m->st, "prompt_ui"));
+    }
+    fill_groups (m);
+    fill_voiceprint (m);
+    return;
+  }
   if (!m->picks_built)
     build_rows (m);
   chain_fill (m);
@@ -884,6 +895,29 @@ mn_free (Mn *m)
   g_free (m);
 }
 
+/* Minerva > Prompt: the wake word and reply groups come with the status (data), then the editors (ns-prompt.c) */
+static void ns_page_prompt (GtkWidget *row, gpointer data);
+
+static void
+ns_page_prompt (GtkWidget *row, gpointer data)
+{
+  GtkWidget *c;
+  AdwNavigationPage *page = ns_page_new ("Prompt", &c);
+  Mn *m = g_new0 (Mn, 1);
+  m->page = page;
+  m->groups_only = TRUE;
+  g_object_set_data_full (G_OBJECT (page), "mn", m, (GDestroyNotify) mn_free);
+  m->msg = ns_note (c, "");
+  gtk_widget_set_visible (m->msg, FALSE);
+  gtk_widget_set_margin_top (m->msg, 0);
+  m->srows = g_ptr_array_new ();
+  m->vp_actions = g_ptr_array_new ();
+  m->sg_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+  gtk_box_append (GTK_BOX (c), m->sg_box);
+  mn_refresh (m);
+  ns_push (page);
+}
+
 void
 ns_page_minerva (GtkWidget *row, gpointer data)
 {
@@ -912,8 +946,6 @@ ns_page_minerva (GtkWidget *row, gpointer data)
 
   m->srows = g_ptr_array_new ();
   m->vp_actions = g_ptr_array_new ();
-  m->sg_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);   /* wake word, reply: from the status, see build_groups */
-  gtk_box_append (GTK_BOX (c), m->sg_box);
 
   m->stt = ns_group (c, "Speech recognition");
   GtkWidget *sg = ns_group (c, NULL);
@@ -926,6 +958,10 @@ ns_page_minerva (GtkWidget *row, gpointer data)
   m->budget_g = ns_group (c, "Budgets");   /* its rows come with the status: one per provider with a budget */
   ns_note (c, "Empty or 0 means no paid use: the paid models stay off, and only the free ones answer, until you set a "
               "cap. Over the cap, Minerva falls back to the free models until the month turns. Checked hourly.");
+
+  GtkWidget *pg = ns_group (c, NULL);   /* wake word, reply, system prompt, state template: the Prompt page */
+  ns_row (pg, "format-justify-left-symbolic", "violet", "Prompt", "Wake word • Reply • System prompt • State template");
+  ns_row_on_activate (gtk_widget_get_last_child (pg), ns_page_prompt, NULL);
 
   GtkWidget *kg = ns_group (c, NULL);
   ns_row (kg, NULL, NULL, "API keys", "Providers and their keys • Accounts");
@@ -945,7 +981,6 @@ static void
 build_rows (Mn *m)
 {
   m->picks_built = TRUE;
-  build_groups (m);
   choice_row (m, m->brain_g, "Main model", "brain.main", NULL, FALSE);
   choice_row (m, m->roles_g, "Messages", "roles.chat", "Same as main", FALSE);
   choice_row (m, m->roles_g, "Events", "roles.events", "Same as main", FALSE);

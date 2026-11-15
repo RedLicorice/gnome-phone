@@ -2,6 +2,7 @@
 #pragma once
 
 #include <adwaita.h>
+#include <json-glib/json-glib.h>
 
 /* ns-pages.c: the hubs and the small pages */
 void ns_page_connections (GtkWidget *row, gpointer data);
@@ -74,6 +75,8 @@ void ns_page_scale_row (GtkWidget *group);
  * installed */
 void     ns_page_minerva (GtkWidget *row, gpointer data);
 void     ns_page_api_keys (GtkWidget *row, gpointer data);
+/* ns-prompt.c: the system prompt and state template editors of Minerva > Prompt; `ui` is `prompt_ui` of the status */
+void     ns_prompt_build (GtkWidget *content, GObject *owner, JsonObject *ui);
 /* a page of the models `minerva-config` offers, the current one marked; `picked` gets the model id (the source the
  * Minerva page's own pickers use) */
 typedef void (*NsModelPicked) (const char *id, gpointer data);
