@@ -36,6 +36,11 @@ GtkWidget *ns_row_spin (GtkWidget *group, const char *title, GSettings *s, const
 GtkWidget *ns_row_choice (GtkWidget *group, const char *title, GSettings *s, const char *key,
                           const char *const *values, const char *const *labels);
 
+/* the same for a key that holds a font family (or a chain): the row and every entry of the picker show a sample in
+ * that font */
+GtkWidget *ns_row_choice_font (GtkWidget *group, const char *title, GSettings *s, const char *key,
+                               const char *const *values, const char *const *labels);
+
 /* a switch row with an icon, for a switch the caller drives (ns_switch_quiet sets it without its handler acting) */
 GtkWidget *ns_row_toggle (GtkWidget *group, const char *icon, const char *color, const char *title,
                           const char *subtitle);

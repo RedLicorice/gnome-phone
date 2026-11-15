@@ -517,7 +517,21 @@ typedef struct {
   char               *key;
   const char *const  *values, *const *labels;
   GtkWidget          *row;
+  gboolean            font;   /* the values are font families: every label is drawn in its own family */
 } Choice;
+
+#define FONT_SAMPLE "The quick brown fox 0123"
+
+/* `label` drawn in `family` (a family, or a CSS style chain "A, B, serif"; Pango takes both) */
+static void
+font_preview (GtkWidget *label, const char *family)
+{
+  PangoAttrList *attrs = pango_attr_list_new ();
+  if (family && *family)
+    pango_attr_list_insert (attrs, pango_attr_family_new (family));
+  gtk_label_set_attributes (GTK_LABEL (label), attrs);
+  pango_attr_list_unref (attrs);
+}
 
 static const char *
 choice_label (Choice *c)
@@ -529,12 +543,26 @@ choice_label (Choice *c)
   return "";
 }
 
+/* the row's line under its title: the choice, and for a font a sample in that font */
+static void
+choice_show (Choice *c)
+{
+  g_autofree char *v = g_settings_get_string (c->s, c->key);
+  if (!c->font) {
+    ns_row_set_subtitle (c->row, choice_label (c));
+    return;
+  }
+  g_autofree char *t = g_strdup_printf ("%s • %s", choice_label (c), FONT_SAMPLE);
+  ns_row_set_subtitle (c->row, t);
+  font_preview (g_object_get_data (G_OBJECT (c->row), "ns-subtitle"), v);
+}
+
 static void
 choice_picked (GtkWidget *row, gpointer data)
 {
   Choice *c = g_object_get_data (G_OBJECT (row), "ns-choice");
   g_settings_set_string (c->s, c->key, data);
-  ns_row_set_subtitle (c->row, choice_label (c));
+  choice_show (c);
   GtkWidget *box = gtk_widget_get_parent (row);
   for (GtkWidget *r = gtk_widget_get_first_child (box); r; r = gtk_widget_get_next_sibling (r)) {
     GtkWidget *mark = g_object_get_data (G_OBJECT (r), "ns-mark");
@@ -553,7 +581,11 @@ choice_open (GtkWidget *row, gpointer data)
   GtkWidget *g = ns_group (content, NULL);
   g_autofree char *v = g_settings_get_string (c->s, c->key);
   for (guint i = 0; c->values[i]; i++) {
-    GtkWidget *r = ns_row (g, NULL, NULL, c->labels[i], NULL);
+    GtkWidget *r = ns_row (g, NULL, NULL, c->labels[i], c->font ? FONT_SAMPLE : NULL);
+    if (c->font) {
+      font_preview (g_object_get_data (G_OBJECT (r), "ns-title-label"), c->values[i]);
+      font_preview (g_object_get_data (G_OBJECT (r), "ns-subtitle"), c->values[i]);
+    }
     GtkWidget *mark = gtk_image_new_from_icon_name ("object-select-symbolic");
     gtk_widget_add_css_class (mark, "ns-accent");
     gtk_widget_set_opacity (mark, !g_strcmp0 (v, c->values[i]));
@@ -572,21 +604,36 @@ choice_free (Choice *c)
   g_free (c);
 }
 
-GtkWidget *
-ns_row_choice (GtkWidget *group, const char *title, GSettings *s, const char *key,
-               const char *const *values, const char *const *labels)
+static GtkWidget *
+choice_new (GtkWidget *group, const char *title, GSettings *s, const char *key, const char *const *values,
+            const char *const *labels, gboolean font)
 {
   Choice *c = g_new0 (Choice, 1);
+  c->font = font;
   c->s = s;
   c->key = g_strdup (key);
   c->values = values;
   c->labels = labels;
   c->row = ns_row (group, NULL, NULL, title, NULL);
   g_object_set_data_full (G_OBJECT (c->row), "ns-title", g_strdup (title), g_free);
-  ns_row_set_subtitle (c->row, choice_label (c));
+  choice_show (c);
   ns_row_on_activate (c->row, choice_open, c);
   g_object_set_data_full (G_OBJECT (c->row), "ns-own", c, (GDestroyNotify) choice_free);
   return c->row;
+}
+
+GtkWidget *
+ns_row_choice (GtkWidget *group, const char *title, GSettings *s, const char *key,
+               const char *const *values, const char *const *labels)
+{
+  return choice_new (group, title, s, key, values, labels, FALSE);
+}
+
+GtkWidget *
+ns_row_choice_font (GtkWidget *group, const char *title, GSettings *s, const char *key,
+                    const char *const *values, const char *const *labels)
+{
+  return choice_new (group, title, s, key, values, labels, TRUE);
 }
 
 GtkWidget *

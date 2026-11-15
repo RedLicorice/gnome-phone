@@ -72,4 +72,6 @@ void ns_page_scale_row (GtkWidget *group);
 /* ns-minerva.c: Minerva's brain (models, fallbacks, voice, budgets), through minerva-config; shown only where it is
  * installed */
 void     ns_page_minerva (GtkWidget *row, gpointer data);
-gboolean ns_minerva_available (void);
+void     ns_page_api_keys (GtkWidget *row, gpointer data);
+/* Battery page: the Max charge card (only where minerva-config is installed) */
+void     ns_charge_limit_add (AdwNavigationPage *page, GtkWidget *content);

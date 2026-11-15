@@ -23,7 +23,7 @@ resources = gnome.compile_resources('ns-resources', 'src/neo-settings.gresource.
 executable('neo-settings',
   'src/main.c', 'src/ns-ui.c', 'src/ns-pages.c', 'src/ns-parallax.c', 'src/ns-net.c', 'src/ns-bt.c',
   'src/ns-sound.c', 'src/ns-apps.c', 'src/ns-shell.c', 'src/ns-fprint.c', 'src/ns-pattern.c', 'src/ns-privacy.c', 'src/ns-system.c',
-  'src/ns-minerva.c', 'src/ns-ssh.c',
+  'src/ns-minerva.c', 'src/ns-mc.c', 'src/ns-charge.c', 'src/ns-apikeys.c', 'src/ns-ssh.c',
   resources,
   dependencies: deps,
   install: true)

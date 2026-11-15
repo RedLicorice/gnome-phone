@@ -1,4 +1,19 @@
 /* Neo Settings, One UI style: black behind rounded cards in the dark, light grey behind white ones in the light */
+/* The Renaissance look's colours are named once, here: tools/theme/palette.json is canonical (libneo's
+ * neo-renaissance.css names the same tokens neo_*). Everything of the look below, dialogs included, uses these names,
+ * so a second variant (a light one) is another set of values for them, not another stylesheet. */
+@define-color ns_bg #07060b;
+@define-color ns_gold #d9b26a;
+@define-color ns_gold_hi #f3dc9f;
+@define-color ns_parchment #f0e6d0;
+@define-color ns_silver #b0b5c2;
+@define-color ns_silver_dim #6e7280;
+@define-color ns_lapis #23418f;
+@define-color ns_amber #ff9f2e;
+@define-color ns_platinum #cfd2da;
+@define-color ns_granite #1c1d23;
+@define-color ns_granite_hi #3a3c46;
+@define-color ns_error #ff6f9c;   /* neo-style.c NEO_ERROR of the look: the one alarm colour */
 .ns-root, .ns-window { background-color: #f2f2f4; }
 .ns-card { background-color: #ffffff; border-radius: 26px; margin: 0 14px 18px 14px; }
 .ns-root headerbar { background: transparent; box-shadow: none; }
@@ -75,27 +90,66 @@ button.ns-uninstall { margin: 8px 16px 24px; min-height: 48px; border-radius: 14
 
 /* ---- the optional Renaissance look: lapis-tinted black, gold leaf, parchment, neon cyan as an edge light.
  * Michelangelus is installed from the owner's copy, never shipped: the chain falls back. No animation. */
-window.ns-ren, window.ns-ren .ns-root, window.ns-ren.ns-dark, window.ns-ren.ns-dark .ns-root { background-color: #08070d; color: #f0e6d0; }
+window.ns-ren, window.ns-ren .ns-root, window.ns-ren.ns-dark, window.ns-ren.ns-dark .ns-root { background-color: #08070d; color: @ns_parchment; }
 window.ns-ren .ns-card, window.ns-ren.ns-dark .ns-card, window.ns-ren .ns-li, window.ns-ren.ns-dark .ns-li {
-  background-color: #13121e; border-radius: 14px; box-shadow: inset 0 0 0 1px alpha(#b0b5c2, 0.28); }
+  background-color: #13121e; border-radius: 14px; box-shadow: inset 0 0 0 1px alpha(@ns_silver, 0.28); }
 window.ns-ren .ns-li-first { border-top-left-radius: 14px; border-top-right-radius: 14px; }
 window.ns-ren .ns-li-last { border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
 window.ns-ren .ns-big, window.ns-ren .ns-huge, window.ns-ren .ns-head, window.ns-ren .ns-big-title {
-  font-family: "Michelangelus", "Cinzel", serif; font-weight: 700; color: #f3dc9f; letter-spacing: 0.5px; }
-window.ns-ren .ns-group-title { color: #d9b26a; font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 2px; }
-window.ns-ren .ns-title, window.ns-ren label.title, window.ns-ren row { color: #f0e6d0; }
-window.ns-ren .ns-sub, window.ns-ren .ns-note { color: alpha(#f0e6d0, 0.6); }
-window.ns-ren .ns-card separator, window.ns-ren .ns-li > separator { background-color: alpha(#b0b5c2, 0.18); }
-window.ns-ren .ns-accent { color: #d9b26a; }
-window.ns-ren .ns-blue, window.ns-ren .ns-violet, window.ns-ren .ns-purple { background-color: #23418f; color: #d9b26a; }
-window.ns-ren .ns-green, window.ns-ren .ns-lime { background-color: #4a2d0a; color: #ff9f2e; }
+  font-family: "Michelangelus", "Cinzel", serif; font-weight: 700; color: @ns_gold_hi; letter-spacing: 0.5px; }
+window.ns-ren .ns-group-title { color: @ns_gold; font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 2px; }
+window.ns-ren .ns-title, window.ns-ren label.title, window.ns-ren row { color: @ns_parchment; }
+window.ns-ren .ns-sub, window.ns-ren .ns-note { color: alpha(@ns_parchment, 0.6); }
+window.ns-ren .ns-card separator, window.ns-ren .ns-li > separator { background-color: alpha(@ns_silver, 0.18); }
+window.ns-ren .ns-accent { color: @ns_gold; }
+window.ns-ren .ns-blue, window.ns-ren .ns-violet, window.ns-ren .ns-purple { background-color: @ns_lapis; color: @ns_gold; }
+window.ns-ren .ns-green, window.ns-ren .ns-lime { background-color: #4a2d0a; color: @ns_amber; }
 window.ns-ren .ns-orange, window.ns-ren .ns-yellow { background-color: #4a2a1c; color: #e0936f; }
-window.ns-ren .ns-red, window.ns-ren .ns-pink { background-color: #6b1237; color: #ff6f9c; }
+window.ns-ren .ns-red, window.ns-ren .ns-pink { background-color: #6b1237; color: @ns_error; }
 window.ns-ren .ns-grey { background-color: #2a283d; color: #bdb299; }
-window.ns-ren .ns-icon { box-shadow: inset 0 0 0 1px alpha(#b0b5c2, 0.45); }
+window.ns-ren .ns-icon { box-shadow: inset 0 0 0 1px alpha(@ns_silver, 0.45); }
 window.ns-ren switch:checked { background-color: #5a5e6c; }
-window.ns-ren switch:checked slider { background-color: #d9b26a; }
-window.ns-ren scale highlight { background-color: #d9b26a; }
-window.ns-ren scale slider { background-color: #f3dc9f; box-shadow: 0 0 8px alpha(#ff9f2e, 0.5); }
-window.ns-ren entry:focus-within { box-shadow: inset 0 0 0 1px #d9b26a, 0 0 8px alpha(#ff9f2e, 0.5); }
-window.ns-ren .ns-danger { color: #ff6f9c; }
+window.ns-ren switch:checked slider { background-color: @ns_gold; }
+window.ns-ren scale highlight { background-color: @ns_gold; }
+window.ns-ren scale slider { background-color: @ns_gold_hi; box-shadow: 0 0 8px alpha(@ns_amber, 0.5); }
+window.ns-ren entry:focus-within { box-shadow: inset 0 0 0 1px @ns_gold, 0 0 8px alpha(@ns_amber, 0.5); }
+window.ns-ren .ns-danger { color: @ns_error; }
+
+/* ---- dialogs: AdwAlertDialog and AdwDialog (floating and sheet), their entries, buttons and scrim. libadwaita 1.10
+ * paints a dialog from custom properties it reads off the window, so the look is set there, once, for every dialog of
+ * Neo Settings (Your name, confirmations, SSH, the pattern and PIN dialog, Bluetooth pairing, API keys). The stock look
+ * follows the cards (white, and dark grey in the dark); the Renaissance look is granite stone with a silver double
+ * rule, gold for the suggested answer and the one alarm colour for a destructive one. */
+window.ns-window {
+  --dialog-bg-color: #ffffff; --dialog-fg-color: rgba(0, 0, 0, 0.87);
+  --shade-color: rgba(0, 0, 0, 0.32);
+  --accent-bg-color: #3e7bf0; --accent-fg-color: #ffffff; --accent-color: #2f6bdc;
+  --destructive-bg-color: #e5484d; --destructive-fg-color: #ffffff; --destructive-color: #c4343a;
+}
+window.ns-window.ns-dark {
+  --dialog-bg-color: #26262a; --dialog-fg-color: #ffffff;
+  --shade-color: rgba(0, 0, 0, 0.6);
+  --accent-color: #7da6f5; --destructive-color: #ff7b80;
+}
+window.ns-window.ns-ren, window.ns-window.ns-ren.ns-dark {
+  --dialog-bg-color: @ns_granite; --dialog-fg-color: @ns_parchment;
+  --shade-color: color-mix(in srgb, @ns_bg 72%, transparent);
+  --accent-bg-color: @ns_gold; --accent-fg-color: @ns_bg; --accent-color: @ns_gold_hi;
+  --destructive-bg-color: @ns_error; --destructive-fg-color: @ns_bg; --destructive-color: @ns_error;
+}
+window.ns-window dialog.alert sheet, window.ns-window dialog sheet { border-radius: 26px; }
+window.ns-window dialog.alert .response-area button { border-radius: 999px; min-height: 44px; font-weight: 600; }
+window.ns-window dialog entry, window.ns-window dialog passwordentry { border-radius: 14px; min-height: 44px; }
+window.ns-ren dialog.alert sheet, window.ns-ren dialog sheet {
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 1px alpha(@ns_silver, 0.55), inset 0 0 0 4px @ns_granite, inset 0 0 0 5px alpha(@ns_silver, 0.20); }
+window.ns-ren dialog .heading, window.ns-ren dialog .title-2, window.ns-ren dialog .title-4 {
+  font-family: "Michelangelus", "Cinzel", serif; font-weight: 700; color: @ns_gold_hi; letter-spacing: 0.5px; }
+window.ns-ren dialog.alert .response-area button { border-radius: 10px; box-shadow: inset 0 0 0 1px alpha(@ns_silver, 0.40); }
+window.ns-ren dialog.alert .response-area button.suggested-action,
+window.ns-ren dialog.alert .response-area button.destructive-action { box-shadow: none; }
+window.ns-ren dialog entry, window.ns-ren dialog passwordentry {
+  border-radius: 8px; background-color: @ns_granite_hi; color: @ns_parchment; box-shadow: inset 0 0 0 1px alpha(@ns_silver, 0.30); }
+window.ns-ren dialog entry:focus-within, window.ns-ren dialog passwordentry:focus-within {
+  box-shadow: inset 0 0 0 1px @ns_gold, 0 0 8px alpha(@ns_amber, 0.5); }
+window.ns-ren dialog separator { background-color: alpha(@ns_silver, 0.18); }

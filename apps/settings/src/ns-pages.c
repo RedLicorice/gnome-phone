@@ -663,7 +663,7 @@ font_row (GtkWidget *g, GSettings *look, const char *title, const char *key, gbo
   }
   g_ptr_array_add (values, NULL);
   g_ptr_array_add (labels, NULL);
-  ns_row_choice (g, title, look, key, (const char *const *) values->pdata, (const char *const *) labels->pdata);
+  ns_row_choice_font (g, title, look, key, (const char *const *) values->pdata, (const char *const *) labels->pdata);
 
   g_free (fams);
   g_ptr_array_free (names, TRUE);
@@ -996,6 +996,7 @@ ns_page_battery (GtkWidget *row, gpointer data)
   gtk_widget_add_css_class (ch->state, "ns-sub");
   gtk_box_append (GTK_BOX (v), ch->state);
   ns_row_widget (g, NULL, v);
+  ns_charge_limit_add (page, c);
   g_autoptr (GDBusConnection) bus = g_bus_get_sync (G_BUS_TYPE_SYSTEM, NULL, NULL);
   if (bus)
     g_dbus_connection_call (bus, "org.freedesktop.UPower", "/org/freedesktop/UPower/devices/DisplayDevice",

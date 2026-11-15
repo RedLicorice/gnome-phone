@@ -2,6 +2,7 @@
  * the location from the portal's permission store, the online accounts from GNOME Online Accounts' object
  * manager, both asked in the background. */
 #include "ns-pages.h"
+#include "ns-mc.h"
 #include "ns-ui.h"
 
 #include <gio/gdesktopappinfo.h>
@@ -457,6 +458,11 @@ ns_page_accounts (GtkWidget *row, gpointer data)
   g_object_set_data (G_OBJECT (g), "ns-none", none);
   GtkWidget *a = ns_group (c, NULL);
   ns_row_button (a, "Add account", FALSE, add_account, NULL);
+  if (ns_minerva_available ()) {   /* the phone agent's API providers and keys (minerva-config) */
+    GtkWidget *k = ns_group (c, NULL);
+    GtkWidget *r = ns_row (k, "dialog-password-symbolic", "violet", "API keys", "Providers and their keys");
+    ns_row_on_activate (r, ns_page_api_keys, NULL);
+  }
   ns_later_init (page, accounts_refresh);
   /* an account added, removed or signed in again: the list again */
   g_autoptr (GDBusConnection) bus = session_bus ();

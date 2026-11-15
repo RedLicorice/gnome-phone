@@ -4,18 +4,16 @@
  * and never shows a key: it takes one in a password dialog, hands it to `minerva-config key set` on stdin (never in
  * argv) and shows only "set, …last4" or "missing". */
 #include "ns-pages.h"
+#include "ns-mc.h"
 #include "ns-ui.h"
 
 #include <json-glib/json-glib.h>
 
-typedef struct Mn Mn;
+#define str_of ns_json_str
+#define obj_of ns_json_obj
+#define arr_of ns_json_arr
 
-/* an API key: the name `minerva-config key` knows, the row that shows "set, …last4" and the Remove button */
-typedef struct {
-  Mn         *m;
-  const char *name, *label, *file;
-  GtkWidget  *row, *remove;
-} KeyRow;
+typedef struct Mn Mn;
 
 struct Mn {
   AdwNavigationPage *page;
@@ -23,11 +21,9 @@ struct Mn {
   GtkWidget *brain_g, *roles_g, *voice_g; /* filled once, with the first status (the pickers need the model list) */
   GtkWidget *chain, *stt, *notes;       /* rebuilt on every refresh (no pickers inside) */
   GtkWidget *stt_timeout;               /* the cloud recognizers' time limit row */
-  GtkWidget *voice_id, *voice_cap, *or_cap, *el_cap, *spent, *key_pw; /* rows updated in place */
-  KeyRow     keys[2];                   /* OpenRouter, ElevenLabs */
-  GtkWidget *bat_val, *bat_scale, *bat_state; /* Max charge: the value row, the slider, the charge service's state */
-  guint      bat_timer;                 /* a drag is saved 600 ms after the last move */
-  gboolean   bat_syncing;               /* the slider is being set from the status */
+  GtkWidget *voice_id, *voice_cap, *budget_g, *spent; /* rows updated in place */
+  GPtrArray *caps;                      /* the budget rows: each has its brain.conf key in "mn-key" */
+  char      *cap_key;                   /* the budget in money: what the spent line is compared with */
   JsonObject *st;                       /* the last status */
   GStrv      chain_ids;                 /* the configured fallbacks, in order */
   GStrv      stt_ids;                   /* the speech recognizers before Vosk, in order (Vosk is always last) */
@@ -36,56 +32,21 @@ struct Mn {
   gboolean   busy;
 };
 
-static char *
-mn_bin (void)
-{
-  const char *env = g_getenv ("MINERVA_CONFIG_BIN");
-  return env && *env ? g_strdup (env)
-                     : g_build_filename (g_get_home_dir (), ".local", "share", "minerva", "bin", "minerva-config", NULL);
-}
-
-gboolean
-ns_minerva_available (void)
-{
-  g_autofree char *bin = mn_bin ();
-  return g_file_test (bin, G_FILE_TEST_IS_EXECUTABLE);
-}
-
-/* ---- running minerva-config ---- */
+/* ---- running minerva-config (ns-mc.c) ---- */
 
 typedef void (*MnDone) (Mn *m, JsonObject *root, const char *err, gpointer data);
 
 typedef struct {
-  Mn       *m;
-  GObject  *page;                       /* a reference: the answer may come after the page is closed */
-  MnDone    done;
-  gpointer  data;
+  Mn      *m;
+  MnDone   done;
+  gpointer data;
 } Job;
 
 static void
-job_done (GObject *src, GAsyncResult *res, gpointer data)
+job_done (JsonObject *root, const char *err, gpointer data)
 {
   Job *j = data;
-  g_autofree char *out = NULL, *err = NULL;
-  g_autoptr (GError) e = NULL;
-  g_subprocess_communicate_utf8_finish (G_SUBPROCESS (src), res, &out, &err, &e);
-  gboolean ok = !e && g_subprocess_get_if_exited (G_SUBPROCESS (src)) &&
-                g_subprocess_get_exit_status (G_SUBPROCESS (src)) == 0;
-  g_autoptr (JsonParser) parser = json_parser_new ();
-  JsonObject *root = NULL;
-  if (ok && out && *out && json_parser_load_from_data (parser, out, -1, NULL)) {
-    JsonNode *n = json_parser_get_root (parser);
-    root = n && JSON_NODE_HOLDS_OBJECT (n) ? json_node_get_object (n) : NULL;
-  }
-  g_autofree char *why = NULL;
-  if (!ok) {
-    if (err && *err)
-      why = g_strdup (g_strstrip (err));
-    else
-      why = g_strdup (e ? e->message : "minerva-config failed");
-  }
-  j->done (j->m, root, why, j->data);
-  g_object_unref (j->page);
+  j->done (j->m, root, err, j->data);
   g_free (j);
 }
 
@@ -93,27 +54,11 @@ job_done (GObject *src, GAsyncResult *res, gpointer data)
 static void
 mn_run_in (Mn *m, const char *const *args, const char *stdin_text, MnDone done, gpointer data)
 {
-  g_autofree char *bin = mn_bin ();
-  g_autoptr (GPtrArray) argv = g_ptr_array_new ();
-  g_ptr_array_add (argv, bin);
-  for (guint i = 0; args[i]; i++)
-    g_ptr_array_add (argv, (char *) args[i]);
-  g_ptr_array_add (argv, NULL);
-  g_autoptr (GError) err = NULL;
-  GSubprocess *p = g_subprocess_newv ((const char *const *) argv->pdata,
-                                      G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE |
-                                      (stdin_text ? G_SUBPROCESS_FLAGS_STDIN_PIPE : G_SUBPROCESS_FLAGS_NONE), &err);
-  if (!p) {
-    done (m, NULL, err->message, data);
-    return;
-  }
   Job *j = g_new0 (Job, 1);
   j->m = m;
-  j->page = g_object_ref (G_OBJECT (m->page));
   j->done = done;
   j->data = data;
-  g_subprocess_communicate_utf8_async (p, stdin_text, NULL, job_done, j);
-  g_object_unref (p);
+  ns_mc_run (G_OBJECT (m->page), args, stdin_text, job_done, j);
 }
 
 static void
@@ -134,27 +79,6 @@ say (Mn *m, const char *text, gboolean error)
 }
 
 /* ---- reading the status ---- */
-
-static const char *
-str_of (JsonObject *o, const char *member)
-{
-  return o && json_object_has_member (o, member) && json_object_get_string_member (o, member)
-           ? json_object_get_string_member (o, member) : "";
-}
-
-static JsonObject *
-obj_of (JsonObject *o, const char *member)
-{
-  return o && json_object_has_member (o, member) && JSON_NODE_HOLDS_OBJECT (json_object_get_member (o, member))
-           ? json_object_get_object_member (o, member) : NULL;
-}
-
-static JsonArray *
-arr_of (JsonObject *o, const char *member)
-{
-  return o && json_object_has_member (o, member) && JSON_NODE_HOLDS_ARRAY (json_object_get_member (o, member))
-           ? json_object_get_array_member (o, member) : NULL;
-}
 
 static const char *
 setting (Mn *m, const char *key)
@@ -307,7 +231,10 @@ choice_row (Mn *m, GtkWidget *group, const char *title, const char *key, const c
 static void
 engine_picked (GtkWidget *row, guint index, gpointer data)
 {
-  mn_set (data, "voice.engine", index == 1 ? "elevenlabs" : "piper");
+  Mn *m = data;
+  JsonArray *a = arr_of (m->st, "voice_engines");
+  if (a && index < json_array_get_length (a))
+    mn_set (m, "voice.engine", str_of (json_array_get_object_element (a, index), "id"));
 }
 
 typedef struct {
@@ -496,22 +423,35 @@ chain_fill (Mn *m)
 
 /* ---- speech recognition: the engines tried in order, Vosk (on the phone) always last ---- */
 
-static const struct {
-  const char *id, *label;
-} stt_engines[] = {
-  { "claude", "Claude" }, { "elevenlabs", "ElevenLabs" }, { "openrouter", "OpenRouter" },
-};
-
-static const char *
-stt_label (const char *id)
+/* the recognizers a chain can name besides the fixed one come from minerva-config (status: stt_engines): Claude and
+ * every stt-capable API provider of the registry */
+static JsonObject *
+stt_engine (Mn *m, const char *id)
 {
-  for (guint i = 0; i < G_N_ELEMENTS (stt_engines); i++)
-    if (!g_strcmp0 (stt_engines[i].id, id))
-      return stt_engines[i].label;
-  return id;
+  JsonArray *a = arr_of (m->st, "stt_engines");
+  for (guint i = 0; a && i < json_array_get_length (a); i++) {
+    JsonObject *o = json_array_get_object_element (a, i);
+    if (!g_strcmp0 (str_of (o, "id"), id))
+      return o;
+  }
+  return NULL;
 }
 
-/* what to say under an engine: Claude's login (asked of the CLI), a key present or missing, Vosk local */
+static guint
+stt_engine_count (Mn *m)
+{
+  JsonArray *a = arr_of (m->st, "stt_engines");
+  return a ? json_array_get_length (a) : 0;
+}
+
+static const char *
+stt_label (Mn *m, const char *id)
+{
+  const char *n = str_of (stt_engine (m, id), "name");
+  return *n ? n : id;
+}
+
+/* what to say under an engine: Claude's login (asked of the CLI), a key present or missing */
 static const char *
 stt_hint (Mn *m, const char *id)
 {
@@ -542,12 +482,14 @@ stt_add (GtkWidget *row, gpointer data)
   GtkWidget *c;
   AdwNavigationPage *page = ns_page_new ("Add a recognizer", &c);
   GtkWidget *g = ns_group (c, NULL);
+  JsonArray *a = arr_of (m->st, "stt_engines");
   guint shown = 0;
-  for (guint i = 0; i < G_N_ELEMENTS (stt_engines); i++) {
-    if (g_strv_contains ((const char *const *) m->stt_ids, stt_engines[i].id))
+  for (guint i = 0; a && i < json_array_get_length (a); i++) {
+    const char *id = str_of (json_array_get_object_element (a, i), "id");
+    if (g_strv_contains ((const char *const *) m->stt_ids, id))
       continue;
-    GtkWidget *r = ns_row (g, NULL, NULL, stt_engines[i].label, stt_hint (m, stt_engines[i].id));
-    g_object_set_data_full (G_OBJECT (r), "mn-id", g_strdup (stt_engines[i].id), g_free);
+    GtkWidget *r = ns_row (g, NULL, NULL, stt_label (m, id), stt_hint (m, id));
+    g_object_set_data_full (G_OBJECT (r), "mn-id", g_strdup (id), g_free);
     ns_row_on_activate (r, stt_add_picked, m);
     shown++;
   }
@@ -561,10 +503,11 @@ stt_fill (Mn *m)
 {
   ns_group_clear (m->stt);
   g_strfreev (m->stt_ids);
-  m->stt_ids = split_ids (setting (m, "voice.stt_chain"), "vosk");
+  JsonObject *fixed = obj_of (m->st, "stt_fixed");   /* the local one, always last */
+  m->stt_ids = split_ids (setting (m, "voice.stt_chain"), str_of (fixed, "id"));
   guint n = g_strv_length (m->stt_ids);
   for (guint i = 0; i < n; i++) {
-    GtkWidget *row = ns_row (m->stt, NULL, NULL, stt_label (m->stt_ids[i]), stt_hint (m, m->stt_ids[i]));
+    GtkWidget *row = ns_row (m->stt, NULL, NULL, stt_label (m, m->stt_ids[i]), stt_hint (m, m->stt_ids[i]));
     ChainOp *op = g_new0 (ChainOp, 1);
     op->m = m;
     op->index = i;
@@ -577,8 +520,9 @@ stt_fill (Mn *m)
     gtk_box_append (GTK_BOX (box), icon_button ("list-remove-symbolic", "Remove", G_CALLBACK (chain_remove), op, 0, TRUE));
     ns_row_suffix (row, box);
   }
-  ns_row (m->stt, NULL, NULL, "Vosk (on the phone)", "local, offline • always the last one");
-  if (n < G_N_ELEMENTS (stt_engines))
+  g_autofree char *last = g_strdup_printf ("%s • always the last one", str_of (fixed, "hint"));
+  ns_row (m->stt, NULL, NULL, str_of (fixed, "name"), last);
+  if (n < stt_engine_count (m))
     ns_row_button (m->stt, "Add a recognizer…", FALSE, stt_add, m);
 }
 
@@ -589,153 +533,6 @@ stt_status_done (Mn *m, JsonObject *root, const char *err, gpointer data)
   m->claude_hint = g_strdup (!err && root ? str_of (root, "claude") : "unknown");
   if (m->st)
     stt_fill (m);
-}
-
-/* ---- API keys ---- */
-
-/* `key set|remove NAME --apply`: apply restarts the agent server when the OpenRouter key came or went */
-static void
-key_run (KeyRow *k, const char *action, const char *secret)
-{
-  Mn *m = k->m;
-  if (m->busy) {
-    say (m, "Still applying the last change…", FALSE);
-    return;
-  }
-  m->busy = TRUE;
-  say (m, "Applying…", FALSE);
-  const char *const args[] = { "key", action, k->name, "--apply", "--json", NULL };
-  mn_run_in (m, args, secret, set_done, NULL);
-}
-
-static void
-key_entered (const char *text, gpointer data)
-{
-  KeyRow *k = data;
-  if (!text || !*text)
-    return;
-  key_run (k, "set", text);   /* the dialog's string is not kept; minerva-config strips and checks it */
-}
-
-static void
-key_activated (GtkWidget *row, gpointer data)
-{
-  KeyRow *k = data;
-  g_autofree char *heading = g_strdup_printf ("%s key", k->label);
-  g_autofree char *body = g_strdup_printf ("Paste the key. It is saved in ~/.config/minerva/%s, readable by you only, "
-                                           "and never shown again.", k->file);
-  ns_ask (row, heading, body, "", TRUE, "Save", key_entered, k);
-}
-
-static void
-key_removed (gboolean yes, gpointer data)
-{
-  if (yes)
-    key_run (data, "remove", NULL);
-}
-
-static void
-key_remove_clicked (GtkButton *b, gpointer data)
-{
-  KeyRow *k = data;
-  g_autofree char *heading = g_strdup_printf ("Remove the %s key?", k->label);
-  ns_confirm (GTK_WIDGET (b), heading, "The file is deleted. You can enter a key again at any time.", "Remove", TRUE,
-              key_removed, k);
-}
-
-static void
-key_row_build (Mn *m, GtkWidget *group, KeyRow *k, const char *name, const char *label, const char *file)
-{
-  k->m = m;
-  k->name = name;
-  k->label = label;
-  k->file = file;
-  g_autofree char *title = g_strdup_printf ("%s key", label);
-  k->row = ns_row (group, NULL, NULL, title, "…");
-  ns_row_on_activate (k->row, key_activated, k);
-  k->remove = icon_button ("user-trash-symbolic", "Remove the key", G_CALLBACK (key_remove_clicked), k, 0, FALSE);
-  ns_row_suffix (k->row, k->remove);
-}
-
-static void
-keys_update (Mn *m)
-{
-  JsonObject *hints = obj_of (m->st, "key_hints");
-  for (guint i = 0; i < G_N_ELEMENTS (m->keys); i++) {
-    const char *h = str_of (hints, m->keys[i].name);
-    if (!*h)
-      h = "missing";
-    ns_row_set_subtitle (m->keys[i].row, h);
-    gtk_widget_set_sensitive (m->keys[i].remove, g_str_has_prefix (h, "set"));
-  }
-}
-
-/* ---- battery: Max charge ---- */
-
-static int
-bat_value (Mn *m)
-{
-  int v = (int) g_ascii_strtoll (setting (m, "battery.max_charge"), NULL, 10);
-  return v < 50 || v > 100 ? 100 : v;
-}
-
-static void
-bat_show (Mn *m, int v)
-{
-  g_autofree char *t = v >= 100 ? g_strdup ("Off (100 %)") : g_strdup_printf ("%d %%", v);
-  ns_row_set_subtitle (m->bat_val, t);
-}
-
-static gboolean
-bat_save (gpointer data)
-{
-  Mn *m = data;
-  m->bat_timer = 0;
-  g_autofree char *v = g_strdup_printf ("%d", (int) gtk_range_get_value (GTK_RANGE (m->bat_scale)));
-  mn_set_ex (m, "battery.max_charge", v, FALSE);   /* nothing to render: the charge service polls brain.conf */
-  return G_SOURCE_REMOVE;
-}
-
-static void
-bat_moved (GtkRange *range, gpointer data)
-{
-  Mn *m = data;
-  if (m->bat_syncing)
-    return;
-  double raw = gtk_range_get_value (range), v = 5 * (int) (raw / 5 + 0.5);   /* steps of 5 */
-  if (v != raw) {
-    m->bat_syncing = TRUE;
-    gtk_range_set_value (range, v);
-    m->bat_syncing = FALSE;
-  }
-  bat_show (m, (int) v);
-  if (m->bat_timer)
-    g_source_remove (m->bat_timer);
-  m->bat_timer = g_timeout_add (600, bat_save, m);
-}
-
-static void
-bat_update (Mn *m)
-{
-  if (!m->bat_timer) {   /* a drag in progress is not overwritten */
-    int v = bat_value (m);
-    m->bat_syncing = TRUE;
-    gtk_range_set_value (GTK_RANGE (m->bat_scale), v);
-    m->bat_syncing = FALSE;
-    bat_show (m, v);
-  }
-  JsonObject *b = obj_of (m->st, "battery");   /* the charge service's state file; absent: nothing shown */
-  const char *state = str_of (b, "state"), *soc = str_of (b, "soc_estimate"), *why = str_of (b, "reason");
-  gtk_widget_set_visible (m->bat_state, *state != 0);
-  if (*state) {
-    g_autoptr (GString) t = g_string_new (state);
-    t->str[0] = g_ascii_toupper (t->str[0]);
-    if (*soc)
-      g_string_append_printf (t, " • about %s %%", soc);
-    if (*why)
-      g_string_append_printf (t, " • %s", why);
-    ns_row_set_subtitle (m->bat_state, t->str);
-  }
 }
 
 /* ---- refresh ---- */
@@ -778,14 +575,10 @@ update_fields (Mn *m)
   fill_value (m->voice_id, setting (m, "voice.voice"));
   fill_value (m->voice_cap, setting (m, "voice.daily_chars"));
   fill_value (m->stt_timeout, setting (m, "voice.stt_timeout_s"));
-  fill_value (m->or_cap, setting (m, "budgets.openrouter_monthly_eur"));
-  fill_value (m->el_cap, setting (m, "budgets.elevenlabs_chars_month"));
-  JsonObject *keys = obj_of (m->st, "keys");
-  keys_update (m);
-  bat_update (m);
-  ns_row_set_subtitle (m->key_pw, keys && json_object_get_boolean_member (keys, "opencode_password") ? "Present" : "Missing");
+  for (guint i = 0; i < m->caps->len; i++)
+    fill_value (m->caps->pdata[i], setting (m, g_object_get_data (m->caps->pdata[i], "mn-key")));
   JsonObject *b = obj_of (m->st, "budget");
-  const char *cap = setting (m, "budgets.openrouter_monthly_eur");
+  const char *cap = m->cap_key ? setting (m, m->cap_key) : "";
   if (b && json_object_has_member (b, "usage_usd") && !json_node_is_null (json_object_get_member (b, "usage_usd"))) {
     g_autofree char *t = g_strdup_printf ("$%.2f%s%s%s", json_object_get_double_member (b, "usage_usd"),
                                           *cap ? " of €" : "", cap,
@@ -827,10 +620,11 @@ mn_refresh (Mn *m)
 static void
 mn_free (Mn *m)
 {
-  if (m->bat_timer)
-    g_source_remove (m->bat_timer);
   if (m->st)
     json_object_unref (m->st);
+  if (m->caps)
+    g_ptr_array_free (m->caps, TRUE);
+  g_free (m->cap_key);
   g_strfreev (m->chain_ids);
   g_strfreev (m->stt_ids);
   g_free (m->claude_hint);
@@ -855,8 +649,8 @@ ns_page_minerva (GtkWidget *row, gpointer data)
   gtk_box_append (GTK_BOX (c), m->notes);
 
   m->chain = ns_group (c, "Fallback chain");
-  ns_note (c, "Tried in this order when the main model cannot answer. OpenRouter models fall back inside OpenRouter; "
-              "free opencode models are the last resort when OpenRouter is out of reach.");
+  ns_note (c, "Tried in this order when the main model cannot answer. A gateway's models fall back inside the "
+              "gateway; free opencode models are the last resort when no paid provider is reachable.");
 
   m->roles_g = ns_group (c, "Models by role");
   ns_note (c, "Eyes and Mailbox are saved, but nothing reads them yet.");
@@ -870,29 +664,16 @@ ns_page_minerva (GtkWidget *row, gpointer data)
               "fails or takes longer than the time limit (1 to 10 s) passes it to the next. Vosk runs on the phone and "
               "is always the last. The wake word itself is always recognized on the phone.");
 
-  GtkWidget *bg = ns_group (c, "Budgets");
-  m->or_cap = field_row (m, bg, "OpenRouter per month (EUR)", "budgets.openrouter_monthly_eur");
-  m->el_cap = field_row (m, bg, "ElevenLabs per month (characters)", "budgets.elevenlabs_chars_month");
-  m->spent = ns_row_info (bg, "Spent on OpenRouter this month", "");
-  ns_note (c, "Empty or 0 means no paid use: OpenRouter stays off, and only the free models answer, until you set a "
+  m->caps = g_ptr_array_new ();
+  m->budget_g = ns_group (c, "Budgets");   /* its rows come with the status: one per provider with a budget */
+  ns_note (c, "Empty or 0 means no paid use: the paid models stay off, and only the free ones answer, until you set a "
               "cap. Over the cap, Minerva falls back to the free models until the month turns. Checked hourly.");
 
-  GtkWidget *tg = ns_group (c, "Battery");
-  m->bat_val = ns_row_info (tg, "Max charge", "");
-  ns_row_scale (tg, NULL, "battery-level-80-symbolic", 50, 100, 5, &m->bat_scale);
-  gtk_range_set_round_digits (GTK_RANGE (m->bat_scale), 0);
-  g_signal_connect (m->bat_scale, "value-changed", G_CALLBACK (bat_moved), m);
-  m->bat_state = ns_row_info (tg, "Charging", "");
-  gtk_widget_set_visible (m->bat_state, FALSE);
-  ns_note (c, "Holds the battery near this level while plugged in; the phone reads the level from the battery voltage. "
-              "100 % switches it off.");
-
-  GtkWidget *kg = ns_group (c, "Keys");
-  key_row_build (m, kg, &m->keys[0], "openrouter", "OpenRouter", "openrouter.env");
-  key_row_build (m, kg, &m->keys[1], "elevenlabs", "ElevenLabs", "elevenlabs.env");
-  m->key_pw = ns_row_info (kg, "Agent server password", "");
-  ns_note (c, "Tap a key to enter it; it is never shown again, only its last four characters. Without the OpenRouter key "
-              "only the free opencode models are used. ElevenLabs is stored for the voice service.");
+  GtkWidget *kg = ns_group (c, NULL);
+  ns_row (kg, NULL, NULL, "API keys", "Providers and their keys • Accounts");
+  ns_row_on_activate (gtk_widget_get_last_child (kg), ns_page_api_keys, NULL);
+  ns_note (c, "Keys for every provider, and endpoints of your own, are managed under Accounts. Without a key only the "
+              "free opencode models are used.");
 
   say (m, "", FALSE);
   mn_refresh (m);
@@ -911,9 +692,27 @@ build_rows (Mn *m)
   choice_row (m, m->roles_g, "Events", "roles.events", "Same as main", FALSE);
   choice_row (m, m->roles_g, "Eyes (looks at pictures)", "roles.eyes", "Same as main", TRUE);
   choice_row (m, m->roles_g, "Mailbox (other agents)", "roles.mailbox", "Same as main", FALSE);
-  static const char *const engines[] = { "Phone voice only (Piper)", "ElevenLabs, Piper as fallback", NULL };
-  ns_row_pick (m->voice_g, "Speech engine", engines, !g_strcmp0 (setting (m, "voice.engine"), "elevenlabs"),
-               engine_picked, m);
-  m->voice_id = field_row (m, m->voice_g, "ElevenLabs voice", "voice.voice");
+  JsonArray *ve = arr_of (m->st, "voice_engines");   /* the phone's own, then every provider with a voice */
+  g_autoptr (GPtrArray) labels = g_ptr_array_new ();
+  guint sel = 0;
+  for (guint i = 0; ve && i < json_array_get_length (ve); i++) {
+    JsonObject *o = json_array_get_object_element (ve, i);
+    g_ptr_array_add (labels, (char *) str_of (o, "label"));
+    if (!g_strcmp0 (str_of (o, "id"), setting (m, "voice.engine")))
+      sel = i;
+  }
+  g_ptr_array_add (labels, NULL);
+  ns_row_pick (m->voice_g, "Speech engine", (const char *const *) labels->pdata, sel, engine_picked, m);
+  m->voice_id = field_row (m, m->voice_g, "Cloud voice name", "voice.voice");
   m->voice_cap = field_row (m, m->voice_g, "Characters per day", "voice.daily_chars");
+  JsonArray *br = arr_of (m->st, "budget_rows");
+  for (guint i = 0; br && i < json_array_get_length (br); i++) {
+    JsonObject *o = json_array_get_object_element (br, i);
+    GtkWidget *r = field_row (m, m->budget_g, str_of (o, "label"), str_of (o, "key"));
+    g_object_set_data_full (G_OBJECT (r), "mn-key", g_strdup (str_of (o, "key")), g_free);
+    g_ptr_array_add (m->caps, r);
+    if (!m->cap_key && json_object_get_boolean_member (o, "money"))
+      m->cap_key = g_strdup (str_of (o, "key"));
+  }
+  m->spent = ns_row_info (m->budget_g, "Spent this month", "");
 }

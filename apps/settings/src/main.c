@@ -4,6 +4,7 @@
 #include "ns-bt.h"
 #include "ns-net.h"
 #include "ns-pages.h"
+#include "ns-mc.h"
 #include "ns-sound.h"
 #include "ns-ui.h"
 
@@ -47,11 +48,11 @@ static const Entry entries[] = {
   { "find-location-symbolic", "purple", "Location", "Location services • App access",
     "gps geoclue", ns_page_location, NULL, "org.gnome.system.location" },
   { NULL },
-  { "avatar-default-symbolic", "blue", "Accounts", "Online accounts",
-    "google nextcloud email", ns_page_accounts },
+  { "avatar-default-symbolic", "blue", "Accounts", "Online accounts • API keys",
+    "google nextcloud email api key token provider endpoint llm secret", ns_page_accounts },
   { NULL },
   { "face-smile-symbolic", "purple", "Minerva", "Model • Fallbacks • Voice • Budgets",
-    "ai agent brain llm openrouter opencode elevenlabs piper key budget cost", ns_page_minerva, NULL, NULL,
+    "ai agent brain llm opencode piper voice key budget cost", ns_page_minerva, NULL, NULL,
     ns_minerva_available },
   { NULL },
   { "view-grid-symbolic", "blue", "Apps", "Default apps • App settings",
