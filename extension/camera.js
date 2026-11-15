@@ -17,7 +17,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {clock, doing, facesText, historyLine, owner, parseState} from './cameratext.js';
 import {animate, bezier} from './motion.js';
-import {Color, cogl, font, gild, rgba} from './palette.js';
+import {Color, cogl, font, gild, restyleActor, rgba} from './palette.js';
 import {px, SCREEN_H, SCREEN_W} from './units.js';
 
 const BUS = 'org.minerva.Camera1';
@@ -104,6 +104,11 @@ function label(text, sp, weight, colour, wrap = true) {
 // The sheet a tap on the chip opens: over everything (the lock screen too), a dim a tap on closes, rebuilt as the
 // state changes while it is up
 export class CameraSheet {
+    _panelStyle() {
+        return `background-color: ${rgba(Color.surfaceContainerLow)}; border-radius: ${px(CORNER)}px; ` +
+            `padding: ${px(PAD)}px;${gild(0.5, true)}`;
+    }
+
     constructor(watch) {
         this._watch = watch;
         this._grab = null;
@@ -115,10 +120,15 @@ export class CameraSheet {
         this.layer.add_child(this._scrim);
         this._panel = new St.BoxLayout({
             orientation: Clutter.Orientation.VERTICAL, reactive: true, x: px(MARGIN), width: px(SCREEN_W - 2 * MARGIN),
-            style: `background-color: ${rgba(Color.surfaceContainerLow)}; border-radius: ${px(CORNER)}px; ` +
-                `padding: ${px(PAD)}px;${gild(0.5)}`,
+            style: this._panelStyle(),
         });
         this.layer.add_child(this._panel);
+        // the look is live: the panel's style, and the labels are built again if it is up
+        restyleActor(this._panel, () => {
+            this._panel.style = this._panelStyle();
+            if (this.layer.visible)
+                this._rebuild();
+        });
         this._ids = [watch.connect('tapped', () => this.open()),
             watch.connect('changed', () => this.layer.visible && this._rebuild())];
     }
@@ -169,7 +179,7 @@ export class CameraSheet {
             onUpdate: p => {
                 const alpha = enter ? p : 1 - p;
                 this._panel.opacity = Math.round(alpha * 255);
-                this.layer.background_color = cogl(Color.black, DIM * alpha);
+                this.layer.background_color = cogl(Color.dim, DIM * alpha);
             },
             onDone,
         });

@@ -25,7 +25,6 @@ const STANDARD_DECELERATE = bezier(0, 0, 0, 1);
 const ACCELERATE_DECELERATE = t => 0.5 - 0.5 * Math.cos(Math.PI * t);
 
 // materialColorPrimaryContainer (tone 30 of the primary's hue), not measured: the pressed key
-const PRIMARY_CONTAINER = [16, 78, 86];
 
 // --- the messages (keyguard-pin.md §1.1, §4; systemui.md §6.5): primary 18 sp, secondary 14 sp, centred
 const MESSAGE_BASELINE = 288;
@@ -181,18 +180,18 @@ function squircle(cr, cx, cy, a, b, n) {
 // on the S10e: the 12 keys redrawn each frame of the appear made a frame take 115 ms.
 const KeyShape = GObject.registerClass(
 class KeyShape extends Canvas {
-    constructor([fill, alpha], squareness) {
+    // @effect: [rgb, alpha], read at each drawing (the look changes them in place)
+    constructor(effect, squareness) {
         super({width: px(KEY), height: px(KEY)});
         this.set_pivot_point(0.5, 0.5);
-        this._fill = fill;
-        this._alpha = alpha;
+        this._effect = effect;
         this._squareness = squareness;
     }
 
     draw(cr) {
         screenPixels(cr);
         squircle(cr, KEY / 2, KEY / 2, KEY / 2, KEY / 2, this._squareness);
-        setSource(cr, this._fill, this._alpha);
+        setSource(cr, ...this._effect);
         cr.fill();
     }
 });
@@ -279,7 +278,7 @@ class PinKey extends St.Widget {
         this._layers = new St.Widget({width: px(KEY), height: px(KEY)});
         this.add_child(this._layers);
         this._shape = new KeyShape(action ? SurfaceEffect[3] : SurfaceEffect[1], SQUIRCLE_REST);
-        this._pressedShape = new KeyShape([PRIMARY_CONTAINER, 1], SQUIRCLE_PRESSED);
+        this._pressedShape = new KeyShape([Color.primaryContainer, 1], SQUIRCLE_PRESSED);
         this._pressedShape.opacity = 0;
         this._face = icon ? new IconFace(icon) : new DigitFace(digit);
         this._layers.add_child(this._shape);

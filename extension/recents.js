@@ -27,7 +27,7 @@ import {Canvas, VectorIcon} from './icons.js';
 import {ICONS as L3_ICONS} from './l3icondata.js';
 import {PathInterpolator} from './launch.js';
 import {VelocityTracker} from './motion.js';
-import {Color, cogl, gild, setSource} from './palette.js';
+import {Color, cogl, gild, restyleActor, setSource} from './palette.js';
 import {overWindows} from './scanout.js';
 import {openAppInfo, settingsApp} from './settings.js';
 import {
@@ -68,7 +68,7 @@ const CHIP_FADE_MS = 185;
 // Launcher3's is 156 dp wide whatever the name; this one is no narrower and grows to fit the name and the memory, up
 // to the card's width less the insets.
 const CHIP = {inset: 36, minW: 464, h: 108, icon: 72, iconX: 18, textX: 114, memGap: 24, arrow: 72, arrowEnd: 24};
-const CHIP_COLOUR = [34, 44, 45];       // materialColorSurfaceBright, measured
+const CHIP_COLOUR = Color.chip;         // materialColorSurfaceBright, measured
 const CHIP_RADIUS = 84;                 // app_chip_round_corner_radius 28 dp: a pill, collapsed or expanded
 // expanded (revealAnim, for the menu): the background 8 dp out at the top and start, 52 dp tall and at least 216 dp
 // wide; the icon 32 dp; the name's start moves by the icon's growth over two, the chevron to the new end, upside down
@@ -90,7 +90,7 @@ const MENU_ALPHA = clampToProgress(LINEAR, 0.48, 0.74), ROWS_ALPHA = clampToProg
 // goes down by the map's height (Recents._actions)
 const ACTIONS = [329, 1812, 750, 1956];
 const MAP_MARGIN = 42;                  // 14 dp
-const BUTTON_COLOUR = [31, 41, 42];
+const BUTTON_COLOUR = Color.button;
 const BUTTON_H = 144, BUTTON_PAD = 48, BUTTON_ICON = 60, BUTTON_ICON_GAP = 24;
 const DISABLED_ALPHA = 0.29;
 const CLEAR_ALL_LEFT = 150;             // its left edge when scrolled to it: the oldest card's left − 48 − its width
@@ -199,8 +199,10 @@ class Chip {
             opacity: 0, offscreen_redirect: Clutter.OffscreenRedirect.AUTOMATIC_FOR_OPACITY,
         });
         // St keeps the radius to half the height: a pill at either height
-        this._pill = new St.Widget({
-            style: `background-color: rgb(${CHIP_COLOUR}); border-radius: ${u(CHIP_RADIUS)}px;${gild()}`,
+        const pillStyle = () => `background-color: rgb(${CHIP_COLOUR}); border-radius: ${u(CHIP_RADIUS)}px;${gild()}`;
+        this._pill = new St.Widget({style: pillStyle()});
+        restyleActor(this._pill, () => {
+            this._pill.style = pillStyle();
         });
         this.root.add_child(this._pill);
         // app_chip_fg: pressed, onSurface at 0.15 over it
@@ -318,10 +320,14 @@ class TaskMenu {
         this._scale = scale;
         this.items = items;
         this.height = items.length * MENU.rowH;
+        const menuStyle = () => `background-color: rgb(${CHIP_COLOUR}); border-radius: ${u(MENU.r)}px;${gild()}`;
         this.root = new St.Widget({
-            style: `background-color: rgb(${CHIP_COLOUR}); border-radius: ${u(MENU.r)}px;${gild()}`,
+            style: menuStyle(),
             clip_to_allocation: true, opacity: 0,
             offscreen_redirect: Clutter.OffscreenRedirect.AUTOMATIC_FOR_OPACITY,
+        });
+        restyleActor(this.root, () => {
+            this.root.style = menuStyle();
         });
         this._rows = new Clutter.Actor({width: u(MENU.w), height: u(this.height)});
         this._rows.set_pivot_point(0, 0);
@@ -454,12 +460,12 @@ class RamMap {
         this._badge = new St.Widget({
             style: `border: ${u(RAM.badgeBorder)}px solid rgba(255, 255, 255, 0.6); border-radius: 999px;`,
         });
-        this._total = new AndroidText('', 12, 700, {colour: Color.white});
+        this._total = new AndroidText('', 12, 700, {colour: Color.onWall});
         this._badge.add_child(this._total);
         this.root.add_child(this._badge);
         this._parts = ['used', 'cache', 'free'].map(key => {
             const dot = new AndroidText('●', 12, 400, {colour: RAM_COLOURS[key]});
-            const label = new AndroidText('', 12, 400, {colour: Color.white, alpha: 0.85});
+            const label = new AndroidText('', 12, 400, {colour: Color.onWall, alpha: 0.85});
             this.root.add_child(dot);
             this.root.add_child(label);
             return {key, dot, label};
@@ -562,10 +568,14 @@ class Button {
     constructor(text, iconName, scale, parent) {
         const u = v => v / scale;
         this._scale = scale;
+        const buttonStyle = () => `background-color: rgb(${BUTTON_COLOUR}); border-radius: ${u(BUTTON_H / 2)}px;${gild(0.5)}`;
         this.root = new St.Widget({
             height: u(BUTTON_H), opacity: 0,
-            style: `background-color: rgb(${BUTTON_COLOUR}); border-radius: ${u(BUTTON_H / 2)}px;${gild(0.5)}`,
+            style: buttonStyle(),
             offscreen_redirect: Clutter.OffscreenRedirect.AUTOMATIC_FOR_OPACITY,
+        });
+        restyleActor(this.root, () => {
+            this.root.style = buttonStyle();
         });
         // OverviewActionButton: 14 sp at 600, which the phone draws as 700 made bold; the icon, then 8 dp, then
         // the label, centred in the pill
@@ -637,8 +647,10 @@ class StackTabs {
             const label = new AndroidText(`${name}  ${count}`, 14, 500, {
                 colour: on ? Color.onPrimary : Color.onSurface, embolden: true, letterSpacing: 0.025});
             const w = Math.round(label.textWidth + 2 * TABS.padX);
-            const pill = new St.Widget({
-                style: `background-color: rgb(${on ? Color.primary : CHIP_COLOUR}); border-radius: ${u(TABS.h / 2)}px;`,
+            const pillStyle = () => `background-color: rgb(${on ? Color.primary : CHIP_COLOUR}); border-radius: ${u(TABS.h / 2)}px;`;
+            const pill = new St.Widget({style: pillStyle()});
+            restyleActor(pill, () => {
+                pill.style = pillStyle();
             });
             pill.set_position(u(x), 0);
             pill.set_size(u(w), u(TABS.h));
@@ -723,6 +735,9 @@ export class Recents {
         Main.layoutManager.uiGroup.insert_child_above(this.layer, global.window_group);
         overWindows(this.layer);
         this._scrim = new Clutter.Actor({width: m.width, height: m.height, background_color: cogl(SCRIM), opacity: 0});
+        restyleActor(this._scrim, () => {
+            this._scrim.background_color = cogl(SCRIM);
+        });
         this.layer.add_child(this._scrim);
 
         // the cards of one stack (stacks.js): the running app's, when there are owners besides the user

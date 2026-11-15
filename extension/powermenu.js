@@ -20,7 +20,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {VectorIcon} from './icons.js';
 import {animate, bezier, LINEAR} from './motion.js';
-import {Color, cogl, gild, rgba} from './palette.js';
+import {Color, cogl, gild, restyleActor, rgba} from './palette.js';
 import {AndroidText} from './text.js';
 import {px, SCREEN_H, SCREEN_W} from './units.js';
 
@@ -83,6 +83,10 @@ export class PowerMenu {
         this.layer.add_child(this._scrim);
         this._panel = new St.Widget({reactive: true, style: shapeStyle(Color.surfaceContainerLow, CORNER)});
         this.layer.add_child(this._panel);
+        // the look is live (the buttons are built at each opening)
+        restyleActor(this._panel, () => {
+            this._panel.style = shapeStyle(Color.surfaceContainerLow, CORNER);
+        });
     }
 
     get showing() {
@@ -134,7 +138,7 @@ export class PowerMenu {
                 const alpha = enter ? p : 1 - p;
                 this._panel.opacity = Math.round(alpha * 255);
                 this._panel.translation_x = px(enter ? ENTER_DX * (1 - p) : EXIT_DX * p);
-                this.layer.background_color = cogl(Color.black, DIM * alpha);
+                this.layer.background_color = cogl(Color.dim, DIM * alpha);
             },
             onDone,
         });

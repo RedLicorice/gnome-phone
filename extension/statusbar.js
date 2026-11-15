@@ -14,7 +14,7 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {Canvas, paintIcon} from './icons.js';
-import {Color, cogl, dataFont, font, setSource, Type} from './palette.js';
+import {bindColor, Color, dataFont, font, restyleActor, setSource, Type} from './palette.js';
 import {px, screenPixels, SCALE, SCREEN_W} from './units.js';
 
 // --- geometry, screen px of the 1080x2280 reference (spec §1)
@@ -43,6 +43,8 @@ const CHIP_W = 96;                      // the camera chip (camera.js): a green 
 const CHIP_H = 54;
 const CHIP_ICON = 38;
 const CHIP_COLOUR = [0x2e, 0x9e, 0x4f];
+// the clock's face: mono in the Renaissance looks
+const clockFont = () => dataFont(...Type.labelLargeEmphasized) ?? font(...Type.labelLargeEmphasized);
 const SYSTEM_SPAN = 300 + CHIP_W + 19;  // signal, Wi-Fi and the widest battery (228) end to end, the chip, and room
 const ICONS_TAIL = 2;                   // the battery's antialiased edge past its end
 const ICON_GAP = 19;                    // between signal, Wi-Fi and battery
@@ -305,9 +307,9 @@ export function paintSystemIcons(cr, state, end, centerY) {
     if (battery.present)
         paintBattery(cr, at.battery, centerY - BATTERY_H / 2, battery, !!powerSave);
     if (wifi.connected)
-        paintWifi(cr, at.wifi, centerY - ICON_H / 2, wifi.level, Color.white);
+        paintWifi(cr, at.wifi, centerY - ICON_H / 2, wifi.level, Color.onWall);
     if (mobile.present)
-        paintSignal(cr, at.signal, centerY + ICON_H / 2, mobile.level, Color.white);
+        paintSignal(cr, at.signal, centerY + ICON_H / 2, mobile.level, Color.onWall);
     if (at.chip !== undefined)
         paintCameraChip(cr, at.chip, centerY);
 }
@@ -440,16 +442,21 @@ class StatusBar extends St.Widget {
 
         // black over apps, nothing over the launcher
         this._background = new St.Widget({
-            style: 'background-color: black;',
+            style: `background-color: rgb(${Color.bar.map(Math.round).join(', ')});`,
             opacity: 0,
             width: this.width,
             height: this.height,
         });
         this.add_child(this._background);
+        // the look is live: the band's colour (light over an app in the day looks)
+        restyleActor(this, () => {
+            this._background.style = `background-color: rgb(${Color.bar.map(Math.round).join(', ')});`;
+        });
 
-        this._clock = new Clutter.Text({
-            font_name: dataFont(...Type.labelLargeEmphasized) ?? font(...Type.labelLargeEmphasized),
-            color: cogl(Color.white),
+        this._clock = bindColor(new Clutter.Text(), Color.onWall);
+        this._clock.font_name = clockFont();
+        restyleActor(this._clock, () => {
+            this._clock.font_name = clockFont();
         });
         this.add_child(this._clock);
         this._wallClock = new GnomeDesktop.WallClock({time_only: true});

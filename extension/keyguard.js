@@ -25,7 +25,7 @@ import {vibrate} from './haptics.js';
 import {Canvas, paintIcon} from './icons.js';
 import {animate, clamp, EMPHASIZED_ACCELERATE, FAST_OUT_SLOW_IN, lerp, LINEAR, MIN_FLING_VELOCITY,
     TOUCH_RESPONSE, VelocityTracker} from './motion.js';
-import {Color, rgba, SHADE_PANEL} from './palette.js';
+import {Color, onRestyle, offRestyle, rgba, SHADE_PANEL} from './palette.js';
 import {chargingText} from './state.js';
 import {notificationIcon, SystemIcons} from './statusbar.js';
 import {AndroidText} from './text.js';
@@ -69,8 +69,6 @@ function setLockedHint(locked) {
 // --- the lock screen (§6.1-6.3)
 const CLOCK_SIZE = 86 * 0.98;           // dp, the small Flex clock
 const CLOCK_WGHT = 550;                 // matched to the reference's ink: 582 px for "05:12"
-// a soft grey-white, the owner's choice for the launcher's clock (2026-11-04), not the accent
-const CLOCK_COLOUR = [224, 224, 224];
 const CLOCK_LEFT = 84;                  // 28 dp
 const CLOCK_INK_TOP = 246;
 const DATE_SIZE = 16;
@@ -80,8 +78,6 @@ const CARRIER_LEFT = 48;
 const CARRIER_INK_TOP = 42;
 const SYSTEM_END = 880;                 // 9 px left of the home status bar's (keyguard-extras §C.3)
 const PILL = {x: 48, y: 664, h: 144, pad: 39, slot: 66, icon: 45, max: 3};
-const PILL_COLOUR = [19, 27, 28];
-const PILL_ICON = [221, 231, 233];
 const LOCK_ICON = {cx: 540, cy: 1950, size: 65 * 2.54};
 const INDICATION_SIZE = 14;
 const INDICATION_WGHT = 700;            // body 400 + Bold text's 300: stems 6-7 px, cap height 32 at opsz 16
@@ -287,22 +283,22 @@ export class Keyguard extends Signals.EventEmitter {
         this._blurLayer.add_effect(this._blur);
         this.actor.add_child(this._blurLayer);
         this._scrim = new St.Widget({width: monitor.width, height: monitor.height, opacity: 0,
-            style: `background-color: ${rgba(SHADE_PANEL[0].map(Math.round), SHADE_PANEL[1])};`});
+            style: this._scrimStyle()});
         this.actor.add_child(this._scrim);
 
         // what the lock screen shows
         this._content = new St.Widget({width: monitor.width, height: monitor.height});
         this.actor.add_child(this._content);
-        this._carrier = new AndroidText('', 14, 700, {colour: Color.white, opsz: 16});
+        this._carrier = new AndroidText('', 14, 700, {colour: Color.onWall, opsz: 16});
         this._content.add_child(this._carrier);
         this._systemIcons = new SystemIcons(this._state, {end: SYSTEM_END});
         this._content.add_child(this._systemIcons);
-        this._clock = new AndroidText('', CLOCK_SIZE, CLOCK_WGHT, {colour: CLOCK_COLOUR});
+        this._clock = new AndroidText('', CLOCK_SIZE, CLOCK_WGHT, {colour: Color.clock});
         this._content.add_child(this._clock);
-        this._date = new AndroidText('', DATE_SIZE, DATE_WGHT, {colour: Color.white});
+        this._date = new AndroidText('', DATE_SIZE, DATE_WGHT, {colour: Color.onWall});
         this._content.add_child(this._date);
         this._pill = new St.Widget({x: px(PILL.x), y: px(PILL.y), height: px(PILL.h), visible: false,
-            style: `background-color: rgb(${PILL_COLOUR.join(', ')}); border-radius: ${px(PILL.h / 2)}px;`});
+            style: this._pillStyle()});
         this._content.add_child(this._pill);
         this._lockIcon = new LockIcon();
         this._content.add_child(this._lockIcon);
@@ -312,16 +308,31 @@ export class Keyguard extends Signals.EventEmitter {
                 this._lockIconTapped();
             return Clutter.EVENT_PROPAGATE;
         });
-        this._indication = new AndroidText('', INDICATION_SIZE, INDICATION_WGHT, {colour: Color.white, opsz: 16});
+        this._indication = new AndroidText('', INDICATION_SIZE, INDICATION_WGHT, {colour: Color.onWall, opsz: 16});
         this._content.add_child(this._indication);
 
         this._bouncerBox = new St.Widget({width: monitor.width, height: monitor.height, opacity: 0, visible: false});
         this.actor.add_child(this._bouncerBox);
         this.actor.add_child(new Clutter.Actor());
 
+        // the look is live: what was copied into styles follows (the text and the lock icon are Canvases)
+        onRestyle(this, () => {
+            this._scrim.style = this._scrimStyle();
+            this._pill.style = this._pillStyle();
+            this._syncPill();
+        });
+
         this._tracker = new VelocityTracker();
         this._down = null;
         this.actor.connect('event', (a, event) => this._onEvent(event));
+    }
+
+    _scrimStyle() {
+        return `background-color: ${rgba(SHADE_PANEL[0].map(Math.round), SHADE_PANEL[1])};`;
+    }
+
+    _pillStyle() {
+        return `background-color: rgb(${Color.lockPill.map(Math.round).join(', ')}); border-radius: ${px(PILL.h / 2)}px;`;
     }
 
     _syncWallpaper() {
@@ -392,7 +403,7 @@ export class Keyguard extends Signals.EventEmitter {
         sources.slice(0, sources.length > PILL.max + 1 ? PILL.max : n).forEach((source, k) => {
             const icon = notificationIcon(source, px(PILL.icon));
             icon.opacity = 255;
-            icon.style = `color: rgb(${PILL_ICON.join(', ')});`;
+            icon.style = `color: rgb(${Color.onSurface.join(', ')});`;
             icon.set_position(px(PILL.pad + PILL.slot * k + (PILL.slot - PILL.icon) / 2), px((PILL.h - PILL.icon) / 2));
             this._pill.add_child(icon);
         });
@@ -1118,6 +1129,7 @@ export class Keyguard extends Signals.EventEmitter {
     }
 
     destroy() {
+        offRestyle(this);
         this._stopFinger();
         this._settle?.stop();
         this._unlocking?.stop();

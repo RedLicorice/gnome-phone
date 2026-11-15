@@ -17,6 +17,9 @@ gjs = find_program('gjs', required: false)
 if gjs.found()
   test('predictor', gjs, args: ['-m', files('tests/predictor.test.js')])
   test('camera-indicator', gjs, args: ['-m', files('tests/camera.test.js')])
+  # the look: effective look over all settings, Color changed in place, the wallpaper and icon pack swaps (needs mutter's
+  # Cogl typelib and glib-compile-schemas; the script skips otherwise)
+  test('theme', find_program('bash'), args: [files('tests/theme-test.sh')])
 endif
 
 # appmem.py runs as a program of its own (recents.js)
