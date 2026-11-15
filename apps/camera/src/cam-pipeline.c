@@ -184,7 +184,7 @@ run_request (gpointer job, gpointer data)
   CamPipeline *self = data;
   g_autofree char *camera = NULL;
   g_autofree char *error = NULL;
-  gboolean active, reopen, ok = FALSE;
+  gboolean active, reopen, name_set = FALSE, ok = FALSE;
   int width, height;
   guint generation;
 
@@ -234,8 +234,13 @@ run_request (gpointer job, gpointer data)
       if (reopen)
         {
           set_state_wait (self, GST_STATE_NULL);
-          if (src_has (self, "camera-name"))
-            g_object_set (self->src, "camera-name", camera, NULL);
+          /* the name goes to a fresh source: set again, libcamerasrc looks the camera up once more and fails
+           * ("Could not find a camera named") while the camera it opened still lives in the element */
+          if (!name_set && src_has (self, "camera-name"))
+            {
+              g_object_set (self->src, "camera-name", camera, NULL);
+              name_set = TRUE;
+            }
         }
       else
         set_state_wait (self, GST_STATE_READY);

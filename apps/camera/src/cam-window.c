@@ -97,6 +97,7 @@ struct _CamView {
   /* the stream */
   gboolean   running;
   char      *bound_id;
+  char      *ok_id;                     /* the camera whose stream ran last (the one to fall back on) */
   int        bound_w, bound_h;
   gboolean   in_settings, closing;
   guint      close_timer;
@@ -1276,6 +1277,8 @@ on_streaming (CamPipeline *pipeline, CamView *self)
 {
   int width, height;
 
+  g_free (self->ok_id);
+  self->ok_id = g_strdup (self->bound_id);
   cam_pipeline_get_size (pipeline, &width, &height);
   cam_viewfinder_set_geometry (CAM_VIEWFINDER (self->viewfinder), preview_turn (self), is_front (self),
                                preview_cover (self), width, height);
@@ -1287,6 +1290,28 @@ on_streaming (CamPipeline *pipeline, CamView *self)
   update_controls (self);
 }
 
+/* A camera that did not start after a switch is not the end of the app: the one that streamed before is still
+ * there, so the switch goes back to it (a camera that fails at start-up still fails the app, as it did) */
+static gboolean
+go_back (CamView *self)
+{
+  CamCamera *camera = NULL;
+
+  if (!self->ok_id || !g_strcmp0 (self->ok_id, self->bound_id))
+    return FALSE;
+  for (guint i = 0; i < self->cameras->len && !camera; i++)
+    if (!g_strcmp0 (((CamCamera *) self->cameras->pdata[i])->id, self->ok_id))
+      camera = self->cameras->pdata[i];
+  if (!camera)
+    return FALSE;
+  use_camera (self, camera);
+  remember_camera (self);
+  update_controls (self);
+  toast (self, _("This camera did not start, back to the one before"));
+  bind_camera (self);
+  return TRUE;
+}
+
 static void
 on_pipeline_error (CamPipeline *pipeline, int error, const char *detail, CamView *self)
 {
@@ -1294,10 +1319,12 @@ on_pipeline_error (CamPipeline *pipeline, int error, const char *detail, CamView
   switch (error)
     {
     case CAM_PIPELINE_ERROR_BUSY:
-      fail (self, _("This camera is already in use, try closing the app using it."));
+      if (!go_back (self))
+        fail (self, _("This camera is already in use, try closing the app using it."));
       break;
     case CAM_PIPELINE_ERROR_STREAM:
-      fail (self, _("There was an error while preparing the stream. Please report this to the developers."));
+      if (!go_back (self))
+        fail (self, _("There was an error while preparing the stream. Please report this to the developers."));
       break;
     default:
       toast (self, _("Error while setting up the session. The app will try to recover."));
@@ -2533,6 +2560,7 @@ cam_view_dispose (GObject *object)
   g_clear_pointer (&self->cameras, g_ptr_array_unref);
   g_clear_pointer (&self->rotators, g_ptr_array_unref);
   g_clear_pointer (&self->bound_id, g_free);
+  g_clear_pointer (&self->ok_id, g_free);
   G_OBJECT_CLASS (cam_view_parent_class)->dispose (object);
 }
 
