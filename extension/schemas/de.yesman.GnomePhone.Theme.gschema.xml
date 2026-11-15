@@ -12,6 +12,27 @@
       leaf, lapis and parchment on OLED black, neon cyan edges, Michelangelus capitals where the font is installed.
       The shell and the Neo apps follow it live; the kiosk picks it up on its next start.</description>
     </key>
+    <key name="day-look" type="s">
+      <choices>
+        <choice value="marble"/>
+        <choice value="sea"/>
+      </choices>
+      <default>'marble'</default>
+      <summary>Look by day</summary>
+      <description>Used while the system style is light: 'marble' is Carrara white marble with verde Alpi, 'sea' is
+      warm sand with sky blue. Only while name is 'renaissance'.</description>
+    </key>
+    <key name="night-look" type="s">
+      <choices>
+        <choice value="forest"/>
+        <choice value="plum"/>
+      </choices>
+      <default>'forest'</default>
+      <summary>Look by night</summary>
+      <description>Used while the system style is dark (org.gnome.desktop.interface color-scheme prefer-dark):
+      'forest' is green-black marble with moss veins, 'plum' is the granite plum look. Only while name is
+      'renaissance'.</description>
+    </key>
     <key name="font-display" type="s">
       <default>'Michelangelus, Cinzel'</default>
       <summary>Display font chain</summary>

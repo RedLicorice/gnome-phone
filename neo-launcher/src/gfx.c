@@ -426,6 +426,15 @@ gfx_tex_from_bgra (int w, int h, const void *pixels, int stride)
   return t;
 }
 
+GfxTex *
+gfx_tex_from_gray (int w, int h, const void *pixels, int stride)
+{
+  GfxTex *t = gfx_tex_new (w, h, VK_FORMAT_R8_UNORM);
+  if (t)
+    gfx_tex_write (t, 0, 0, w, h, pixels, stride);
+  return t;
+}
+
 static void
 flush_uploads (void)
 {
@@ -703,6 +712,17 @@ gfx_image_uv (GfxTex *t, float x, float y, float w, float h, float u0, float v0,
   q->r = q->g = q->b = q->a = a;
   q->radius = radius;
   q->mode = GFX_MODE_TEX;
+}
+
+void
+gfx_mask_uv (GfxTex *t, float x, float y, float w, float h, float u0, float v0, float u1, float v1, GfxColor c)
+{
+  GfxInst *q = gfx_push (t, GFX_PIPE_QUAD);
+  float a = c.a * q->a;
+  q->x = x; q->y = y; q->w = w; q->h = h;
+  q->u0 = u0; q->v0 = v0; q->u1 = u1; q->v1 = v1;
+  q->r = c.r * a; q->g = c.g * a; q->b = c.b * a; q->a = a;
+  q->mode = GFX_MODE_MASK;
 }
 
 void

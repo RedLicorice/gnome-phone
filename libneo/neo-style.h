@@ -48,8 +48,17 @@ void    neo_init        (void);
 /* Whether the optional Renaissance theme (setting de.yesman.GnomePhone.Theme name) is in force. It follows the setting
  * live: the CSS reloads, drawn widgets recolour on their next draw. */
 gboolean neo_theme_is_renaissance (void);
-/* A colour an app brings of its own, as the Renaissance look wants it (unchanged in the stock look): teal and cyan
- * pastels to gold, dark teal to lapis, neutrals to the night, white to parchment. See neo-pressable fills. */
+/* The look in force: "marble" or "sea" (day), "forest" or "plum" (night); NULL in the stock look. It is the Theme
+ * setting's night-look while org.gnome.desktop.interface color-scheme is prefer-dark, else its day-look, and follows
+ * name, day-look, night-look and color-scheme live (like the colours, which come from tools/theme/palette.json via
+ * the generated neo-looks.h). Every neo window carries the classes neo-look-day or neo-look-night and neo-look-<id>. */
+const char *neo_theme_look (void);
+/* Whether the look in force is a light one (marble, sea). FALSE in the stock look, which is always dark. */
+gboolean neo_theme_is_day (void);
+/* A colour an app brings of its own, as the Renaissance look wants it (unchanged in the stock look). At night: teal and
+ * cyan pastels to gold, dark teal to lapis, neutrals to the night, white to parchment. By day the reverse for the
+ * lightness: dark surfaces to light ones, light text to dark ink, dark teal to pale gold, pastel teal to deep gold.
+ * See neo-pressable fills. */
 GdkRGBA  neo_theme_map_rgba (const GdkRGBA *color);
 
 GdkRGBA neo_color       (NeoColor color);

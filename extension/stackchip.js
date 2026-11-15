@@ -11,7 +11,9 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {Color, dataFont, font, rgba} from './palette.js';
+import {Color, dataFont, font, restyleActor, rgba} from './palette.js';
+import {owlIcon} from './owl.js';
+import {isRenaissance} from './theme.js';
 import {overWindows} from './scanout.js';
 import {px} from './units.js';
 
@@ -23,6 +25,7 @@ const TOP = (116 - HEIGHT) / 2;
 const PAD = 28;
 const FONT_SP = 12;
 
+const chipFont = () => dataFont(FONT_SP, 600) ?? font(FONT_SP, 600);
 const nice = owner => owner.charAt(0).toUpperCase() + owner.slice(1);
 
 export class StackChip {
@@ -36,8 +39,24 @@ export class StackChip {
         });
         this._label = new St.Label({y_align: Clutter.ActorAlign.CENTER});
         const text = this._label.clutter_text;
-        text.font_name = dataFont(FONT_SP, 600) ?? font(FONT_SP, 600);
-        this._button.set_child(this._label);
+        text.font_name = chipFont();
+        // in the Renaissance looks the owl alone stands for the agent (no dot)
+        this._owl = owlIcon(px(HEIGHT * 0.7));
+        this._owl.y_align = Clutter.ActorAlign.CENTER;
+        this._owl.visible = isRenaissance();
+        const box = new St.BoxLayout({style: `spacing: ${px(PAD / 2)}px;`});
+        box.add_child(this._owl);
+        box.add_child(this._label);
+        this._button.set_child(box);
+        this._owner = null;
+        this._takenOver = false;
+        // the look is live: the chip's colours, its face and its owl
+        restyleActor(this._button, () => {
+            text.font_name = chipFont();
+            this._owl.visible = isRenaissance();
+            if (this._button.visible)
+                this._style();
+        });
         this._button.connect('clicked', () => this._onToggle());
         Main.layoutManager.addTopChrome(this._button);
         overWindows(this._button);
@@ -46,16 +65,23 @@ export class StackChip {
     // owner: the agent's name; takenOver: whether the user has the window
     show(owner, takenOver) {
         const m = Main.layoutManager.primaryMonitor;
-        const [fg, bg, edge] = takenOver
-            ? [Color.onPrimary, rgba(Color.primary, 0.95), rgba(Color.primary, 1)]
-            : [Color.onSurface, rgba(Color.surface, 0.88), rgba(Color.silver, 0.7)];
-        this._label.text = takenOver ? `‖ ${nice(owner)} · resume` : `● ${nice(owner)}`;
-        this._button.style = `padding: 0 ${px(PAD)}px; min-height: ${px(HEIGHT)}px; border-radius: ${px(HEIGHT / 2)}px; ` +
-            `background-color: ${bg}; border: ${Math.max(1, px(3))}px solid ${edge};`;
-        this._label.style = `color: ${rgba(fg, 1)};`;
+        this._owner = owner;
+        this._takenOver = takenOver;
+        this._style();
         this._button.visible = true;
         this._button.set_position(m.x + px(LEFT), m.y + px(TOP));
         this._sync();
+    }
+
+    _style() {
+        const owner = this._owner, takenOver = this._takenOver;
+        const [fg, bg, edge] = takenOver
+            ? [Color.onPrimary, rgba(Color.primary, 0.95), rgba(Color.primary, 1)]
+            : [Color.onSurface, rgba(Color.surface, 0.88), rgba(Color.silver, 0.7)];
+        this._label.text = takenOver ? `‖ ${nice(owner)} · resume` : `${isRenaissance() ? '' : '● '}${nice(owner)}`;
+        this._button.style = `padding: 0 ${px(PAD)}px; min-height: ${px(HEIGHT)}px; border-radius: ${px(HEIGHT / 2)}px; ` +
+            `background-color: ${bg}; border: ${Math.max(1, px(3))}px solid ${edge};`;
+        this._label.style = `color: ${rgba(fg, 1)};`;
     }
 
     hide() {

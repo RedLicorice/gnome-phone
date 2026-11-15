@@ -1,0 +1,27 @@
+The Renaissance icon packs (neo-launcher/iconpacks/renaissance-*), generated, one script for all four:
+
+    python3 -I make-renaissance-pack.py ../../neo-launcher/iconpacks/renaissance-day          --style tile   --mode day
+    python3 -I make-renaissance-pack.py ../../neo-launcher/iconpacks/renaissance-night        --style tile   --mode night
+    python3 -I make-renaissance-pack.py ../../neo-launcher/iconpacks/renaissance-glyph-day    --style glyph  --mode day
+    python3 -I make-renaissance-pack.py ../../neo-launcher/iconpacks/renaissance-glyph-night  --style glyph  --mode night
+
+Tile (the launcher's home grid and dock, `de.yesman.neo icon-pack`): full-bleed 256 px squares in the quick-settings
+inactive tile's design (extension/qs.js: a flat rounded square, corner radius 24/76 of its width, the fill and the ink
+of the look's tiles) with the app's Material glyph centred, flat, no frame and no neon. Day is the day looks' cream
+tile with dark ink, night the night looks' dark tile with light ink; Minerva's own icon (`yesman`) is the owl (owl.png,
+derived from the Minerva agent image). One pack serves each pair of looks, so the day fill is marble's and sea's shared
+cream and the night fill forest's and plum's shared near-black. The launcher paints drawn icons at the full icon size
+over nothing (neo-launcher/src/icons.c icons_render), so the tile fills the icon box and pack.json has no shape; `scale`
+(0.5) and `iconback` (the tile alone) only serve apps the pack does not draw. gnome-map.json is the same desktop-id map
+as the round pack's; appfilter.json is empty.
+
+Glyph (for Neo Settings' rows and search results, not the launcher): only the fine-line glyph and its neon aura on
+transparent, in a marble (day) or granite (night) ink. icons/<name>.png for every icon-name string Neo Settings uses
+(apps/settings/src, "-symbolic" suffix kept) and the short names of the mock-up (wifi bt display sound notif battery
+account lock minerva apps); icons.txt lists them. The colour is the area's.
+
+Glyphs are Material Symbols Outlined, weight 200 (Google, Apache-2.0: glyphs/LICENSE), fetched by fetch-glyphs.sh from
+github.com/google/material-design-icons (symbols/web/<name>/materialsymbolsoutlined/<name>_wght200_48px.svg) and
+committed. The script needs python3-gi with Rsvg 2.0, python3-cairo and python3-pil. Output is
+deterministic (textures are seeded from the icon's name). To add an app: a line in TILED (glyph) and its desktop
+id in MAP; to add a Settings icon: a line in GLYPHS; then run fetch-glyphs.sh and the four commands above.

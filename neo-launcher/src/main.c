@@ -240,6 +240,10 @@ wallpaper_load (void)
   g_autofree char *dir = file ? g_path_get_dirname (file) : NULL;
   g_autofree char *json = dir ? g_build_filename (dir, "parallax.json", NULL) : NULL;
   g_autofree char *set = g_settings_get_string (N.settings, "wallpaper-parallax");
+  {
+    g_autofree char *base = dir ? g_path_get_basename (dir) : NULL;
+    N.day_ink = base && (!g_strcmp0 (base, "renaissance-marble") || !g_strcmp0 (base, "renaissance-sea"));
+  }
   Parallax *p = NULL;
   if (env)
     p = parallax_new (env, wake, NULL);

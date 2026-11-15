@@ -1,0 +1,102 @@
+{
+  "range": 60,
+  "tilt": 0.2,
+  "layers": [
+    {
+      "file": "base.jpg",
+      "depth": 0
+    }
+  ],
+  "chisel": {
+    "design": [
+      1080,
+      2400
+    ],
+    "tile": [
+      752,
+      820
+    ],
+    "scale": 2,
+    "lit": [
+      243,
+      220,
+      160
+    ],
+    "dark": [
+      0,
+      0,
+      0
+    ],
+    "lit_gain": 0.9,
+    "dark_gain": 0.9,
+    "glow": {
+      "color": [
+        240,
+        215,
+        170
+      ],
+      "alpha": 0.1,
+      "radius": 0.9,
+      "x": [
+        0.5,
+        0.45
+      ],
+      "y": [
+        0.35,
+        0.35
+      ]
+    },
+    "buckets": [
+      {
+        "angle": 99.0,
+        "lit": "chisel-lit-00.png",
+        "dark": "chisel-dark-00.png"
+      },
+      {
+        "angle": 117.0,
+        "lit": "chisel-lit-01.png",
+        "dark": "chisel-dark-01.png"
+      },
+      {
+        "angle": 135.0,
+        "lit": "chisel-lit-02.png",
+        "dark": "chisel-dark-02.png"
+      },
+      {
+        "angle": 153.0,
+        "lit": "chisel-lit-03.png",
+        "dark": "chisel-dark-03.png"
+      },
+      {
+        "angle": 171.0,
+        "lit": "chisel-lit-04.png",
+        "dark": "chisel-dark-04.png"
+      },
+      {
+        "angle": 189.0,
+        "lit": "chisel-lit-05.png",
+        "dark": "chisel-dark-05.png"
+      },
+      {
+        "angle": 207.0,
+        "lit": "chisel-lit-06.png",
+        "dark": "chisel-dark-06.png"
+      },
+      {
+        "angle": 225.0,
+        "lit": "chisel-lit-07.png",
+        "dark": "chisel-dark-07.png"
+      },
+      {
+        "angle": 243.0,
+        "lit": "chisel-lit-08.png",
+        "dark": "chisel-dark-08.png"
+      },
+      {
+        "angle": 261.0,
+        "lit": "chisel-lit-09.png",
+        "dark": "chisel-dark-09.png"
+      }
+    ]
+  }
+}
