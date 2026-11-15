@@ -33,7 +33,7 @@ static const Entry entries[] = {
   { NULL },
   { "display-brightness-symbolic", "lime", "Display", "Brightness • Font size • Screen timeout",
     "screen timeout dim suspend power saving rotate scale double tap wake adaptive brightness night light intensity "
-    "warm amber",
+    "warm amber aod always on always-on",
     ns_page_display },
   { "battery-full-symbolic", "green", "Battery", "Charge • Battery health",
     "charge health temperature voltage capacity max charge limit",
@@ -300,7 +300,7 @@ static const struct {
   { "notifications", ns_page_notifications },
   { "power", ns_page_battery }, { "battery", ns_page_battery },
   { "battery-info", ns_page_battery_info }, { "battery-information", ns_page_battery_info },
-  { "display", ns_page_display }, { "displays", ns_page_display }, { "compositor", ns_page_display },
+  { "aod", ns_page_display }, { "always-on", ns_page_display }, { "display", ns_page_display }, { "displays", ns_page_display }, { "compositor", ns_page_display },
   { "night-light", ns_page_night_light }, { "nightlight", ns_page_night_light },
   { "fingerprint", ns_page_fingerprint }, { "fingerprints", ns_page_fingerprint },
   { "lockscreen", ns_page_lock_screen }, { "lock-screen", ns_page_lock_screen }, { "screen-lock", ns_page_lock_screen },

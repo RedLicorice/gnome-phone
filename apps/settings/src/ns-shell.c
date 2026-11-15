@@ -104,22 +104,6 @@ lock_free (Lock *l)
   g_free (l);
 }
 
-/* The always-on display is for OLED panels: black costs them nothing, and gnome-phone's AOD (extension/aod.js) puts
- * them in their low power mode, where the panel itself keeps the picture at a few nits and ticks the clock. That
- * mode is the `lpm` attribute of the panel's DSI device, which only an OLED panel's driver has (the S10e's); an LCD
- * (the POCO's) would light its whole backlight for a black screen, so it gets no switch (owner, 2026-11-12). */
-static gboolean
-panel_is_oled (void)
-{
-  g_autoptr (GDir) d = g_dir_open ("/sys/bus/mipi-dsi/devices", 0, NULL);
-  for (const char *n; d && (n = g_dir_read_name (d));) {
-    g_autofree char *lpm = g_build_filename ("/sys/bus/mipi-dsi/devices", n, "lpm", NULL);
-    if (g_file_test (lpm, G_FILE_TEST_EXISTS))
-      return TRUE;
-  }
-  return FALSE;
-}
-
 /* Not on this page, and why:
  * - "Lock automatically" / "Lock after the screen turns off" (org.gnome.desktop.screensaver lock-enabled and
  *   lock-delay): the keyguard locks the moment the screen goes off (power.js goToSleep calls keyguard.lock()). A
@@ -156,9 +140,6 @@ ns_page_lock_screen (GtkWidget *row, gpointer data)
   g = ns_group (c, "On the lock screen");
   GSettings *n = ns_page_settings (page, "org.gnome.desktop.notifications");
   ns_row_switch (g, "Notifications", "Their apps' icons below the clock", n, "show-in-lock-screen");
-  if (ns_has_key (neo, "aod") && panel_is_oled ())
-    ns_row_switch (g, "Always On Display", "The time, the date and notifications while the screen is off", neo,
-                   "aod");
   ns_push (page);
 }
 

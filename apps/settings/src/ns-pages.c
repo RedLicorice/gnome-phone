@@ -730,8 +730,13 @@ ns_page_display (GtkWidget *row, gpointer data)
     GtkWidget *r = ns_row_switch (g, "Auto rotate", "Turn the screen with the phone", NULL, NULL);
     g_settings_bind (touch, "orientation-lock", ns_row_get_switch (r), "active", G_SETTINGS_BIND_INVERT_BOOLEAN);
   }
-  ns_power_rows (c, g);
   GSettings *neo = ns_page_settings (page, "de.yesman.neo");
+  if (neo && ns_has_key (neo, "aod"))
+    ns_row_switch (g, "Always On Display",
+                   ns_panel_is_oled () ? "The time, the date and notifications while the screen is off"
+                                       : "Keeps the whole backlight on while the screen is off: it costs battery",
+                   neo, "aod");
+  ns_power_rows (c, g);
   if (neo) {
     g = ns_group (c, NULL);
     ns_row_switch (g, "Double tap to wake", "Wake the screen with a double tap", neo, "double-tap-wake");

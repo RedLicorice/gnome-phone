@@ -103,6 +103,10 @@ gboolean   ns_settings_exists (const char *schema);
 GSettings *ns_page_settings (AdwNavigationPage *page, const char *schema);
 /* whether the installed schema has `key` (an older one may not) */
 gboolean   ns_has_key (GSettings *s, const char *key);
+/* where the kernel lists the panel's DSI devices */
+#define NS_DSI_DEVICES "/sys/bus/mipi-dsi/devices"
+/* whether the panel is an OLED (it has the low power mode `lpm`) rather than an LCD */
+gboolean   ns_panel_is_oled (void);
 /* an app id as GSettings paths take it (GNOME Settings', feedbackd's and phoc's way): no .desktop, lower case,
  * anything but letters, digits and '-' made '-' */
 char      *ns_munge_app_id (const char *id);

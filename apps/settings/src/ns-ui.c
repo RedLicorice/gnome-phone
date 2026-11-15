@@ -1189,6 +1189,22 @@ ns_page_settings (AdwNavigationPage *page, const char *schema)
   return s;
 }
 
+/* The always-on display suits OLED panels: black costs them nothing, and gnome-phone's AOD (extension/aod.js) puts
+ * them in their low power mode, where the panel itself keeps the picture at a few nits and ticks the clock. That
+ * mode is the `lpm` attribute of the panel's DSI device, which only an OLED panel's driver has (the S10e's). An LCD
+ * (the POCO's) lights its whole backlight for a black screen. */
+gboolean
+ns_panel_is_oled (void)
+{
+  g_autoptr (GDir) d = g_dir_open (NS_DSI_DEVICES, 0, NULL);
+  for (const char *n; d && (n = g_dir_read_name (d));) {
+    g_autofree char *lpm = g_build_filename (NS_DSI_DEVICES, n, "lpm", NULL);
+    if (g_file_test (lpm, G_FILE_TEST_EXISTS))
+      return TRUE;
+  }
+  return FALSE;
+}
+
 gboolean
 ns_has_key (GSettings *s, const char *key)
 {
