@@ -24,6 +24,11 @@ struct Mn {
   GtkWidget *voice_id, *voice_cap, *budget_g, *spent; /* rows updated in place */
   GtkWidget *events, *bypass;           /* the events daemon's day: tokens used, and today's bypass switch */
   GtkWidget *sg_box;                    /* the data-driven groups (setting_groups of the status) go in here */
+  GtkWidget *vp_info;                   /* the voiceprint's state row (a group's "voiceprint" data) */
+  char      *vp_text[3];                /* its texts: enrolled, none, enrolling ({got}, {need}) */
+  GPtrArray *vp_actions;                /* the voiceprint buttons: "mn-when" says in which state each shows */
+  guint      poll_id;                   /* refreshes while an enrollment runs */
+  guint      poll_s;
   GPtrArray *srows;                     /* their rows: "mn-key", "mn-kind" (and "mn-ids" for a picker) */
   GPtrArray *caps;                      /* the budget rows: each has its brain.conf key in "mn-key" */
   char      *cap_key;                   /* the budget in money: what the spent line is compared with */
@@ -612,6 +617,111 @@ sw_toggled (GtkWidget *sw, GParamSpec *pspec, gpointer data)
   mn_set (m, g_object_get_data (G_OBJECT (sw), "mn-key"), gtk_switch_get_active (GTK_SWITCH (sw)) ? "true" : "false");
 }
 
+/* ---- the owner's voiceprint (speaker check of the wake word): a state row and its buttons, all texts from the data ---- */
+
+typedef struct {
+  Mn    *m;
+  GStrv  args;
+} VpAction;
+
+static void
+vp_action_done (Mn *m, JsonObject *root, const char *err, gpointer data)
+{
+  if (err) {
+    g_autofree char *t = g_strdup_printf ("%s", err);
+    say (m, t, TRUE);
+  } else {
+    say (m, "", FALSE);
+  }
+  mn_refresh (m);
+}
+
+static void
+vp_action_run (GtkWidget *row, gpointer data)
+{
+  VpAction *a = data;
+  mn_run (a->m, (const char *const *) a->args, vp_action_done, NULL);
+}
+
+static void
+vp_action_free (VpAction *a)
+{
+  g_strfreev (a->args);
+  g_free (a);
+}
+
+static void
+build_voiceprint (Mn *m, GtkWidget *grp, JsonObject *vp)
+{
+  const char *keys[3] = { "enrolled", "none", "enrolling" };
+  for (int i = 0; i < 3; i++) {
+    g_free (m->vp_text[i]);
+    m->vp_text[i] = g_strdup (str_of (vp, keys[i]));
+  }
+  m->poll_s = (guint) json_object_get_int_member_with_default (vp, "poll_s", 2);
+  m->vp_info = ns_row_info (grp, str_of (vp, "label"), "");
+  JsonArray *acts = arr_of (vp, "actions");
+  for (guint i = 0; acts && i < json_array_get_length (acts); i++) {
+    JsonObject *o = json_array_get_object_element (acts, i);
+    JsonArray *av = arr_of (o, "args");
+    g_autoptr (GPtrArray) v = g_ptr_array_new ();
+    for (guint k = 0; av && k < json_array_get_length (av); k++)
+      g_ptr_array_add (v, g_strdup (json_array_get_string_element (av, k)));
+    g_ptr_array_add (v, NULL);
+    VpAction *a = g_new0 (VpAction, 1);
+    a->m = m;
+    a->args = g_strdupv ((char **) v->pdata);
+    GtkWidget *row = ns_row_button (grp, str_of (o, "label"), json_object_get_boolean_member_with_default (o, "destructive", FALSE),
+                                    vp_action_run, a);
+    g_object_set_data_full (G_OBJECT (row), "mn-vp-action", a, (GDestroyNotify) vp_action_free);
+    g_object_set_data_full (G_OBJECT (row), "mn-when", g_strdup (str_of (o, "when")), g_free);
+    g_ptr_array_add (m->vp_actions, row);
+  }
+}
+
+static gboolean
+poll_tick (gpointer data)
+{
+  Mn *m = data;
+  JsonObject *vp = obj_of (m->st, "voiceprint");
+  if (!vp || !json_object_get_boolean_member_with_default (vp, "enrolling", FALSE)) {
+    m->poll_id = 0;
+    return G_SOURCE_REMOVE;
+  }
+  mn_refresh (m);
+  return G_SOURCE_CONTINUE;
+}
+
+static void
+fill_voiceprint (Mn *m)
+{
+  JsonObject *vp = obj_of (m->st, "voiceprint");
+  if (!vp || !m->vp_info)
+    return;
+  gboolean enrolled = json_object_get_boolean_member_with_default (vp, "enrolled", FALSE);
+  gboolean enrolling = json_object_get_boolean_member_with_default (vp, "enrolling", FALSE);
+  g_autoptr (GString) t = g_string_new (m->vp_text[enrolling ? 2 : enrolled ? 0 : 1]);
+  g_autofree char *got = g_strdup_printf ("%d", (int) json_object_get_int_member_with_default (vp, "got", 0));
+  g_autofree char *need = g_strdup_printf ("%d", (int) json_object_get_int_member_with_default (vp, "need", 0));
+  g_string_replace (t, "{got}", got, 0);
+  g_string_replace (t, "{need}", need, 0);
+  ns_row_value_set (m->vp_info, t->str);
+  for (guint i = 0; i < m->vp_actions->len; i++) {
+    GtkWidget *row = m->vp_actions->pdata[i];
+    const char *when = g_object_get_data (G_OBJECT (row), "mn-when");
+    /* when: "" always, "idle" while no enrollment runs, "enrolled" with a voiceprint and none running */
+    gboolean show = !*when || (!g_strcmp0 (when, "idle") && !enrolling) || (!g_strcmp0 (when, "enrolled") && enrolled && !enrolling);
+    gtk_widget_set_visible (row, show);
+  }
+  for (guint i = 0; i < m->srows->len; i++) {
+    GtkWidget *row = m->srows->pdata[i];
+    if (g_object_get_data (G_OBJECT (row), "mn-needs-vp"))
+      gtk_widget_set_sensitive (row, enrolled);
+  }
+  if (enrolling && !m->poll_id)
+    m->poll_id = g_timeout_add_seconds (m->poll_s, poll_tick, m);
+}
+
 static void
 build_groups (Mn *m)
 {
@@ -656,8 +766,12 @@ build_groups (Mn *m)
       }
       g_object_set_data_full (G_OBJECT (row), "mn-key", g_strdup (key), g_free);
       g_object_set_data_full (G_OBJECT (row), "mn-kind", g_strdup (kind), g_free);
+      g_object_set_data (G_OBJECT (row), "mn-needs-vp", GINT_TO_POINTER (!g_strcmp0 (str_of (r, "needs"), "voiceprint")));
       g_ptr_array_add (m->srows, row);
     }
+    JsonObject *vp = obj_of (g, "voiceprint");
+    if (vp)
+      build_voiceprint (m, grp, vp);
     const char *nt = str_of (g, "note");
     if (*nt)
       ns_note (m->sg_box, nt);
@@ -736,6 +850,7 @@ status_done (Mn *m, JsonObject *root, const char *err, gpointer data)
   notes_fill (m);
   update_fields (m);
   fill_groups (m);
+  fill_voiceprint (m);
 }
 
 static void
@@ -756,6 +871,12 @@ mn_free (Mn *m)
     g_ptr_array_free (m->caps, TRUE);
   if (m->srows)
     g_ptr_array_free (m->srows, TRUE);
+  if (m->poll_id)
+    g_source_remove (m->poll_id);
+  if (m->vp_actions)
+    g_ptr_array_free (m->vp_actions, TRUE);
+  for (int i = 0; i < 3; i++)
+    g_free (m->vp_text[i]);
   g_free (m->cap_key);
   g_strfreev (m->chain_ids);
   g_strfreev (m->stt_ids);
@@ -790,6 +911,7 @@ ns_page_minerva (GtkWidget *row, gpointer data)
   m->voice_g = ns_group (c, "Voice");
 
   m->srows = g_ptr_array_new ();
+  m->vp_actions = g_ptr_array_new ();
   m->sg_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);   /* wake word, reply: from the status, see build_groups */
   gtk_box_append (GTK_BOX (c), m->sg_box);
 
