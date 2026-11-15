@@ -618,6 +618,18 @@ timeout_picked (GtkWidget *row, guint i, gpointer session)
   g_settings_set_uint (session, "idle-delay", timeouts[i]);
 }
 
+/* The same picker on Display and on Wallpaper and style: one setting, two doors. */
+static void
+font_size_row (GtkWidget *g, GSettings *iface)
+{
+  double f = g_settings_get_double (iface, "text-scaling-factor");
+  guint ti = 1;
+  for (guint i = 0; i < G_N_ELEMENTS (text_scales); i++)
+    if (ABS (text_scales[i] - f) < 0.01)
+      ti = i;
+  ns_row_pick (g, "Font size", text_labels, ti, text_picked, iface);
+}
+
 static int
 name_cmp (gconstpointer a, gconstpointer b)
 {
@@ -686,39 +698,13 @@ ns_page_display (GtkWidget *row, gpointer data)
   AdwNavigationPage *page = ns_page_new ("Display", &c);
   GSettings *iface = ns_page_settings (page, "org.gnome.desktop.interface");
 
-  GtkWidget *g = ns_group (c, NULL);
-  GSettings *look = ns_page_settings (page, "de.yesman.GnomePhone.Theme");
-  if (look) {
-    static const char *const looks[] = { "default", "renaissance", NULL };
-    static const char *const look_labels[] = { "Stock", "Cyberpunk Renaissance", NULL };
-    ns_row_choice (g, "Look", look, "name", looks, look_labels);
-    /* the two variants: the day one is used while Dark mode (below) is off, the night one while it is on. Picking
-     * applies at once (the choice writes the setting, libneo, the shell and this window follow it live). Older schemas
-     * have no such keys. */
-    if (ns_has_key (look, "day-look") && ns_has_key (look, "night-look")) {
-      static const char *const days[] = { "marble", "sea", NULL };
-      static const char *const day_labels[] = { "Marmo", "Marino", NULL };
-      static const char *const nights[] = { "forest", "plum", NULL };
-      static const char *const night_labels[] = { "Bosco", "Prugna", NULL };
-      GtkWidget *day = ns_row_choice (g, "Day look", look, "day-look", days, day_labels);
-      GtkWidget *night = ns_row_choice (g, "Night look", look, "night-look", nights, night_labels);
-      /* they only mean something while the Renaissance look is on */
-      g_settings_bind_with_mapping (look, "name", day, "visible", G_SETTINGS_BIND_GET, renaissance_get, NULL, NULL, NULL);
-      g_settings_bind_with_mapping (look, "name", night, "visible", G_SETTINGS_BIND_GET, renaissance_get, NULL, NULL, NULL);
-    }
-    GSettingsSchema *schema = NULL;
-    g_object_get (look, "settings-schema", &schema, NULL);
-    if (g_settings_schema_has_key (schema, "font-display")) {
-      font_row (g, look, "Display font", "font-display", TRUE);
-      font_row (g, look, "Body font", "font-body", FALSE);
-      font_row (g, look, "Mono font", "font-mono", TRUE);
-    }
-    g_settings_schema_unref (schema);
-  }
-  dark_row (g, iface);
+  /* the look, the fonts and Dark mode live on Wallpaper and style (ns_page_wallpaper); Display keeps the screen */
+  GtkWidget *g;
   GSettings *color = ns_page_settings (page, "org.gnome.settings-daemon.plugins.color");
-  if (color && display_has_gamma ())
+  if (color && display_has_gamma ()) {
+    g = ns_group (c, NULL);
     night_row (g, color, iface);
+  }
 
   /* both rows wait for an answer (mutter's, the sensor's): the card shows with the first that has something */
   g = ns_group (c, NULL);
@@ -727,12 +713,7 @@ ns_page_display (GtkWidget *row, gpointer data)
   adaptive_row (g, ns_page_settings (page, "org.gnome.settings-daemon.plugins.power"));
 
   g = ns_group (c, NULL);
-  double f = g_settings_get_double (iface, "text-scaling-factor");
-  guint ti = 1;
-  for (guint i = 0; i < G_N_ELEMENTS (text_scales); i++)
-    if (ABS (text_scales[i] - f) < 0.01)
-      ti = i;
-  ns_row_pick (g, "Font size", text_labels, ti, text_picked, iface);
+  font_size_row (g, iface);
   ns_page_scale_row (g);
 
   GSettings *session = ns_page_settings (page, "org.gnome.desktop.session");
@@ -1123,8 +1104,42 @@ ns_page_wallpaper (GtkWidget *row, gpointer data)
   g_signal_connect_object (bg, "changed::picture-uri", G_CALLBACK (picture_changed), r, 0);
 
   g = ns_group (c, "Style");
+  GSettings *look = ns_page_settings (page, "de.yesman.GnomePhone.Theme");
+  if (look) {
+    static const char *const looks[] = { "default", "renaissance", NULL };
+    static const char *const look_labels[] = { "Stock", "Cyberpunk Renaissance", NULL };
+    ns_row_choice (g, "Look", look, "name", looks, look_labels);
+    /* the two variants: the day one is used while Dark mode (below) is off, the night one while it is on. Picking
+     * applies at once (the choice writes the setting, libneo, the shell and this window follow it live). Older schemas
+     * have no such keys. */
+    if (ns_has_key (look, "day-look") && ns_has_key (look, "night-look")) {
+      static const char *const days[] = { "marble", "sea", NULL };
+      static const char *const day_labels[] = { "Marmo", "Marino", NULL };
+      static const char *const nights[] = { "forest", "plum", NULL };
+      static const char *const night_labels[] = { "Bosco", "Prugna", NULL };
+      GtkWidget *day = ns_row_choice (g, "Day look", look, "day-look", days, day_labels);
+      GtkWidget *night = ns_row_choice (g, "Night look", look, "night-look", nights, night_labels);
+      /* they only mean something while the Renaissance look is on */
+      g_settings_bind_with_mapping (look, "name", day, "visible", G_SETTINGS_BIND_GET, renaissance_get, NULL, NULL, NULL);
+      g_settings_bind_with_mapping (look, "name", night, "visible", G_SETTINGS_BIND_GET, renaissance_get, NULL, NULL, NULL);
+    }
+  }
   dark_row (g, iface);
   ns_row_widget (g, "Accent colour", accent_picker (iface));
+
+  /* the font families and the size are one decision: they sit together here, and Font size keeps its Display row too */
+  g = ns_group (c, "Fonts");
+  if (look) {
+    GSettingsSchema *schema = NULL;
+    g_object_get (look, "settings-schema", &schema, NULL);
+    if (g_settings_schema_has_key (schema, "font-display")) {
+      font_row (g, look, "Display font", "font-display", TRUE);
+      font_row (g, look, "Body font", "font-body", FALSE);
+      font_row (g, look, "Mono font", "font-mono", TRUE);
+    }
+    g_settings_schema_unref (schema);
+  }
+  font_size_row (g, iface);
   ns_push (page);
 }
 
