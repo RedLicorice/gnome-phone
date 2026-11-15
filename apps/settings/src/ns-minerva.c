@@ -716,3 +716,81 @@ build_rows (Mn *m)
   }
   m->spent = ns_row_info (m->budget_g, "Spent this month", "");
 }
+
+/* ---- the model list as a page of its own (Permissions > Classifier) ----
+ * The same source as this page's pickers, `minerva-config models --json`, and the same labels; `picked` gets the id
+ * of the row that was tapped. */
+
+struct _ModelPick {
+  char         *title, *current;
+  NsModelPicked picked;
+  gpointer      data;
+};
+
+typedef struct _ModelPick ModelPick;
+
+static void
+model_pick_free (ModelPick *p)
+{
+  g_free (p->title);
+  g_free (p->current);
+  g_free (p);
+}
+
+static void
+model_row_tapped (GtkWidget *row, gpointer data)
+{
+  ModelPick *p = data;
+  g_autofree char *id = g_strdup (g_object_get_data (G_OBJECT (row), "mp-id"));
+  NsModelPicked picked = p->picked;
+  gpointer into = p->data;   /* the page, and p with it, may go at once */
+  gtk_widget_activate_action (row, "navigation.pop", NULL);
+  if (picked)
+    picked (id, into);
+}
+
+static void
+model_pick_done (JsonArray *list, const char *err, gpointer data)
+{
+  ModelPick *p = data;
+  GtkWidget *c;
+  AdwNavigationPage *page = ns_page_new (p->title, &c);
+  g_object_set_data_full (G_OBJECT (page), "mp", p, (GDestroyNotify) model_pick_free);
+  GtkWidget *g = ns_group (c, NULL);
+  guint n = 0;
+  for (guint i = 0; list && i < json_array_get_length (list); i++) {
+    JsonObject *o = json_array_get_object_element (list, i);
+    const char *id = str_of (o, "id");
+    g_autofree char *label = model_label (o);
+    gboolean cur = !g_strcmp0 (id, p->current);
+    GtkWidget *r = ns_row (g, NULL, NULL, label, cur ? "In use now" : NULL);
+    g_object_set_data_full (G_OBJECT (r), "mp-id", g_strdup (id), g_free);
+    if (cur) {
+      GtkWidget *mark = gtk_image_new_from_icon_name ("object-select-symbolic");
+      gtk_widget_add_css_class (mark, "ns-accent");
+      ns_row_suffix (r, mark);
+    }
+    ns_row_on_activate (r, model_row_tapped, p);
+    n++;
+  }
+  if (!n) {
+    g_autofree char *t = err && *err ? g_strdup_printf ("Could not read the models: %s", err)
+                                     : g_strdup ("No model is listed. Is the agent server running?");
+    ns_note (c, t);
+  } else {
+    ns_note (c, "The models the phone's agent offers. Fallbacks stay as they are.");
+  }
+  ns_push (page);
+}
+
+void
+ns_model_pick (GtkWidget *from, const char *title, const char *current, NsModelPicked picked, gpointer data)
+{
+  static const char *const args[] = { "models", "--json", NULL };
+  ModelPick *p = g_new0 (ModelPick, 1);
+  p->title = g_strdup (title);
+  p->current = g_strdup (current);
+  p->picked = picked;
+  p->data = data;
+  ns_mc_run_list (G_OBJECT (from), "minerva-config", args, model_pick_done, p);
+}

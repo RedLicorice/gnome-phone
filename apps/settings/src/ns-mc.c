@@ -1,26 +1,40 @@
-/* Running `minerva-config`; see ns-mc.h. */
+/* Running `minerva-config` (and the other programs beside it); see ns-mc.h. */
 #include "ns-mc.h"
 #include "ns-pages.h"
 
+/* the program's path: `prog`'s own env var ("minerva-perm" -> MINERVA_PERM_BIN) or the Minerva bin directory */
 static char *
-mc_bin (void)
+prog_bin (const char *prog)
 {
-  const char *env = g_getenv ("MINERVA_CONFIG_BIN");
-  return env && *env ? g_strdup (env)
-                     : g_build_filename (g_get_home_dir (), ".local", "share", "minerva", "bin", "minerva-config", NULL);
+  g_autofree char *name = g_ascii_strup (prog, -1);
+  for (char *p = name; *p; p++)
+    if (*p == '-')
+      *p = '_';
+  g_autofree char *var = g_strconcat (name, "_BIN", NULL);
+  const char *env = g_getenv (var);
+  if (env && *env)
+    return g_strdup (env);
+  return g_build_filename (g_get_home_dir (), ".local", "share", "minerva", "bin", prog, NULL);
+}
+
+gboolean
+ns_mc_prog_available (const char *prog)
+{
+  g_autofree char *bin = prog_bin (prog);
+  return g_file_test (bin, G_FILE_TEST_IS_EXECUTABLE);
 }
 
 gboolean
 ns_minerva_available (void)
 {
-  g_autofree char *bin = mc_bin ();
-  return g_file_test (bin, G_FILE_TEST_IS_EXECUTABLE);
+  return ns_mc_prog_available ("minerva-config");
 }
 
 typedef struct {
-  GObject  *owner;
-  NsMcDone  done;
-  gpointer  data;
+  GObject      *owner;
+  NsMcDone      done;        /* one of these two */
+  NsMcListDone  list_done;
+  gpointer      data;
 } Job;
 
 static void
@@ -34,9 +48,11 @@ job_done (GObject *src, GAsyncResult *res, gpointer data)
                 g_subprocess_get_exit_status (G_SUBPROCESS (src)) == 0;
   g_autoptr (JsonParser) parser = json_parser_new ();
   JsonObject *root = NULL;
+  JsonArray *list = NULL;
   if (ok && out && *out && json_parser_load_from_data (parser, out, -1, NULL)) {
     JsonNode *n = json_parser_get_root (parser);
     root = n && JSON_NODE_HOLDS_OBJECT (n) ? json_node_get_object (n) : NULL;
+    list = n && JSON_NODE_HOLDS_ARRAY (n) ? json_node_get_array (n) : NULL;
   }
   g_autofree char *why = NULL;
   if (!ok) {
@@ -45,15 +61,18 @@ job_done (GObject *src, GAsyncResult *res, gpointer data)
     else
       why = g_strdup (e ? e->message : "minerva-config failed");
   }
-  j->done (root, why, j->data);
+  if (j->done)
+    j->done (root, why, j->data);
+  else
+    j->list_done (list, why, j->data);
   g_object_unref (j->owner);
   g_free (j);
 }
 
-void
-ns_mc_run (GObject *owner, const char *const *args, const char *stdin_text, NsMcDone done, gpointer data)
+static void
+job_start (GObject *owner, const char *prog, const char *const *args, const char *stdin_text, Job *j)
 {
-  g_autofree char *bin = mc_bin ();
+  g_autofree char *bin = prog_bin (prog);
   g_autoptr (GPtrArray) argv = g_ptr_array_new ();
   g_ptr_array_add (argv, bin);
   for (guint i = 0; args[i]; i++)
@@ -64,15 +83,41 @@ ns_mc_run (GObject *owner, const char *const *args, const char *stdin_text, NsMc
                                       G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE |
                                       (stdin_text ? G_SUBPROCESS_FLAGS_STDIN_PIPE : G_SUBPROCESS_FLAGS_NONE), &err);
   if (!p) {
-    done (NULL, err->message, data);
+    if (j->done)
+      j->done (NULL, err->message, j->data);
+    else
+      j->list_done (NULL, err->message, j->data);
+    g_free (j);
     return;
   }
-  Job *j = g_new0 (Job, 1);
   j->owner = g_object_ref (owner);
-  j->done = done;
-  j->data = data;
   g_subprocess_communicate_utf8_async (p, stdin_text, NULL, job_done, j);
   g_object_unref (p);
+}
+
+void
+ns_mc_run_bin (GObject *owner, const char *prog, const char *const *args, const char *stdin_text, NsMcDone done,
+               gpointer data)
+{
+  Job *j = g_new0 (Job, 1);
+  j->done = done;
+  j->data = data;
+  job_start (owner, prog, args, stdin_text, j);
+}
+
+void
+ns_mc_run (GObject *owner, const char *const *args, const char *stdin_text, NsMcDone done, gpointer data)
+{
+  ns_mc_run_bin (owner, "minerva-config", args, stdin_text, done, data);
+}
+
+void
+ns_mc_run_list (GObject *owner, const char *prog, const char *const *args, NsMcListDone done, gpointer data)
+{
+  Job *j = g_new0 (Job, 1);
+  j->list_done = done;
+  j->data = data;
+  job_start (owner, prog, args, NULL, j);
 }
 
 const char *

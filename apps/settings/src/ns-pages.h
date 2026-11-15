@@ -73,5 +73,15 @@ void ns_page_scale_row (GtkWidget *group);
  * installed */
 void     ns_page_minerva (GtkWidget *row, gpointer data);
 void     ns_page_api_keys (GtkWidget *row, gpointer data);
+/* a page of the models `minerva-config` offers, the current one marked; `picked` gets the model id (the source the
+ * Minerva page's own pickers use) */
+typedef void (*NsModelPicked) (const char *id, gpointer data);
+void     ns_model_pick (GtkWidget *from, const char *title, const char *current, NsModelPicked picked,
+                        gpointer data);
 /* Battery page: the Max charge card (only where minerva-config is installed) */
 void     ns_charge_limit_add (AdwNavigationPage *page, GtkWidget *content);
+
+/* ns-perm.c: Security and privacy > Permissions (Minerva's agent, through minerva-perm); its row in the Security
+ * page's first card, filled from `status --json` */
+void ns_perm_add_row (GtkWidget *group);
+void ns_page_permissions (GtkWidget *row, gpointer data);
