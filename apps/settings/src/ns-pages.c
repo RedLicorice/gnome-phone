@@ -716,23 +716,24 @@ ns_page_display (GtkWidget *row, gpointer data)
   font_size_row (g, iface);
   ns_page_scale_row (g);
 
+  /* the screen's sleep behaviour, one group: when it goes off, how it turns, and the power rows Battery used to
+   * carry (ns_power_rows, ns-system.c) */
   GSettings *session = ns_page_settings (page, "org.gnome.desktop.session");
   guint idle = g_settings_get_uint (session, "idle-delay"), sel = 1;
   for (guint i = 0; i < G_N_ELEMENTS (timeouts); i++)
     if (timeouts[i] == idle)
       sel = i;
-  g = ns_group (c, NULL);
+  g = ns_group (c, "Screen");
   ns_row_pick (g, "Screen timeout", timeout_labels, sel, timeout_picked, session);
   GSettings *touch = ns_page_settings (page, "org.gnome.settings-daemon.peripherals.touchscreen");
   if (touch) {
     GtkWidget *r = ns_row_switch (g, "Auto rotate", "Turn the screen with the phone", NULL, NULL);
     g_settings_bind (touch, "orientation-lock", ns_row_get_switch (r), "active", G_SETTINGS_BIND_INVERT_BOOLEAN);
   }
+  ns_power_rows (c, g);
   GSettings *neo = ns_page_settings (page, "de.yesman.neo");
   if (neo) {
     g = ns_group (c, NULL);
-    ns_row_switch (g, "Always On Display", "The time, battery and notifications on a black screen while it is off",
-                   neo, "aod");
     ns_row_switch (g, "Double tap to wake", "Wake the screen with a double tap", neo, "double-tap-wake");
   }
   ns_push (page);
@@ -1011,8 +1012,6 @@ ns_page_battery (GtkWidget *row, gpointer data)
    * the battery's body, as Android's BatteryWithPercent does, when the key is on. */
   g = ns_group (c, NULL);
   page_row (g, NULL, NULL, "Battery information", "Health • Temperature • Capacity", ns_page_battery_info);
-  page_row (g, NULL, NULL, "Power and screen blank",
-            ns_screen_off_sleeper () ? "Dim the screen" : "Automatic suspend • Dim the screen", ns_page_power);
   ns_push (page);
 }
 

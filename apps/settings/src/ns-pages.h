@@ -58,7 +58,8 @@ void ns_ssh_askpass (void);
 void ns_page_language (GtkWidget *row, gpointer data);
 void ns_page_datetime (GtkWidget *row, gpointer data);
 void ns_page_users (GtkWidget *row, gpointer data);
-void ns_page_power (GtkWidget *row, gpointer data);
+/* Display's Screen group: dim and the power profile go in that group, automatic suspend after it (its own card) */
+void ns_power_rows (GtkWidget *c, GtkWidget *g);
 /* whether a daemon of the phone's own suspends it whenever the screen is off (then GNOME's automatic suspend has
  * nothing to do) */
 gboolean ns_screen_off_sleeper (void);

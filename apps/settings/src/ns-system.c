@@ -599,24 +599,18 @@ sleep_row (GtkWidget *g, GSettings *power, const char *title, const char *what)
 }
 
 /* Not on this page, and why: the power button's action (power-button-action). gnome-phone keeps the power key to
- * itself (power.js), as Phosh did, so gnome-settings-daemon's action never runs. */
+ * itself (power.js), as Phosh did, so gnome-settings-daemon's action never runs.
+ *
+ * These rows used to be Battery's "Power and screen blank" page; they are Display's Screen group now, since when
+ * the screen sleeps is one decision. Dim and the power profile go in the caller's group `g`; automatic suspend
+ * has two picks, so it gets a card of its own after it in `c`. */
 void
-ns_page_power (GtkWidget *row, gpointer data)
+ns_power_rows (GtkWidget *c, GtkWidget *g)
 {
-  GtkWidget *c;
-  AdwNavigationPage *page = ns_page_new ("Power and screen blank", &c);
-  GSettings *power = ns_page_settings (page, "org.gnome.settings-daemon.plugins.power");
+  GSettings *power = ns_settings ("org.gnome.settings-daemon.plugins.power");
   if (!power)
     return;
-  GtkWidget *g;
-  if (!ns_screen_off_sleeper ()) {
-    g = ns_group (c, "Automatic suspend");
-    sleep_row (g, power, "On battery", "battery");
-    sleep_row (g, power, "Plugged in", "ac");
-    ns_note (c, "Suspend saves the most power, but calls, messages and alarms can be missed while the phone "
-                "sleeps.");
-  }
-  g = ns_group (c, NULL);
+  g_object_set_data_full (G_OBJECT (g), "ns-power", power, g_object_unref);
   /* gnome-settings-daemon dims the backlight through the shell a little before the screen timeout */
   if (ns_has_key (power, "idle-dim"))
     ns_row_switch (g, "Dim the screen", "Before it turns off", power, "idle-dim");
@@ -626,9 +620,14 @@ ns_page_power (GtkWidget *row, gpointer data)
                     G_FILE_TEST_EXISTS) ||
        g_file_test ("/usr/share/dbus-1/system-services/net.hadess.PowerProfiles.service", G_FILE_TEST_EXISTS)))
     ns_row_switch (g, "Power saving on low battery", NULL, power, "power-saver-profile-on-low-battery");
-  if (ns_screen_off_sleeper ())
+  if (!ns_screen_off_sleeper ()) {
+    GtkWidget *a = ns_group (c, "Automatic suspend");
+    sleep_row (a, power, "On battery", "battery");
+    sleep_row (a, power, "Plugged in", "ac");
+    ns_note (c, "Suspend saves the most power, but calls, messages and alarms can be missed while the phone "
+                "sleeps.");
+  } else
     ns_note (c, "This phone sleeps as soon as its screen is off.");
-  ns_push (page);
 }
 
 /* ---- Wallpapers ---- */
