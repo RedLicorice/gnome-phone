@@ -244,7 +244,7 @@ draw_icon_and_label (Tile *t, float x, float y, bool label)
   if (label && N.labels) {
     float lw = home_label_width ();
     label_draw (t->label, x + H.icon / 2 - lw / 2, y + H.label_y - text_ascent (N.label_font),
-                (GfxColor) { 1, 1, 1, 1 }, true);
+                N.day_ink ? (GfxColor) { 0.10f, 0.12f, 0.14f, 1 } : (GfxColor) { 1, 1, 1, 1 }, !N.day_ink);
   }
 }
 
@@ -254,10 +254,10 @@ draw_clock (float x0)
   float top = H.cell_y0, cx = x0 + N.W / 2;
   if (H.time)
     text_draw (H.time, cx, top + dp (CLOCK_TIME_BASELINE_DP) - text_ascent (H.time_font),
-               GFX_RGBA (CLOCK_TIME_RGB, 1));
+               N.day_ink ? (GfxColor) { 0.16f, 0.18f, 0.21f, 1 } : GFX_RGBA (CLOCK_TIME_RGB, 1));
   if (H.date)
     label_draw (H.date, cx, top + dp (CLOCK_DATE_BASELINE_DP) - text_ascent (H.date_font),
-                (GfxColor) { 1, 1, 1, 1 }, false);
+                N.day_ink ? (GfxColor) { 0.22f, 0.25f, 0.29f, 1 } : (GfxColor) { 1, 1, 1, 1 }, false);
 }
 
 static void

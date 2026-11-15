@@ -17,7 +17,7 @@
 #define STATUS_BAR_DP            (116 / 3.0)   /* the shell's status bar: the cutout sets it, not the 24 dp default */
 #define NAV_GESTURE_DP           32            /* the bottom strip the shell's swipe up starts in */
 #define DOCK_SLOTS               5             /* the dock's cells, whatever the pages' grid */
-#define ICON_DP                  56            /* × desktop-icon-scale / drawer-icon-scale */
+#define ICON_DP                  64            /* × desktop-icon-scale / drawer-icon-scale */
 #define WS_SIDE_DP               8             /* cell box x: 8 dp in from each side */
 #define WS_TOP_DP                (32 / 3.0)    /* cell box y: below the status bar */
 #define WS_CONTENT_DP            85            /* icon + gap + label box: (cell − this)/2 is the icon's top in a cell */
@@ -86,6 +86,7 @@ typedef struct {
   /* the rest of Settings' Home screen layout (main.c layout_read) */
   int          drawer_cols;
   float        icon_dp, drawer_icon_dp;   /* ICON_DP × the scale keys; home.c and drawer.c fit them to their cells */
+  bool         day_ink;           /* a light Renaissance wallpaper (marble, sea): dark labels and clock */
   bool         labels;            /* the app names under the home screen's icons */
   bool         search;            /* the drawer's search pill */
   TextFont    *label_font;
