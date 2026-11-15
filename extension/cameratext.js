@@ -42,6 +42,8 @@ export function doing(entry) {
         return `sta usando la fotocamera ${entry.label}`;
     if (entry.purpose === 'enroll')
         return `Sto imparando il volto di ${entry.detail || 'una persona'}`;
+    if (entry.purpose === 'enroll_pet')
+        return `Sto imparando a riconoscere ${entry.detail || 'una bestiola'}`;
     return PURPOSE[entry.purpose] ?? 'Minerva sta usando la fotocamera';
 }
 
@@ -59,6 +61,11 @@ export function facesText(entry) {
 export function clock(seconds) {
     const d = new Date(seconds * 1000);
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+// What the sheet's release button says: Minerva's capture lets go of the camera, another app is closed
+export function releaseLabel(entry) {
+    return entry.source === 'minerva' ? 'Rilascia fotocamera' : `Chiudi ${owner(entry)}`;
 }
 
 // The line of a past capture: "22:41  Minerva · Sto riconoscendo chi è davanti alla fotocamera · Giuseppe (0,71)"

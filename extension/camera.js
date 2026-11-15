@@ -1,6 +1,7 @@
 // The camera indicator. Whenever a camera is open a chip shows in the status bar (statusbar.js paints it, over the lock
 // screen too: the lock screen draws the same system icons), and a tap on it opens a sheet: who has the camera and why,
-// what Minerva's captures recognised (names with scores, a thumbnail with the faces boxed) and the last captures.
+// what Minerva's captures recognised (names with scores, a thumbnail with the faces boxed), the last captures, and a
+// release button (Minerva's capture stops, another app is closed: `Release` on minerva-camwatch, see eyes/camwatch.py).
 //
 // The facts come from minerva-camwatch over D-Bus (org.minerva.Camera1, eyes/minerva_eyes/camwatch.py): it finds any
 // app's camera by its powered sensor and takes Minerva's own reports. Nothing here polls: the service's Changed
@@ -15,7 +16,7 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {clock, doing, facesText, historyLine, owner, parseState} from './cameratext.js';
+import {clock, doing, facesText, historyLine, owner, parseState, releaseLabel} from './cameratext.js';
 import {animate, bezier} from './motion.js';
 import {Color, cogl, font, gild, restyleActor, rgba} from './palette.js';
 import {px, SCREEN_H, SCREEN_W} from './units.js';
@@ -192,6 +193,9 @@ export class CameraSheet {
         panel.add_child(label(active.length ? 'Fotocamera in uso' : 'Fotocamera non in uso', TITLE_SP, 700, Color.onSurface));
         for (const entry of active)
             panel.add_child(this._card(entry));
+        if (active.length)  // the release button: Minerva's capture is asked to stop, another app is closed, on the tap
+            for (const entry of active)
+                panel.add_child(this._releaseButton(entry));
         const past = history.slice(0, HISTORY_MAX);
         if (past.length) {
             const heading = label('Ultime riprese', LINE_SP, 700, Color.onSurface);
@@ -228,6 +232,33 @@ export class CameraSheet {
         if (entry.thumb)
             card.add_child(this._thumb(entry.thumb));
         return card;
+    }
+
+    // Minerva lets the camera go, or the app holding it is closed: only when the user taps, never before
+    _releaseButton(entry) {
+        const text = releaseLabel(entry);
+        const button = new St.Button({
+            style: `margin-top: ${px(GAP)}px; padding: ${px(GAP * 0.6)}px ${px(GAP)}px; ` +
+                `border-radius: ${px(CORNER / 2)}px; background-color: ${rgba(Color.primary, 0.14)};${gild(0.4, true)}`,
+            can_focus: true,
+            accessible_name: text,
+        });
+        button.set_child(label(text, LINE_SP, 700, Color.primary, false));
+        button.connect('clicked', () => this._release(entry));
+        return button;
+    }
+
+    // Ask minerva-camwatch to let go of this entry: it tells Minerva's capture to stop (and frees the camera) or
+    // closes the app that holds it. Fire and forget: the sheet is rebuilt by the service's Changed signal.
+    _release(entry) {
+        Gio.DBus.session.call(BUS, PATH, BUS, 'Release', new GLib.Variant('(s)', [entry.id]),
+            new GLib.VariantType('(s)'), Gio.DBusCallFlags.NONE, 2000, null, (conn, res) => {
+                try {
+                    conn.call_finish(res);
+                } catch (e) {
+                    log(`gnome-phone: camera release: ${e.message}`);
+                }
+            });
     }
 
     _thumb(path) {
