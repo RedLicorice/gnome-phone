@@ -23,6 +23,8 @@ struct Mn {
   GtkWidget *stt_timeout;               /* the cloud recognizers' time limit row */
   GtkWidget *voice_id, *voice_cap, *budget_g, *spent; /* rows updated in place */
   GtkWidget *events, *bypass;           /* the events daemon's day: tokens used, and today's bypass switch */
+  GtkWidget *sg_box;                    /* the data-driven groups (setting_groups of the status) go in here */
+  GPtrArray *srows;                     /* their rows: "mn-key", "mn-kind" (and "mn-ids" for a picker) */
   GPtrArray *caps;                      /* the budget rows: each has its brain.conf key in "mn-key" */
   char      *cap_key;                   /* the budget in money: what the spent line is compared with */
   JsonObject *st;                       /* the last status */
@@ -596,6 +598,92 @@ fill_value (GtkWidget *row, const char *value)
   ns_row_value_set (row, value);
 }
 
+/* ---- the data-driven groups ----
+ * `setting_groups` of the status (minerva-config, settings_ui.json) lists titled groups of rows: a key of brain.conf
+ * with its label, kind (bool, choice, text, int, float), choices, and help. The page keeps no list of settings of its
+ * own: a setting is a line of data there. */
+
+static void
+sw_toggled (GtkWidget *sw, GParamSpec *pspec, gpointer data)
+{
+  Mn *m = data;
+  if (ns_switch_syncing (sw) || m->busy)
+    return;
+  mn_set (m, g_object_get_data (G_OBJECT (sw), "mn-key"), gtk_switch_get_active (GTK_SWITCH (sw)) ? "true" : "false");
+}
+
+static void
+build_groups (Mn *m)
+{
+  JsonArray *gs = arr_of (m->st, "setting_groups");
+  for (guint i = 0; gs && i < json_array_get_length (gs); i++) {
+    JsonObject *g = json_array_get_object_element (gs, i);
+    GtkWidget *grp = ns_group (m->sg_box, str_of (g, "title"));
+    JsonArray *rows = arr_of (g, "rows");
+    for (guint j = 0; rows && j < json_array_get_length (rows); j++) {
+      JsonObject *r = json_array_get_object_element (rows, j);
+      const char *key = str_of (r, "key"), *kind = str_of (r, "kind"), *label = str_of (r, "label");
+      const char *help = str_of (r, "help");
+      GtkWidget *row;
+      if (!g_strcmp0 (kind, "bool")) {
+        row = ns_row_switch (grp, label, *help ? help : NULL, NULL, NULL);
+        GtkWidget *sw = ns_row_get_switch (row);
+        g_object_set_data_full (G_OBJECT (sw), "mn-key", g_strdup (key), g_free);
+        g_signal_connect (sw, "notify::active", G_CALLBACK (sw_toggled), m);
+      } else if (!g_strcmp0 (kind, "choice")) {
+        JsonArray *ch = arr_of (r, "choices");
+        g_autoptr (GPtrArray) ids = g_ptr_array_new_with_free_func (g_free);
+        g_autoptr (GPtrArray) labels = g_ptr_array_new_with_free_func (g_free);
+        for (guint k = 0; ch && k < json_array_get_length (ch); k++) {
+          JsonObject *o = json_array_get_object_element (ch, k);
+          g_ptr_array_add (ids, g_strdup (str_of (o, "id")));
+          g_ptr_array_add (labels, g_strdup (str_of (o, "label")));
+        }
+        g_ptr_array_add (ids, NULL);
+        g_ptr_array_add (labels, NULL);
+        Choice *c = g_new0 (Choice, 1);
+        c->m = m;
+        c->key = g_strdup (key);
+        c->ids = g_strdupv ((char **) ids->pdata);
+        row = ns_row_pick (grp, label, (const char *const *) labels->pdata, 0, choice_picked, c);
+        g_object_set_data_full (G_OBJECT (row), "mn-choice", c, (GDestroyNotify) choice_free);
+        if (*help)
+          ns_row_set_subtitle (row, help);
+      } else {
+        row = field_row (m, grp, label, key);
+        if (*help)
+          ns_row_set_subtitle (row, help);
+      }
+      g_object_set_data_full (G_OBJECT (row), "mn-key", g_strdup (key), g_free);
+      g_object_set_data_full (G_OBJECT (row), "mn-kind", g_strdup (kind), g_free);
+      g_ptr_array_add (m->srows, row);
+    }
+    const char *nt = str_of (g, "note");
+    if (*nt)
+      ns_note (m->sg_box, nt);
+  }
+}
+
+static void
+fill_groups (Mn *m)
+{
+  for (guint i = 0; i < m->srows->len; i++) {
+    GtkWidget *row = m->srows->pdata[i];
+    const char *key = g_object_get_data (G_OBJECT (row), "mn-key"), *kind = g_object_get_data (G_OBJECT (row), "mn-kind");
+    const char *v = setting (m, key);
+    if (!g_strcmp0 (kind, "bool")) {
+      ns_switch_quiet (ns_row_get_switch (row), !g_strcmp0 (v, "true"));
+    } else if (!g_strcmp0 (kind, "choice")) {
+      Choice *c = g_object_get_data (G_OBJECT (row), "mn-choice");
+      for (guint k = 0; c && c->ids[k]; k++)
+        if (!g_strcmp0 (c->ids[k], v))
+          ns_row_pick_select (row, k);
+    } else {
+      fill_value (row, v);
+    }
+  }
+}
+
 static void
 update_fields (Mn *m)
 {
@@ -647,6 +735,7 @@ status_done (Mn *m, JsonObject *root, const char *err, gpointer data)
   stt_fill (m);
   notes_fill (m);
   update_fields (m);
+  fill_groups (m);
 }
 
 static void
@@ -665,6 +754,8 @@ mn_free (Mn *m)
     json_object_unref (m->st);
   if (m->caps)
     g_ptr_array_free (m->caps, TRUE);
+  if (m->srows)
+    g_ptr_array_free (m->srows, TRUE);
   g_free (m->cap_key);
   g_strfreev (m->chain_ids);
   g_strfreev (m->stt_ids);
@@ -698,6 +789,10 @@ ns_page_minerva (GtkWidget *row, gpointer data)
 
   m->voice_g = ns_group (c, "Voice");
 
+  m->srows = g_ptr_array_new ();
+  m->sg_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);   /* wake word, reply: from the status, see build_groups */
+  gtk_box_append (GTK_BOX (c), m->sg_box);
+
   m->stt = ns_group (c, "Speech recognition");
   GtkWidget *sg = ns_group (c, NULL);
   m->stt_timeout = field_row (m, sg, "Cloud time limit (seconds)", "voice.stt_timeout_s");
@@ -728,6 +823,7 @@ static void
 build_rows (Mn *m)
 {
   m->picks_built = TRUE;
+  build_groups (m);
   choice_row (m, m->brain_g, "Main model", "brain.main", NULL, FALSE);
   choice_row (m, m->roles_g, "Messages", "roles.chat", "Same as main", FALSE);
   choice_row (m, m->roles_g, "Events", "roles.events", "Same as main", FALSE);
