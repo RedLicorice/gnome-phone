@@ -1,11 +1,9 @@
 {
  "id": "renaissance-day",
  "title": "Renaissance Day",
- "scale": 0.5,
+ "scale": 1,
  "shape": null,
- "iconback": [
-  "iconback"
- ],
+ "iconback": [],
  "iconmask": [],
  "iconupon": []
 }
