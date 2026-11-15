@@ -37,7 +37,7 @@ foreach p : protocols
 endforeach
 
 executable('neo-launcher',
-  'src/main.c', 'src/vk.c', 'src/gfx.c', 'src/wl.c', 'src/text.c', 'src/image.c', 'src/parallax.c', 'src/apps.c',
+  'src/main.c', 'src/vk.c', 'src/gfx.c', 'src/wl.c', 'src/text.c', 'src/image.c', 'src/parallax.c', 'src/chisel.c', 'src/apps.c',
   'src/icons.c', 'src/model.c', 'src/tiles.c', 'src/home.c', 'src/drawer.c', 'src/nav.c',
   'src/popup.c', 'src/drag.c',
   proto_src,
@@ -55,6 +55,10 @@ install_data('iconpacks/95_neo-iconpack-round.gschema.override',
              install_dir: get_option('datadir') / 'glib-2.0' / 'schemas')
 # the NASA solar-system parallax set (tools/parallax-solar-system makes it), packaged apart as neo-parallax-solar-system
 install_subdir('parallax/solar-system', install_dir: get_option('datadir') / 'neo-launcher' / 'parallax')
+# the theme-v4 wallpapers (tools/parallax-renaissance/build_chisel.py makes them); the theme picks one by its look
+foreach look : ['marble', 'sea', 'forest', 'plum']
+  install_subdir('parallax/renaissance-' + look, install_dir: get_option('datadir') / 'neo-launcher' / 'parallax')
+endforeach
 install_data('parallax/95_neo-parallax-solar-system.gschema.override',
              install_dir: get_option('datadir') / 'glib-2.0' / 'schemas')
 install_data('parallax/neo-parallax-solar-system.xml', install_dir: get_option('datadir') / 'gnome-background-properties')

@@ -7,7 +7,8 @@
 
 typedef struct Parallax Parallax;
 
-/* `dir` holds parallax.json ({"range": dp, "tilt": g, "layers": [{"file", "depth"}…]}, back to front) */
+/* `dir` holds parallax.json ({"range": dp, "tilt": g, "layers": [{"file", "depth"}…]}, back to front), and
+ * optionally "chisel": marks lit by one light that the tilt moves (chisel.h); a set with it runs without a sensor too */
 Parallax *parallax_new    (const char *dir, void (*wake) (void *data), void *data);
 /* a still picture: one layer that never moves, and no sensor */
 Parallax *parallax_new_image (const char *file);

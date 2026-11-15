@@ -56,6 +56,7 @@ Vk      *gfx_vk              (void);
 
 GfxTex  *gfx_tex_new         (int w, int h, VkFormat format);
 GfxTex  *gfx_tex_from_bgra   (int w, int h, const void *pixels, int stride);
+GfxTex  *gfx_tex_from_gray   (int w, int h, const void *pixels, int stride);   /* one byte a pixel, for gfx_mask */
 void     gfx_tex_write       (GfxTex *t, int x, int y, int w, int h, const void *pixels, int stride);
 GfxTex  *gfx_target_new      (int w, int h);
 void     gfx_tex_free        (GfxTex *t);      /* once no frame in flight uses it */
@@ -87,6 +88,9 @@ void     gfx_rect            (float x, float y, float w, float h, float radius, 
 void     gfx_rect_corners    (float x, float y, float w, float h, const float r[4], GfxColor c);
 void     gfx_ring            (float x, float y, float w, float h, float radius, float width, GfxColor c);
 void     gfx_image           (GfxTex *t, float x, float y, float w, float h, float radius, float alpha);
+/* colour × the texture's red channel (an R8 coverage map): a tinted overlay, premultiplied as it is drawn */
+void     gfx_mask_uv         (GfxTex *t, float x, float y, float w, float h, float u0, float v0, float u1, float v1,
+                              GfxColor c);
 void     gfx_image_uv        (GfxTex *t, float x, float y, float w, float h, float u0, float v0, float u1, float v1,
                               float radius, float alpha);
 
