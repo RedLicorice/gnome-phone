@@ -88,8 +88,7 @@ installed (const Entry *e)
   if (e->available && !e->available ())
     return FALSE;
   if (e->needs_schema) {
-    g_autoptr (GSettings) s = ns_settings (e->needs_schema);
-    if (!s)
+    if (!ns_settings_exists (e->needs_schema))
       return FALSE;
   }
   if (e->argv) {
@@ -299,7 +298,8 @@ startup (GApplication *app, gpointer data)
 
 /* a page by name: `--page home` (the launcher's "Settings" opens the home screen's), the panel names gnome-phone asks
  * for (a quick settings tile's long press, the volume panel's and the notification shade's settings buttons) and
- * GNOME Settings' names, which other apps ask for. "network" is the flight mode tile's: Connections has the switch. */
+ * GNOME Settings' names, which other apps ask for. "network" is the flight mode tile's: Connections has the switch.
+ * The first name of a page is its primary one: --list-pages (below) prints it as the page's id. */
 static const struct {
   const char *name;
   NsActivate  page;
@@ -309,8 +309,9 @@ static const struct {
   { "wifi", ns_page_wifi }, { "wlan", ns_page_wifi },
   { "hotspot", ns_page_hotspot }, { "wifi-hotspot", ns_page_hotspot },
   { "wwan", ns_page_mobile }, { "mobile-broadband", ns_page_mobile }, { "mobile", ns_page_mobile },
-  { "network", ns_page_connections }, { "vpn", ns_page_network }, { "wired", ns_page_network },
-  { "bluetooth", ns_page_bluetooth }, { "connections", ns_page_connections },
+  { "connections", ns_page_connections }, { "network", ns_page_connections },
+  { "vpn", ns_page_network }, { "wired", ns_page_network },
+  { "bluetooth", ns_page_bluetooth },
   { "sharing", ns_page_sharing }, { "printers", ns_page_printers },
   { "sound", ns_page_sound }, { "feedback", ns_page_sound },
   { "notifications", ns_page_notifications },
@@ -322,9 +323,10 @@ static const struct {
   { "lockscreen", ns_page_lock_screen }, { "lock-screen", ns_page_lock_screen }, { "screen-lock", ns_page_lock_screen },
   { "keyboard", ns_page_keyboard }, { "osk", ns_page_keyboard }, { "touch-keyboard", ns_page_touch_keyboard },
   { "mouse", ns_page_mouse },
+  { "security", ns_page_privacy },
   /* "privacy" comes from the location tile only */
-  { "privacy", ns_page_location }, { "location", ns_page_location },
-  { "online-accounts", ns_page_accounts }, { "accounts", ns_page_accounts },
+  { "location", ns_page_location }, { "privacy", ns_page_location },
+  { "accounts", ns_page_accounts }, { "online-accounts", ns_page_accounts },
   { "applications", ns_page_apps }, { "apps", ns_page_apps }, { "overview", ns_page_apps },
   { "default-apps", ns_page_default_apps },
   { "region", ns_page_language }, { "language", ns_page_language },
@@ -332,11 +334,53 @@ static const struct {
   { "users", ns_page_users }, { "user-accounts", ns_page_users },
   { "ssh", ns_page_ssh },
   { "system", ns_page_general },
-  { "universal-access", ns_page_accessibility }, { "accessibility", ns_page_accessibility },
-  { "info-overview", ns_page_about }, { "about", ns_page_about },
+  { "accessibility", ns_page_accessibility }, { "universal-access", ns_page_accessibility },
+  { "about", ns_page_about }, { "info-overview", ns_page_about },
   { "minerva", ns_page_minerva }, { "brain", ns_page_minerva },
   { "permissions", ns_page_permissions }, { "agent-permissions", ns_page_permissions },
 };
+
+/* `--list-pages`: the pages the menu shows, as one JSON array, for the launcher's search provider: id (the primary
+ * --page name from direct[]), title, subtitle, keywords, icon. Derived from entries[] and direct[], no table of
+ * its own; what the menu hides (schema not installed, not available) and the entries that open another app are
+ * left out. Sub-pages (wifi, hotspot, ...) have no title or keywords of their own, so they are not listed, though
+ * --page opens them. Needs no display and no running app. */
+static int
+list_pages (void)
+{
+  g_autoptr (JsonBuilder) b = json_builder_new ();
+  json_builder_begin_array (b);
+  for (guint i = 0; i < G_N_ELEMENTS (entries); i++) {
+    const Entry *e = &entries[i];
+    if (!e->title || !e->page || !installed (e))
+      continue;
+    const char *id = NULL;
+    for (guint d = 0; !id && d < G_N_ELEMENTS (direct); d++)
+      if (direct[d].page == e->page)
+        id = direct[d].name;
+    if (!id)
+      continue;
+    json_builder_begin_object (b);
+    json_builder_set_member_name (b, "id");
+    json_builder_add_string_value (b, id);
+    json_builder_set_member_name (b, "title");
+    json_builder_add_string_value (b, e->title);
+    json_builder_set_member_name (b, "subtitle");
+    json_builder_add_string_value (b, e->subtitle ? e->subtitle : "");
+    json_builder_set_member_name (b, "keywords");
+    json_builder_add_string_value (b, e->keywords ? e->keywords : "");
+    json_builder_set_member_name (b, "icon");
+    json_builder_add_string_value (b, e->icon ? e->icon : "");
+    json_builder_end_object (b);
+  }
+  json_builder_end_array (b);
+  g_autoptr (JsonGenerator) gen = json_generator_new ();
+  g_autoptr (JsonNode) root = json_builder_get_root (b);
+  json_generator_set_root (gen, root);
+  g_autofree char *out = json_generator_to_data (gen, NULL);
+  g_print ("%s\n", out);
+  return 0;
+}
 
 static void
 open_page (GApplication *app, const char *name, const char *arg)
@@ -395,10 +439,15 @@ main (int argc, char **argv)
     ns_ssh_askpass ();
     return 0;
   }
+  /* before the app: no display, no instance */
+  for (int i = 1; i < argc; i++)
+    if (g_str_equal (argv[i], "--list-pages"))
+      return list_pages ();
   g_autoptr (AdwApplication) app = adw_application_new ("de.yesman.NeoSettings", G_APPLICATION_HANDLES_COMMAND_LINE);
   const GOptionEntry options[] = {
     { "page", 0, 0, G_OPTION_ARG_STRING, NULL, "Open a page: home, wallpaper, wifi, hotspot, bluetooth, power…", "PAGE" },
     { "app", 0, 0, G_OPTION_ARG_STRING, NULL, "Open an app's page (its desktop file id)", "ID" },
+    { "list-pages", 0, 0, G_OPTION_ARG_NONE, NULL, "Print the pages as JSON and exit (handled before the app)", NULL },
     { NULL }
   };
   g_application_add_main_option_entries (G_APPLICATION (app), options);
