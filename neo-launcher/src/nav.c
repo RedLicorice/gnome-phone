@@ -24,6 +24,7 @@
 #include <math.h>
 
 #include "neo.h"
+#include "omni.h"
 
 #define REVEAL_MS          1000.0
 #define REVEAL_FADE_MS     200.0
@@ -344,6 +345,7 @@ method_call (GDBusConnection *bus, const char *sender, const char *path, const c
     }
     if (!g_strcmp0 (state, "background")) {
       V.state = NAV_BACKGROUND;
+      omni_close_now ();
       drawer_close_now ();
     } else if (!g_strcmp0 (state, "reveal") || !g_strcmp0 (state, "back") || !g_strcmp0 (state, "back-reveal")) {
       V.state = state[0] == 'r' ? NAV_REVEAL : state[4] ? NAV_BACK_REVEAL : NAV_BACK;
@@ -360,6 +362,7 @@ method_call (GDBusConnection *bus, const char *sender, const char *path, const c
       }
     } else if (!g_strcmp0 (state, "home") || !g_strcmp0 (state, "home-reveal")) {
       V.state = state[4] ? NAV_HOME_REVEAL : NAV_HOME;
+      omni_close_now ();
       V.t0 = t0 / 1000.0;
     } else {
       V.state = NAV_NORMAL;
@@ -381,6 +384,8 @@ method_call (GDBusConnection *bus, const char *sender, const char *path, const c
       touch_drop ();                /* back drops the drag (a held icon too) */
     else if (popup_is_open ())
       popup_close ();
+    else if (omni_back ())          /* the search view closes first */
+      ;
     else if (!drawer_search_back ())  /* a search ends first, then the drawer closes */
       drawer_back ();
   } else if (!g_strcmp0 (method, "Cancel")) {
@@ -389,6 +394,7 @@ method_call (GDBusConnection *bus, const char *sender, const char *path, const c
     touch_drop ();
     drag_cancel (true);
     popup_close_now ();
+    omni_close_now ();
     drawer_close_now ();
     wl_schedule (N.wl);
   } else if (!g_strcmp0 (method, "Scrim")) {

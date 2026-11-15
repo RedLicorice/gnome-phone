@@ -39,7 +39,7 @@ endforeach
 executable('neo-launcher',
   'src/main.c', 'src/vk.c', 'src/gfx.c', 'src/wl.c', 'src/text.c', 'src/image.c', 'src/parallax.c', 'src/apps.c',
   'src/icons.c', 'src/search.c', 'src/model.c', 'src/tiles.c', 'src/home.c', 'src/drawer.c', 'src/nav.c',
-  'src/popup.c', 'src/drag.c',
+  'src/popup.c', 'src/drag.c', 'src/widgets.c', 'src/omni.c',
   proto_src,
   include_directories: include_directories('src', 'shaders'),
   dependencies: deps,

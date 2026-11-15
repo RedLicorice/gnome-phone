@@ -133,6 +133,9 @@ float  home_stretch      (void);                         /* the horizontal edge 
 Tile  *home_tile_at      (float x, float y, float *ix, float *iy, ModelPos *pos);
 void   home_model_changed (void);                        /* icons added or taken away: the pages reflowed */
 void   home_clock_tick   (void);
+void   home_clock_draw   (float x, float y, float w, float h);   /* the clock widget, in its box */
+float  home_row_top      (int row, int rows, float *h);          /* the widgets' rows: top and height */
+bool   home_widget_tap   (float x, float y);                     /* a tap on a widget: it took it */
 bool   home_icon_rect    (const char *id, float r[4]);
 /* for a drag. "page" -1 is the dock; a page's cells are in the strip's coordinates (page p from x = p·pitch, before
  * the scroll and the spring-loaded shrink), the dock's on the screen; a page's index is the model's (page 0's start
@@ -199,6 +202,7 @@ bool   drawer_search_key (guint32 keysym, const char *utf8);   /* true: the fiel
 void   drawer_search_text (const char *utf8);
 void   drawer_search_erase (int before, int after);
 void   drawer_search_submit (void);                       /* Enter: the first app found opens */
+GfxTex *drawer_search_icon (void);                         /* the magnifier, white, for omni.c */
 bool   drawer_search_back (void);                         /* back leaves a search first: true when it did */
 /* the swipe up from the bar while the drawer is open: home (false from down: not the drawer's) */
 bool   drawer_home_down  (float x, float y, double t);

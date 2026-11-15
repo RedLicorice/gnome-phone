@@ -380,6 +380,10 @@ req_finish (Req *req, gboolean timed_out, GPtrArray *hits)
     .n_total = req->n_total,
     .ms = (g_get_monotonic_time () - gen->start) / 1000.0,
   };
+  if (self->providers)
+    for (guint i = 0; i < self->providers->len; i++)
+      if (self->providers->pdata[i] == req->p)
+        group.order = i;
   gboolean last = gen->remaining == 0;
   /* the callback may start a new query: it drops `self->gen`, and this request keeps its generation alive */
   self->func (self, gen->generation, &group, last, self->data);

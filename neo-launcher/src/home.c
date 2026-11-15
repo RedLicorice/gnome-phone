@@ -9,6 +9,7 @@
 #include <math.h>
 
 #include "neo.h"
+#include "widgets.h"
 
 #define PAGING_SLOP_DP        16          /* 2 × the 8 dp touch slop */
 #define TOUCH_SLOP_DP         8
@@ -248,10 +249,11 @@ draw_icon_and_label (Tile *t, float x, float y, bool label)
   }
 }
 
-static void
-draw_clock (float x0)
+/* the clock widget, in its box (widgets.c) */
+void
+home_clock_draw (float x, float top, float w, float h)
 {
-  float top = H.cell_y0, cx = x0 + N.W / 2;
+  float cx = x + w / 2;
   if (H.time)
     text_draw (H.time, cx, top + dp (CLOCK_TIME_BASELINE_DP) - text_ascent (H.time_font),
                GFX_RGBA (CLOCK_TIME_RGB, 1));
@@ -345,8 +347,7 @@ home_draw (float content_scale)
       if (p == over)
         gfx_ring (r[0], r[1], r[2], r[3], dp (CARD_RADIUS_DP), dp (CARD_STROKE_DP), GFX_RGBA (CARD_RGB, q));
     }
-    if (p == 0)
-      draw_clock (0);
+    widgets_draw (p, p * H.pitch);
     GPtrArray *items = page_cells (p);
     for (guint i = 0; items && i < items->len; i++)
       draw_cell (p, i, items->pdata[i], true);
@@ -555,6 +556,23 @@ home_frame (void)
   bool a = false, b = false;
   H.stretch = spongy_edge_frame (&H.left, N.now, false, &a) + spongy_edge_frame (&H.right, N.now, true, &b);
   return more || a || b || press_animating ();
+}
+
+/* the top and height of the rows [row, row + rows) the widgets of a page use, in the strip's coordinates */
+float
+home_row_top (int row, int rows, float *h)
+{
+  *h = rows * H.cell_h;
+  return H.cell_y0 + row * H.cell_h;
+}
+
+/* a tap on the workspace at rest, on the first page: a widget's */
+bool
+home_widget_tap (float x, float y)
+{
+  if (H.page != 0 || H.snapping || fabsf (H.scroll) > 1 || drag_spring () > 0)
+    return false;
+  return widgets_tap (x, y);
 }
 
 float

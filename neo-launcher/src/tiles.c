@@ -6,6 +6,7 @@
 #include "icons.h"
 #include "image.h"
 #include "neo.h"
+#include "widgets.h"
 
 #define PRESS_SCALE   1.10f
 #define PRESS_MS      200.0
@@ -254,7 +255,7 @@ tiles_load (int cols, int rows)
   N.label_font = text_font_axes ("Google Sans Flex", 700, dp (LABEL_SP), "opsz=72,ROND=100");
 
   N.model = model_new (cols, rows, DOCK_SLOTS);
-  model_set_reserved (N.model, cols);                 /* the clock widget's row on the first page */
+  model_set_reserved (N.model, widgets_slots (0, cols));   /* the widgets' rows on the first page */
   label_widths ();
   GList *infos = g_list_sort (g_hash_table_get_values (apps), app_compare);
   for (GList *l = infos; l; l = l->next)
@@ -264,7 +265,7 @@ tiles_load (int cols, int rows)
   g_auto (GStrv) hidden = g_settings_get_strv (N.settings, "hidden-from-home");
   model_set_hidden (N.model, hidden);
   model_load (N.model, apps);
-  model_set_reserved (N.model, N.model->cols);
+  model_set_reserved (N.model, widgets_slots (0, N.model->cols));
   g_thread_unref (g_thread_new ("neo-icons", icon_thread, all_icon_jobs ()));
 }
 

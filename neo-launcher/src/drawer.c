@@ -406,6 +406,12 @@ drawer_search_key (guint32 keysym, const char *utf8)
   return true;
 }
 
+GfxTex *
+drawer_search_icon (void)
+{
+  return D.search_icon;
+}
+
 /* back while searching ends the search (the next one closes the sheet) */
 bool
 drawer_search_back (void)

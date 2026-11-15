@@ -12,6 +12,8 @@
 
 #include "image.h"
 #include "neo.h"
+#include "omni.h"
+#include "widgets.h"
 #include "parallax.h"
 
 #define DRAWER_DEPTH       0.33f      /* bottomSheetDepth */
@@ -27,8 +29,8 @@ void drawer_prepare (void);
 Neo N;
 
 /* OWNER_POPUP: a touch on an open menu; OWNER_HELD: the finger whose long press opened it, still down;
- * OWNER_BAR: a swipe up from the bar while the drawer is open (home) */
-typedef enum { OWNER_NONE, OWNER_HOME, OWNER_DRAWER, OWNER_POPUP, OWNER_HELD, OWNER_BAR } Owner;
+ * OWNER_BAR: a swipe up from the bar while the drawer is open (home); OWNER_OMNI: the search view (omni.c) */
+typedef enum { OWNER_NONE, OWNER_HOME, OWNER_DRAWER, OWNER_POPUP, OWNER_HELD, OWNER_BAR, OWNER_OMNI } Owner;
 
 static struct {
   Vk          vk;
@@ -369,10 +371,11 @@ layout_apply (gpointer data)
   int px = tiles_icon_px (), cols, rows;
   layout_read (&cols, &rows);
   model_set_grid (N.model, cols, rows);
-  model_set_reserved (N.model, N.model->cols);
+  model_set_reserved (N.model, widgets_slots (0, N.model->cols));
   tiles_relabel ();
   home_layout ();
   drawer_layout ();
+  omni_layout ();
   home_model_changed ();
   if (tiles_icon_px () != px)
     tiles_reload_icons ();
@@ -500,12 +503,14 @@ on_frame (gpointer data, gint64 time)
     tiles_relabel ();               /* the columns' widths changed */
     home_layout ();
     drawer_layout ();
+    omni_layout ();
     nav_icons_changed ();
   }
   bool more = A.par ? parallax_tick (A.par) : false;
   more |= home_frame ();
   more |= drawer_frame ();
   more |= popup_frame ();
+  more |= omni_frame ();
   more |= drag_frame ();
   nav_drawer (drawer_progress () > 0 || drawer_dragging ());
   more |= nav_frame ();
@@ -562,6 +567,7 @@ on_frame (gpointer data, gint64 time)
   if (!blurred || sharp_home)
     draw_home (scale, stretch);
   drawer_draw ();
+  omni_draw ();
   popup_draw ();
   drag_draw ();
   if (scrim > 0)
@@ -658,6 +664,10 @@ on_touch (gpointer data, WlTouchType type, int id, double x, double y, guint32 t
     A.moved = false;
     A.down_tile = NULL;
     hold_cancel ();
+    if (omni_is_open () && omni_touch_down (x, y, t)) {
+      A.owner = OWNER_OMNI;
+      break;
+    }
     if (bar && drawer_home_down (x, y, t)) {
       A.owner = OWNER_BAR;
       break;
@@ -686,7 +696,9 @@ on_touch (gpointer data, WlTouchType type, int id, double x, double y, guint32 t
       A.moved = true;
       hold_cancel ();
     }
-    if (A.owner == OWNER_BAR) {
+    if (A.owner == OWNER_OMNI) {
+      omni_touch_move (x, y, t);
+    } else if (A.owner == OWNER_BAR) {
       drawer_home_move (x, y, t);
     } else if (A.owner == OWNER_POPUP) {
       popup_touch_move (x, y);
@@ -720,7 +732,9 @@ on_touch (gpointer data, WlTouchType type, int id, double x, double y, guint32 t
     if (id != A.touch)
       return;
     hold_cancel ();
-    if (A.owner == OWNER_BAR) {
+    if (A.owner == OWNER_OMNI) {
+      omni_touch_up (x, y, t);
+    } else if (A.owner == OWNER_BAR) {
       if (drawer_home_up (x, y, t))
         popup_close ();               /* home closes every open view */
     } else if (A.owner == OWNER_POPUP) {
@@ -734,6 +748,8 @@ on_touch (gpointer data, WlTouchType type, int id, double x, double y, guint32 t
       press_up ();
       if (!A.moved && A.down_tile)
         tile_launch (A.down_tile, A.down_ix, A.down_iy, home_icon_size (), false);
+      else if (!A.moved && !A.down_tile)
+        home_widget_tap (x, y);
     } else if (A.owner == OWNER_DRAWER) {
       drawer_touch_up (x, y, t);
     }
@@ -742,7 +758,9 @@ on_touch (gpointer data, WlTouchType type, int id, double x, double y, guint32 t
     break;
   case WL_TOUCH_CANCEL:
     hold_cancel ();
-    if (A.owner == OWNER_BAR)
+    if (A.owner == OWNER_OMNI)
+      omni_touch_cancel (t);
+    else if (A.owner == OWNER_BAR)
       drawer_home_cancel (t);
     else if (A.owner == OWNER_POPUP)
       popup_touch_cancel ();
@@ -771,7 +789,11 @@ touch_drop (void)
 static void
 on_key (gpointer data, guint32 key, guint32 keysym, const char *utf8, bool pressed)
 {
-  /* the drawer's search field takes the typing while it has it */
+  /* the search view's field, or the drawer's, takes the typing while it has it */
+  if (pressed && omni_key (keysym, utf8)) {
+    wl_schedule (N.wl);
+    return;
+  }
   if (pressed && drawer_search_key (keysym, utf8)) {
     wl_schedule (N.wl);
     return;
@@ -784,19 +806,28 @@ on_key (gpointer data, guint32 key, guint32 keysym, const char *utf8, bool press
 static void
 on_text (gpointer data, const char *utf8)
 {
-  drawer_search_text (utf8);
+  if (omni_is_open ())
+    omni_text (utf8);
+  else
+    drawer_search_text (utf8);
 }
 
 static void
 on_erase (gpointer data, int before, int after)
 {
-  drawer_search_erase (before, after);
+  if (omni_is_open ())
+    omni_erase (before, after);
+  else
+    drawer_search_erase (before, after);
 }
 
 static void
 on_submit (gpointer data)
 {
-  drawer_search_submit ();
+  if (omni_is_open ())
+    omni_submit ();
+  else
+    drawer_search_submit ();
 }
 
 static void
