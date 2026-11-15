@@ -112,5 +112,8 @@ gboolean   ns_panel_is_oled (void);
 char      *ns_munge_app_id (const char *id);
 /* a texture of a pixbuf (gdk_texture_new_for_pixbuf is deprecated); any thread */
 GdkTexture *ns_texture_for_pixbuf (GdkPixbuf *pb);
+/* a QR code of `text`, dark on light whatever the theme (libqrencode, opened at run time; ns-ssh.c), or NULL when
+ * libqrencode is not installed or the text does not fit; the caller sizes it */
+GtkWidget *ns_qr_new (const char *text);
 /* the first line a program prints, or NULL */
 char      *ns_run_line (const char *const *argv);

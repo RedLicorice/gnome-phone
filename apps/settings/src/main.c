@@ -309,6 +309,7 @@ static const struct {
   { "security", ns_page_privacy }, { "privacy", ns_page_privacy },
   { "location", ns_page_location },
   { "accounts", ns_page_accounts }, { "online-accounts", ns_page_accounts },
+  { "account", ns_page_account },
   { "applications", ns_page_apps }, { "apps", ns_page_apps }, { "overview", ns_page_apps },
   { "default-apps", ns_page_default_apps },
   { "region", ns_page_language }, { "language", ns_page_language },

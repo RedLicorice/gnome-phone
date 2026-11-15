@@ -643,14 +643,25 @@ qr_draw (GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer data
   cairo_fill (cr);
 }
 
+GtkWidget *
+ns_qr_new (const char *text)
+{
+  QrCode *q = text && *text ? qr_encode (text) : NULL;
+  if (!q)
+    return NULL;
+  GtkWidget *area = gtk_drawing_area_new ();
+  gtk_drawing_area_set_draw_func (GTK_DRAWING_AREA (area), qr_draw, q, (GDestroyNotify) qr_free);
+  return area;
+}
+
 static void
 qr_tapped (GtkWidget *row, gpointer data)
 {
   Pair *p = data;
   g_autofree char *text = key_public_text (p->key);
-  QrCode *q = qr_encode (text);
+  GtkWidget *area = ns_qr_new (text);
 
-  if (!q) {
+  if (!area) {
     say (row, "No QR code", "libqrencode is not installed, or the key is too long for a QR code.");
     return;
   }
@@ -661,9 +672,7 @@ qr_tapped (GtkWidget *row, gpointer data)
   gtk_widget_set_margin_start (box, 18);
   gtk_widget_set_margin_end (box, 18);
   gtk_widget_set_margin_bottom (box, 24);
-  GtkWidget *area = gtk_drawing_area_new ();
   gtk_widget_set_size_request (area, 320, 320);
-  gtk_drawing_area_set_draw_func (GTK_DRAWING_AREA (area), qr_draw, q, (GDestroyNotify) qr_free);
   gtk_box_append (GTK_BOX (box), area);
   GtkWidget *label = gtk_label_new ("The public key, to scan on the other device. It lets this phone log in "
                                     "where it is added; it reveals nothing secret.");

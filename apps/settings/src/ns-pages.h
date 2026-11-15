@@ -75,6 +75,10 @@ void ns_page_scale_row (GtkWidget *group);
  * installed */
 void     ns_page_minerva (GtkWidget *row, gpointer data);
 void     ns_page_api_keys (GtkWidget *row, gpointer data);
+/* the agent's accounts (ns-account.c): a card for the Accounts page, filled from `minerva-config accounts list`
+ * (hidden while it has none), and --page's way to the first account */
+void     ns_accounts_minerva (GtkWidget *content);
+void     ns_page_account (GtkWidget *row, gpointer data);
 void     ns_page_prompt (GtkWidget *row, gpointer data);
 /* ns-prompt.c: the system prompt and state template editors of Minerva > Prompt; `ui` is `prompt_ui` of the status */
 void     ns_prompt_build (GtkWidget *content, GObject *owner, JsonObject *ui);

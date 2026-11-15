@@ -457,7 +457,8 @@ ns_page_accounts (GtkWidget *row, gpointer data)
   g_object_set_data (G_OBJECT (g), "ns-none", none);
   GtkWidget *a = ns_group (c, NULL);
   ns_row_button (a, "Add account", FALSE, add_account, NULL);
-  if (ns_minerva_available ()) {   /* the phone agent's API providers and keys (minerva-config) */
+  if (ns_minerva_available ()) {   /* the phone agent's accounts, API providers and keys (minerva-config) */
+    ns_accounts_minerva (c);
     GtkWidget *k = ns_group (c, NULL);
     GtkWidget *r = ns_row (k, "dialog-password-symbolic", "violet", "API keys", "Providers and their keys");
     ns_row_on_activate (r, ns_page_api_keys, NULL);
