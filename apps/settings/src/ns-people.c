@@ -534,8 +534,8 @@ list_loaded (JsonObject *root, const char *err, gpointer data)
     ns_row (p->list_g, NULL, NULL, l_str (p, "empty"), NULL);
   for (guint i = 0; i < n; i++) {
     JsonObject *o = json_array_get_object_element (people, i);
-    g_autofree char *faces = fmt_n (l_str (p, "faces"), "n", int_of (o, "faces"));
-    g_autofree char *notes = fmt_n (l_str (p, "notes"), "n", int_of (o, "notes"));
+    g_autofree char *faces = fmt_n (l_str (p, int_of (o, "faces") == 1 ? "faces_one" : "faces"), "n", int_of (o, "faces"));
+    g_autofree char *notes = fmt_n (l_str (p, int_of (o, "notes") == 1 ? "notes_one" : "notes"), "n", int_of (o, "notes"));
     g_autofree char *sub = g_strdup_printf ("%s%s%s • %s • %s • %s", bool_of (o, "owner") ? l_str (p, "owner") : "",
                                             bool_of (o, "owner") ? " • " : "", faces,
                                             l_str (p, bool_of (o, "voiceprint") ? "voice_yes" : "voice_no"),

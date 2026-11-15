@@ -230,17 +230,18 @@ on_edit (GtkWidget *button, gpointer data)
 static void
 settings_opened (GObject *bus, GAsyncResult *res, gpointer data)
 {
-  M *m = data;
+  GObject *card = data;  /* the reference on_open_people took */
+  M *m = g_object_get_data (card, "ct-minerva");
   g_autoptr (GVariant) reply = NULL;
   g_autoptr (GError) error = NULL;
 
   reply = g_dbus_connection_call_finish (G_DBUS_CONNECTION (bus), res, &error);
-  if (!reply)
+  if (!reply && m)
     {
       g_message ("Settings' %s: %s", s (m, "settings_action"), error->message);
       toast (m, s (m, "open_failed"));
     }
-  g_object_unref (m->card);
+  g_object_unref (card);
 }
 
 static void
