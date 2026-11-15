@@ -26,7 +26,7 @@ brought up on a POCO X3 NFC.
 | `neo-clock`, `neo-calendar`, `neo-calculator`, `neo-compass` | Alarms, timers and world clock; calendar; calculator; compass |
 | `neo-browser` | A browser with Chrome for Android's phone UI (tab grid, bottom toolbar, incognito) on WebKitGTK 6 |
 | `neo-settings` | The Settings app: connections, sounds, notifications, display, battery, wallpaper and parallax, the home screen, the lock screen, location, accounts, apps, language, accessibility. GNOME Phone opens it wherever GNOME opens a Settings panel |
-| `neo-weather` | The weather where the phone is (GeoClue, or GNOME Weather's first city), from Open-Meteo |
+| `neo-weather` | The weather where the phone is (a city chosen by name, which works with Location off; else GNOME Weather's first city; else GeoClue), from Open-Meteo |
 | `neo-camera` | LineageOS's Aperture rebuilt in GTK 4 on libcamera and GStreamer: photos, videos, barcode scanning |
 | `neo-files` | File Manager+ rebuilt in GTK 4 on GIO and GVfs: storage, removable media, recycle bin, SMB/SFTP/FTP/WebDAV |
 | `neo-iconpack-round` | Round, the default icon pack: white Material Symbols glyphs (Apache-2.0) on gradient discs |

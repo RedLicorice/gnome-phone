@@ -392,8 +392,9 @@ Recommends: geoclue-2.0,
 Description: weather app for GNOME Phone
  Neo Weather shows the weather where the phone is: the next 24 hours, today
  against yesterday, the week and the details. The forecast is Open-Meteo's,
- the place GeoClue's (or GNOME Weather's first city), named by OpenStreetMap's
- Nominatim.
+ the place a city chosen in the app (a search by name, which works with
+ Location off), else GNOME Weather's first city, else GeoClue's, named by
+ OpenStreetMap's Nominatim.
 
 Package: neo-camera
 Architecture: any

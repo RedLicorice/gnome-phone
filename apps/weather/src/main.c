@@ -3,9 +3,11 @@
  * GTK4, so scrolling is the GPU moving what is already drawn; the page scrolls in libspongy's view (Android's fling
  * and the stretch at the ends), like the other GNOME Phone apps, where it is installed.
  *
- * Where: the first city in GNOME Weather, if it has one; otherwise where the phone is, from GeoClue at city accuracy,
- * named by OpenStreetMap's Nominatim. The place is kept in ~/.cache/neo-launcher/weather.json (lat, lon, place), so
- * the page opens on the last place at once and moves when the phone has.
+ * Where: a city the user chose here (the location button, top right: a search by name in Open-Meteo's geocoder, which
+ * works with Location off, flagged "manual" and never moved); otherwise the first city in GNOME Weather, if it has
+ * one; otherwise where the phone is, from GeoClue at city accuracy, named by OpenStreetMap's Nominatim. The place is
+ * kept in ~/.cache/neo-launcher/weather.json (lat, lon, place, manual), so the page opens on the last place at once
+ * and moves when the phone has (unless the place is manual).
  * What: one Open-Meteo forecast (no key) with yesterday in it (past_days=1), fetched in curl and kept in
  * ~/.cache/neo-launcher/forecast.json; the page shows that at once and asks again when it is 15 minutes old. */
 #include <adwaita.h>
@@ -20,11 +22,21 @@
 #define HOURS 24
 #define COL_W 66              /* px, one hour in the hourly strip */
 
+/* the city search: Open-Meteo's geocoder (no key, the forecast's provider) answers a name with places */
+#define GEOCODE_URL      "https://geocoding-api.open-meteo.com/v1/search"
+#define GEOCODE_COUNT    10   /* places listed for a name */
+#define GEOCODE_MIN_LEN  2    /* characters before a search is sent */
+#define GEOCODE_WAIT_S   15
+#define SEARCH_DELAY_MS  400  /* the entry waits this long after the last key */
+#define DIALOG_W         360  /* px, the dialog's width where it floats */
+#define DIALOG_H         560  /* px, and its height */
+
 typedef struct {
   GtkWidget       *win, *sky, *body, *spinner;
   double           lat, lon;
   char            *place;
   gboolean         have_place;
+  gboolean         manual;       /* the place was chosen by the user: GeoClue and GNOME Weather no longer move it */
   GDBusConnection *system;
   char            *geo_client;   /* the GeoClue client object, while it looks */
   guint            geo_signal, geo_timeout;
@@ -617,6 +629,7 @@ load_place (Page *p)
   p->lat = json_object_get_double_member_with_default (o, "lat", 0);
   p->lon = json_object_get_double_member_with_default (o, "lon", 0);
   p->place = g_strdup (json_object_get_string_member_with_default (o, "place", ""));
+  p->manual = json_object_get_boolean_member_with_default (o, "manual", FALSE);
   return p->have_place = p->lat || p->lon;
 }
 
@@ -638,6 +651,8 @@ save_place (Page *p)
   json_builder_add_double_value (b, p->lon);
   json_builder_set_member_name (b, "place");
   json_builder_add_string_value (b, p->place ? p->place : "");
+  json_builder_set_member_name (b, "manual");
+  json_builder_add_boolean_value (b, p->manual);
   json_builder_end_object (b);
   g_autoptr (JsonGenerator) gen = json_generator_new ();
   g_autoptr (JsonNode) root = json_builder_get_root (b);
@@ -667,6 +682,8 @@ use_place (Page *p, double lat, double lon, const char *name)
     fetch (p);
 }
 
+static void show_search (Page *p);
+
 /* no place at all: say how to get one (a known place keeps its weather) */
 static void
 nowhere (Page *p)
@@ -677,7 +694,20 @@ nowhere (Page *p)
   for (GtkWidget *ch; (ch = gtk_widget_get_first_child (p->body));)
     gtk_box_remove (GTK_BOX (p->body), ch);
   gtk_box_append (GTK_BOX (p->body),
-                  label ("No location. Turn on Location in Settings, then tap reload.", "wx-summary", 0));
+                  label ("No location. Choose a city, or turn on Location in Settings and tap reload.", "wx-summary", 0));
+  GtkWidget *choose = gtk_button_new_with_label ("Choose a city");
+  gtk_widget_add_css_class (choose, "pill");
+  gtk_widget_set_halign (choose, GTK_ALIGN_START);
+  g_signal_connect_swapped (choose, "clicked", G_CALLBACK (show_search), p);
+  gtk_box_append (GTK_BOX (p->body), choose);
+}
+
+/* the user's language as two letters, for the services that name places ("en" when it is "C") */
+static char *
+lang_code (void)
+{
+  g_autofree char *lang = g_strndup (g_get_language_names ()[0], 2);
+  return g_strdup (g_strcmp0 (lang, "C") ? lang : "en");
 }
 
 typedef struct {
@@ -703,7 +733,8 @@ named (GObject *src, GAsyncResult *res, gpointer data)
   }
   /* unnamed: the old name only if the phone is still there */
   gboolean near = n->p->have_place && fabs (n->lat - n->p->lat) <= 0.02 && fabs (n->lon - n->p->lon) <= 0.02;
-  use_place (n->p, n->lat, n->lon, name ? name : near ? NULL : "");
+  if (!n->p->manual)              /* a city chosen while the fix was on its way stays */
+    use_place (n->p, n->lat, n->lon, name ? name : near ? NULL : "");
   g_free (n);
 }
 
@@ -714,10 +745,9 @@ name_place (Page *p, double lat, double lon)
   char la[G_ASCII_DTOSTR_BUF_SIZE], lo[G_ASCII_DTOSTR_BUF_SIZE];
   g_ascii_formatd (la, sizeof la, "%.4f", lat);
   g_ascii_formatd (lo, sizeof lo, "%.4f", lon);
-  g_autofree char *lang = g_strndup (g_get_language_names ()[0], 2);
+  g_autofree char *lang = lang_code ();
   g_autofree char *url = g_strdup_printf ("https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=14"
-                                          "&lat=%s&lon=%s&accept-language=%s", la, lo,
-                                          g_strcmp0 (lang, "C") ? lang : "en");
+                                          "&lat=%s&lon=%s&accept-language=%s", la, lo, lang);
   const char *argv[] = { "curl", "-sf", "--max-time", "15", "-A", UA, url, NULL };
   GSubprocess *sp = g_subprocess_newv (argv, G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_SILENCE, NULL);
   if (!sp) {
@@ -768,6 +798,10 @@ on_location (GDBusConnection *bus, const char *sender, const char *path, const c
   g_autoptr (GError) error = NULL;
   double lat, lon;
 
+  if (p->manual) {                /* a city was chosen: the fix is not needed */
+    geo_stop (p);
+    return;
+  }
   g_variant_get (params, "(&o&o)", &old_path, &new_path);
   g_autoptr (GVariant) all = g_dbus_connection_call_sync (bus, GEO_BUS, new_path, "org.freedesktop.DBus.Properties",
                                                           "GetAll", g_variant_new ("(s)", GEO_BUS ".Location"),
@@ -892,11 +926,226 @@ weather_app_city (Page *p)
   return TRUE;
 }
 
+/* a place the user chose stays; otherwise GNOME Weather's first city, then where the phone is */
 static void
 where (Page *p)
 {
+  if (p->manual && p->have_place)
+    return;
   if (!weather_app_city (p))
     locate (p);
+}
+
+/* ---- choosing a city by name (works with Location off) ---- */
+
+typedef struct {
+  Page         *p;
+  AdwDialog    *dlg;
+  GtkWidget    *entry, *status, *scroller, *results;
+  GCancellable *cancel;            /* the search in flight */
+} Search;
+
+typedef struct {
+  double lat, lon;
+  char  *name;
+} Hit;
+
+typedef struct {
+  Search       *s;
+  AdwDialog    *dlg;               /* held, so Search outlives the answer */
+  GCancellable *cancel;
+} Query;
+
+static void
+search_free (Search *s)
+{
+  g_cancellable_cancel (s->cancel);
+  g_clear_object (&s->cancel);
+  g_free (s);
+}
+
+static void
+hit_free (Hit *h)
+{
+  g_free (h->name);
+  g_free (h);
+}
+
+static void
+search_closed (AdwDialog *dlg, Search *s)
+{
+  g_cancellable_cancel (s->cancel);
+}
+
+/* a city picked: kept as the place (GeoClue and GNOME Weather leave it alone), its forecast fetched */
+static void
+hit_activated (AdwActionRow *row, Search *s)
+{
+  Hit *h = g_object_get_data (G_OBJECT (row), "hit");
+  geo_stop (s->p);
+  s->p->manual = TRUE;
+  use_place (s->p, h->lat, h->lon, h->name);
+  adw_dialog_close (s->dlg);
+}
+
+/* "Use my location": the chosen city goes, the place follows GNOME Weather or GeoClue again */
+static void
+mine_activated (AdwActionRow *row, Search *s)
+{
+  s->p->manual = FALSE;
+  if (s->p->have_place)
+    save_place (s->p);
+  where (s->p);
+  adw_dialog_close (s->dlg);
+}
+
+static void
+search_status (Search *s, const char *text)
+{
+  gtk_label_set_label (GTK_LABEL (s->status), text ? text : "");
+  gtk_widget_set_visible (s->status, text != NULL);
+  gtk_widget_set_visible (s->scroller, text == NULL);        /* the list shows only with places in it */
+}
+
+static void
+search_add (Search *s, JsonObject *r)
+{
+  const char *name = json_object_get_string_member_with_default (r, "name", "");
+  if (!*name || !json_object_has_member (r, "latitude") || !json_object_has_member (r, "longitude"))
+    return;
+  g_autoptr (GString) where_ = g_string_new (NULL);
+  const char *parts[] = { json_object_get_string_member_with_default (r, "admin1", ""),
+                          json_object_get_string_member_with_default (r, "country", "") };
+  for (guint i = 0; i < G_N_ELEMENTS (parts); i++)
+    if (*parts[i] && g_strcmp0 (parts[i], name))
+      g_string_append_printf (where_, "%s%s", where_->len ? ", " : "", parts[i]);
+  Hit *h = g_new0 (Hit, 1);
+  h->lat = json_object_get_double_member (r, "latitude");
+  h->lon = json_object_get_double_member (r, "longitude");
+  h->name = g_strdup (name);
+  GtkWidget *row = adw_action_row_new ();
+  adw_preferences_row_set_use_markup (ADW_PREFERENCES_ROW (row), FALSE);
+  adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), name);
+  adw_action_row_set_subtitle (ADW_ACTION_ROW (row), where_->str);
+  gtk_list_box_row_set_activatable (GTK_LIST_BOX_ROW (row), TRUE);
+  g_object_set_data_full (G_OBJECT (row), "hit", h, (GDestroyNotify) hit_free);
+  g_signal_connect (row, "activated", G_CALLBACK (hit_activated), s);
+  gtk_list_box_append (GTK_LIST_BOX (s->results), row);
+}
+
+static void
+searched (GObject *src, GAsyncResult *res, gpointer data)
+{
+  Query *q = data;
+  Search *s = q->s;
+  g_autofree char *out = NULL;
+  g_autoptr (JsonParser) jp = json_parser_new ();
+  gboolean ok = g_subprocess_communicate_utf8_finish (G_SUBPROCESS (src), res, &out, NULL, NULL);
+  if (!g_cancellable_is_cancelled (q->cancel)) {           /* not superseded by a newer word, nor closed */
+    gtk_list_box_remove_all (GTK_LIST_BOX (s->results));
+    if (!ok || !out || !json_parser_load_from_data (jp, out, -1, NULL) ||
+        !JSON_NODE_HOLDS_OBJECT (json_parser_get_root (jp))) {
+      search_status (s, "No answer. Check the network and try again.");
+    } else {
+      JsonObject *o = json_node_get_object (json_parser_get_root (jp));
+      JsonArray *list = json_object_has_member (o, "results") ? json_object_get_array_member (o, "results") : NULL;
+      for (guint i = 0; list && i < json_array_get_length (list); i++)
+        search_add (s, json_array_get_object_element (list, i));
+      search_status (s, gtk_widget_get_first_child (s->results) ? NULL : "No city found.");
+    }
+  }
+  g_object_unref (q->dlg);
+  g_object_unref (q->cancel);
+  g_free (q);
+}
+
+static void
+search_changed (GtkSearchEntry *entry, Search *s)
+{
+  g_autofree char *text = g_strstrip (g_strdup (gtk_editable_get_text (GTK_EDITABLE (entry))));
+  g_cancellable_cancel (s->cancel);
+  g_object_unref (s->cancel);
+  s->cancel = g_cancellable_new ();
+  gtk_list_box_remove_all (GTK_LIST_BOX (s->results));
+  if (g_utf8_strlen (text, -1) < GEOCODE_MIN_LEN) {
+    search_status (s, "Type the name of a city.");
+    return;
+  }
+  g_autofree char *q = g_uri_escape_string (text, NULL, FALSE);
+  g_autofree char *lang = lang_code ();
+  g_autofree char *url = g_strdup_printf (GEOCODE_URL "?name=%s&count=%d&language=%s&format=json", q, GEOCODE_COUNT, lang);
+  g_autofree char *wait = g_strdup_printf ("%d", GEOCODE_WAIT_S);
+  const char *argv[] = { "curl", "-sf", "--max-time", wait, "-A", UA, url, NULL };
+  GSubprocess *sp = g_subprocess_newv (argv, G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_SILENCE, NULL);
+  if (!sp) {
+    search_status (s, "No answer. Check the network and try again.");
+    return;
+  }
+  search_status (s, "Searching…");
+  Query *query = g_new0 (Query, 1);
+  query->s = s;
+  query->dlg = g_object_ref (s->dlg);
+  query->cancel = g_object_ref (s->cancel);
+  g_subprocess_communicate_utf8_async (sp, NULL, s->cancel, searched, query);
+  g_object_unref (sp);
+}
+
+static void
+show_search (Page *p)
+{
+  Search *s = g_new0 (Search, 1);
+  s->p = p;
+  s->cancel = g_cancellable_new ();
+  AdwDialog *dlg = s->dlg = adw_dialog_new ();
+  g_object_set_data_full (G_OBJECT (dlg), "search", s, (GDestroyNotify) search_free);
+  adw_dialog_set_title (dlg, "Location");
+  adw_dialog_set_content_width (dlg, DIALOG_W);
+  adw_dialog_set_content_height (dlg, DIALOG_H);
+  g_signal_connect (dlg, "closed", G_CALLBACK (search_closed), s);
+
+  GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 12);
+  gtk_widget_set_margin_top (box, 12);
+  gtk_widget_set_margin_bottom (box, 12);
+  gtk_widget_set_margin_start (box, 12);
+  gtk_widget_set_margin_end (box, 12);
+
+  s->entry = gtk_search_entry_new ();
+  gtk_search_entry_set_placeholder_text (GTK_SEARCH_ENTRY (s->entry), "Search for a city");
+  gtk_search_entry_set_search_delay (GTK_SEARCH_ENTRY (s->entry), SEARCH_DELAY_MS);
+  g_signal_connect (s->entry, "search-changed", G_CALLBACK (search_changed), s);
+  gtk_box_append (GTK_BOX (box), s->entry);
+
+  GtkWidget *mine = adw_action_row_new ();
+  adw_preferences_row_set_title (ADW_PREFERENCES_ROW (mine), "Use my location");
+  adw_action_row_set_subtitle (ADW_ACTION_ROW (mine), "Needs Location turned on in Settings");
+  gtk_list_box_row_set_activatable (GTK_LIST_BOX_ROW (mine), TRUE);
+  g_signal_connect (mine, "activated", G_CALLBACK (mine_activated), s);
+  GtkWidget *mine_list = gtk_list_box_new ();
+  gtk_list_box_set_selection_mode (GTK_LIST_BOX (mine_list), GTK_SELECTION_NONE);
+  gtk_widget_add_css_class (mine_list, "boxed-list");
+  gtk_list_box_append (GTK_LIST_BOX (mine_list), mine);
+  gtk_box_append (GTK_BOX (box), mine_list);
+
+  s->status = gtk_label_new (NULL);
+  gtk_widget_add_css_class (s->status, "dim-label");
+  gtk_box_append (GTK_BOX (box), s->status);
+
+  s->results = gtk_list_box_new ();
+  gtk_list_box_set_selection_mode (GTK_LIST_BOX (s->results), GTK_SELECTION_NONE);
+  gtk_widget_add_css_class (s->results, "boxed-list");
+  GtkWidget *sc = s->scroller = gtk_scrolled_window_new ();
+  gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (sc), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+  gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (sc), s->results);
+  gtk_widget_set_vexpand (sc, TRUE);
+  gtk_box_append (GTK_BOX (box), sc);
+  search_status (s, "Type the name of a city.");
+
+  GtkWidget *tv = adw_toolbar_view_new ();
+  adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (tv), adw_header_bar_new ());
+  adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (tv), box);
+  adw_dialog_set_child (dlg, tv);
+  adw_dialog_set_focus (dlg, s->entry);
+  adw_dialog_present (dlg, p->win);
 }
 
 static void
@@ -985,7 +1234,13 @@ activate (GtkApplication *app, gpointer data)
   gtk_widget_add_css_class (reload, "flat");
   gtk_widget_add_css_class (reload, "circular");
   g_signal_connect (reload, "clicked", G_CALLBACK (refresh_clicked), p);
+  GtkWidget *pick = gtk_button_new_from_icon_name ("mark-location-symbolic");
+  gtk_widget_add_css_class (pick, "flat");
+  gtk_widget_add_css_class (pick, "circular");
+  gtk_widget_set_tooltip_text (pick, "Choose a city");
+  g_signal_connect_swapped (pick, "clicked", G_CALLBACK (show_search), p);
   gtk_box_append (GTK_BOX (bar), p->spinner);
+  gtk_box_append (GTK_BOX (bar), pick);
   gtk_box_append (GTK_BOX (bar), reload);
   gtk_overlay_add_overlay (GTK_OVERLAY (overlay), bar);
   adw_application_window_set_content (ADW_APPLICATION_WINDOW (win), overlay);

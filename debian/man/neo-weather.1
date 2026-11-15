@@ -5,8 +5,10 @@ neo-weather \- weather app for GNOME Phone
 .B neo-weather
 .SH DESCRIPTION
 Shows the weather where the phone is: now, the next 24 hours, today against yesterday, the week and the details.
-The place is the first city in GNOME Weather if it has one, otherwise where GeoClue puts the phone (city accuracy),
-named by OpenStreetMap's Nominatim. The forecast is Open-Meteo's (no key). The last place and forecast are kept in
+The place is a city chosen in the app (the location button: a search by name in Open-Meteo's geocoder, which works
+with Location off, and which nothing moves afterwards; "Use my location" gives it up), otherwise the first city in
+GNOME Weather if it has one, otherwise where GeoClue puts the phone (city accuracy), named by OpenStreetMap's
+Nominatim. The forecast is Open-Meteo's (no key). The last place and forecast are kept in
 .I ~/.cache/neo-launcher/
 so the app opens on them at once.
 .SH SEE ALSO
