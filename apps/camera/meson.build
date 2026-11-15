@@ -30,6 +30,7 @@ executable('neo-camera',
 configure_file(input: 'data/de.yesman.Camera.service.in', output: 'de.yesman.Camera.service',
                configuration: configuration_data({'bindir': bindir}), install_dir: datadir / 'dbus-1/services')
 install_data('data/de.yesman.Camera.desktop', install_dir: datadir / 'applications')
+install_data('data/de.yesman.CameraScanKey.desktop', install_dir: datadir / 'applications')
 install_data('data/de.yesman.Camera.svg', install_dir: datadir / 'icons/hicolor/scalable/apps')
 install_data('data/de.yesman.Camera.gschema.xml', install_dir: datadir / 'glib-2.0/schemas')
 # Aperture's camera sounds (AOSP frameworks/base data/sounds, Apache-2.0) and Droid Sans Mono (Apache-2.0)

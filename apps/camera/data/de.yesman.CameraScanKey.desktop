@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Import key (QR)
+Name[de]=Schlüssel importieren (QR)
+Comment=Scan a QR code made by Minerva's key tool and save the API key
+Exec=neo-camera --scan
+Icon=de.yesman.Camera
+Terminal=false
+StartupNotify=false
+Categories=Utility;GTK;
+Keywords=QR;Key;API;Import;Minerva;
+X-Purism-FormFactor=Workstation;Mobile;
