@@ -74,6 +74,11 @@ void ns_page_scale_row (GtkWidget *group);
 /* ns-minerva.c: Minerva's brain (models, fallbacks, voice, budgets), through minerva-config; shown only where it is
  * installed */
 void     ns_page_minerva (GtkWidget *row, gpointer data);
+/* the index's four pages: the model and its fallbacks, the voice, the quotas; their texts and order are
+ * minerva_ui.json's (`minerva-config status --json` carries them) */
+void     ns_page_minerva_brain (GtkWidget *row, gpointer data);
+void     ns_page_minerva_voice (GtkWidget *row, gpointer data);
+void     ns_page_minerva_budget (GtkWidget *row, gpointer data);
 void     ns_page_api_keys (GtkWidget *row, gpointer data);
 /* the agent's accounts (ns-account.c): a card for the Accounts page, filled from `minerva-config accounts list`
  * (hidden while it has none), and --page's way to the first account */
@@ -82,11 +87,10 @@ void     ns_page_account (GtkWidget *row, gpointer data);
 void     ns_page_prompt (GtkWidget *row, gpointer data);
 /* ns-prompt.c: the system prompt and state template editors of Minerva > Prompt; `ui` is `prompt_ui` of the status */
 void     ns_prompt_build (GtkWidget *content, GObject *owner, JsonObject *ui);
-/* ns-people.c: Minerva > Persone (notebook, face samples, voiceprint, contact of each person); its row goes into
- * `content` once `minerva-config people ui` answers, labels and all */
-void     ns_people_add_entry (GtkWidget *content, GObject *owner);
-/* `--page people` (Neo Contacts' "Apri in Persone"): the Minerva page, then Persone once `people ui` answers */
+/* ns-people.c: Minerva > Persone (notebook, face samples, voiceprint, contact of each person); `--page people` is
+ * the index, then Persone once `people ui` answers; the index's own row opens it directly */
 void     ns_page_people_open (GtkWidget *row, gpointer data);
+void     ns_page_people_index (GtkWidget *row, gpointer data);
 /* a page of the models `minerva-config` offers, the current one marked; `picked` gets the model id (the source the
  * Minerva page's own pickers use) */
 typedef void (*NsModelPicked) (const char *id, gpointer data);

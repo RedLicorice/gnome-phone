@@ -15,6 +15,8 @@ AdwNavigationPage *ns_page_new (const char *title, GtkWidget **content);
 
 /* a page that is one long list (a GtkListBox of .ns-li rows, or a GtkListView): the list scrolls */
 AdwNavigationPage *ns_page_new_list (const char *title, GtkWidget *list);
+/* the title again once the data arrives: the big one on the page and the bar's */
+void       ns_page_set_title (AdwNavigationPage *page, const char *title);
 
 /* `child` scrolled the way the launcher's app drawer and the shade scroll (libspongy: Android's fling and stretch at
  * the ends), or in a GtkScrolledWindow where libspongy is not installed */

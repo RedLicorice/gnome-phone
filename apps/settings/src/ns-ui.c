@@ -290,6 +290,23 @@ ns_page_new_list (const char *title, GtkWidget *list)
   return page_with (title, list);
 }
 
+/* a page's title after it is made, for the pages whose texts arrive with the data: the big one on the page and the
+ * bar's small one follow the navigation page's */
+void
+ns_page_set_title (AdwNavigationPage *page, const char *title)
+{
+  adw_navigation_page_set_title (page, title);
+  GtkWidget *tv = adw_navigation_page_get_child (page);
+  GtkWidget *sc = tv && ADW_IS_TOOLBAR_VIEW (tv) ? adw_toolbar_view_get_content (ADW_TOOLBAR_VIEW (tv)) : NULL;
+  Title *t = sc ? g_object_get_data (G_OBJECT (sc), "ns-title") : NULL;
+  if (!t)
+    return;
+  gtk_label_set_text (GTK_LABEL (t->small), title);
+  GtkWidget *big = t->block ? gtk_widget_get_first_child (t->block) : NULL;
+  if (big)
+    gtk_label_set_text (GTK_LABEL (big), title);
+}
+
 /* ---- groups and rows ---- */
 
 static void

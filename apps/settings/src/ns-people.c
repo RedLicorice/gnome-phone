@@ -621,31 +621,15 @@ direct_ui_loaded (JsonObject *root, const char *err, gpointer data)
 void
 ns_page_people_open (GtkWidget *row, gpointer data)
 {
-  ns_page_minerva (NULL, NULL);
+  ns_page_minerva (NULL, NULL);   /* `--page people`: the Minerva index under it */
   static const char *const args[] = { "people", "ui", "--json", NULL };
   ns_mc_run (G_OBJECT (g_application_get_default ()), args, NULL, direct_ui_loaded, NULL);
 }
 
-/* ---- the Minerva page's row: there only when `people ui` answers (minerva_people installed) ---- */
-
-static void
-ui_loaded (JsonObject *root, const char *err, gpointer data)
-{
-  GtkWidget *box = data;
-  if (problem (root, err))
-    return;
-  JsonObject *ui = json_object_ref (root);
-  GtkWidget *g = ns_group (box, NULL);
-  GtkWidget *row = ns_row (g, "system-users-symbolic", "blue", str_of (ui, "title"), str_of (ui, "subtitle"));
-  g_object_set_data_full (G_OBJECT (row), "pp-ui", ui, (GDestroyNotify) json_object_unref);
-  ns_row_on_activate (row, ns_page_people, ui);
-}
-
+/* the index's own Persone row: the index is already under the page */
 void
-ns_people_add_entry (GtkWidget *content, GObject *owner)
+ns_page_people_index (GtkWidget *row, gpointer data)
 {
-  GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-  gtk_box_append (GTK_BOX (content), box);
   static const char *const args[] = { "people", "ui", "--json", NULL };
-  ns_mc_run (owner, args, NULL, ui_loaded, box);
+  ns_mc_run (G_OBJECT (g_application_get_default ()), args, NULL, direct_ui_loaded, NULL);
 }

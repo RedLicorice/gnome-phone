@@ -15,6 +15,7 @@ typedef struct {
   const char *const *argv;     /* another app */
   const char *needs_schema;    /* shown only if this settings schema is installed */
   gboolean  (*available) (void); /* shown only if this says so */
+  gboolean  search_only;       /* a sub-page's row: hidden in the menu, shown while a search matches it */
 } Entry;
 
 static const char *const software[] = { "gnome-software", "--mode=updates", NULL };
@@ -55,9 +56,26 @@ static const Entry entries[] = {
   { "avatar-default-symbolic", "blue", "Accounts", "Online accounts • API keys",
     "google nextcloud email api key token provider endpoint llm secret", ns_page_accounts },
   { NULL },
-  { "face-smile-symbolic", "purple", "Minerva", "Model • Fallbacks • Voice • Budgets",
-    "ai agent brain llm opencode piper voice key budget cost", ns_page_minerva, NULL, NULL,
-    ns_minerva_available },
+  { "face-smile-symbolic", "purple", "Minerva", "Modello • Voce • Prompt • Persone • Budget",
+    "ai agent brain cervello llm opencode piper voice voce wakeword prompt persone budget cost", ns_page_minerva, NULL,
+    NULL, ns_minerva_available },
+  { NULL },
+  /* the Minerva index's pages: one row each, hidden in the menu and shown only while a search matches it, so
+   * "wakeword" or "budget" lands on its own page. The titles are the index's (minerva_ui.json). */
+  { "applications-science-symbolic", "blue", "Cervello", "Modello • Catena di riserva • Ruoli",
+    "model modello brain cervello fallback catena riserva ruoli roles", ns_page_minerva_brain, NULL, NULL,
+    ns_minerva_available, TRUE },
+  { "audio-input-microphone-symbolic", "violet", "Voce", "Parola di attivazione • Risposta • Riconoscimento",
+    "voice voce wake wakeword parola attivazione risposta reply stt riconoscimento voiceprint impronta vocale engine "
+    "motore", ns_page_minerva_voice, NULL, NULL, ns_minerva_available, TRUE },
+  { "format-justify-left-symbolic", "violet", "Prompt", "System prompt • Template di stato",
+    "prompt system stato state template", ns_page_prompt, NULL, NULL, ns_minerva_available, TRUE },
+  { "system-users-symbolic", "blue", "Persone", "Volti • Voci • Contatti • Taccuino",
+    "people persone persona contatti contacts volto volti voce voci", ns_page_people_open, NULL, NULL,
+    ns_minerva_available, TRUE },
+  { "x-office-spreadsheet-symbolic", "orange", "Budget", "Tetti di spesa • Eventi • Avvisi",
+    "budget budgets spesa costo costi quota tetti limiti eventi events bypass", ns_page_minerva_budget, NULL, NULL,
+    ns_minerva_available, TRUE },
   { NULL },
   { "view-grid-symbolic", "blue", "Apps", "Default apps • App settings",
     "permissions storage", ns_page_apps },
@@ -118,6 +136,9 @@ search_changed (GtkSearchEntry *entry, gpointer data)
       gboolean all = TRUE;
       for (guint w = 0; words && words[w]; w++)
         all = all && strstr (text, words[w]);
+      /* a sub-page's row shows only while a search names it: the menu keeps one Minerva row */
+      if (GPOINTER_TO_INT (g_object_get_data (G_OBJECT (r), "ns-search-only")))
+        all = all && words && words[0] != NULL;
       gtk_widget_set_visible (r, all);
       any = any || all;
     }
@@ -187,6 +208,8 @@ main_page (void)
       g_ptr_array_add (groups, g);
     }
     GtkWidget *r = ns_row (g, e->icon, e->color, e->title, e->subtitle);
+    gtk_widget_set_visible (r, !e->search_only);
+    g_object_set_data (G_OBJECT (r), "ns-search-only", GINT_TO_POINTER (e->search_only));
     g_autofree char *text = g_strjoin (" ", e->title, e->subtitle, e->keywords, NULL);
     g_object_set_data_full (G_OBJECT (r), "ns-search", g_utf8_strdown (text, -1), g_free);
     ns_row_on_activate (r, activate_entry, (gpointer) e);
@@ -319,8 +342,14 @@ static const struct {
   { "system", ns_page_general },
   { "accessibility", ns_page_accessibility }, { "universal-access", ns_page_accessibility },
   { "about", ns_page_about }, { "info-overview", ns_page_about },
-  { "minerva", ns_page_minerva }, { "brain", ns_page_minerva }, { "minerva-prompt", ns_page_prompt }, { "prompt", ns_page_prompt },
+  { "minerva", ns_page_minerva },
+  { "brain", ns_page_minerva_brain }, { "cervello", ns_page_minerva_brain }, { "modello", ns_page_minerva_brain },
+  { "voice", ns_page_minerva_voice }, { "voce", ns_page_minerva_voice },
+  { "wakeword", ns_page_minerva_voice }, { "wake-word", ns_page_minerva_voice }, { "wake", ns_page_minerva_voice },
+  { "stt", ns_page_minerva_voice }, { "voiceprint", ns_page_minerva_voice }, { "impronta-vocale", ns_page_minerva_voice },
+  { "minerva-prompt", ns_page_prompt }, { "prompt", ns_page_prompt },
   { "people", ns_page_people_open }, { "persone", ns_page_people_open },
+  { "budget", ns_page_minerva_budget }, { "budgets", ns_page_minerva_budget }, { "spesa", ns_page_minerva_budget },
   { "permissions", ns_page_permissions }, { "agent-permissions", ns_page_permissions },
 };
 

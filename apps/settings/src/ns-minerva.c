@@ -15,8 +15,14 @@
 
 typedef struct Mn Mn;
 
+/* which of Minerva's pages this is: the index and the four pages it lists. Each builds only the cards it has, so a
+ * refresh fills what is there and skips the rest. */
+typedef enum { MN_INDEX, MN_BRAIN, MN_VOICE, MN_PROMPT, MN_BUDGET } MnKind;
+
 struct Mn {
+  MnKind     kind;
   AdwNavigationPage *page;
+  GtkWidget *content;                   /* the page's column: its cards are appended here */
   GtkWidget *msg;                       /* the last result: saved, restarted, or the error */
   GtkWidget *brain_g, *roles_g, *voice_g; /* filled once, with the first status (the pickers need the model list) */
   GtkWidget *chain, *stt, *notes;       /* rebuilt on every refresh (no pickers inside) */
@@ -24,6 +30,7 @@ struct Mn {
   GtkWidget *voice_id, *voice_cap, *budget_g, *spent; /* rows updated in place */
   GtkWidget *events, *bypass;           /* the events daemon's day: tokens used, and today's bypass switch */
   GtkWidget *sg_box;                    /* the data-driven groups (setting_groups of the status) go in here */
+  GtkWidget *status_model, *status_spend; /* the index's status card: the model in use, this month's spend */
   GtkWidget *vp_info;                   /* the voiceprint's state row (a group's "voiceprint" data) */
   char      *vp_text[3];                /* its texts: enrolled, none, enrolling ({got}, {need}) */
   GPtrArray *vp_actions;                /* the voiceprint buttons: "mn-when" says in which state each shows */
@@ -37,8 +44,8 @@ struct Mn {
   GStrv      stt_ids;                   /* the speech recognizers before Vosk, in order (Vosk is always last) */
   char      *claude_hint;               /* "signed in"…: asked of the Claude CLI once, when the page opens */
   gboolean   picks_built;               /* the pickers are built once: a refresh must not free what a picker page points to */
+  gboolean   entries_built;             /* the index's rows are built once, from minerva_ui.json */
   gboolean   busy;
-  gboolean   groups_only;               /* the Prompt page: just the data-driven groups and the editors */
 };
 
 /* ---- running minerva-config (ns-mc.c) ---- */
@@ -95,6 +102,13 @@ setting (Mn *m, const char *key)
   return str_of (obj_of (m->st, "brain"), key);
 }
 
+/* the index page's own texts (minerva_ui.json, through the status) */
+static JsonObject *
+mn_ui (Mn *m)
+{
+  return obj_of (m->st, "minerva_ui");
+}
+
 /* the catalog entry of a model id, or NULL */
 static JsonObject *
 model_of (Mn *m, const char *id)
@@ -133,6 +147,8 @@ id_label (Mn *m, const char *id)
 
 static void mn_refresh (Mn *m);
 static void build_rows (Mn *m);
+static void build_page (Mn *m);
+static void index_fill (Mn *m);
 
 static void
 set_done (Mn *m, JsonObject *root, const char *err, gpointer data)
@@ -566,7 +582,7 @@ stt_status_done (Mn *m, JsonObject *root, const char *err, gpointer data)
 {
   g_free (m->claude_hint);
   m->claude_hint = g_strdup (!err && root ? str_of (root, "claude") : "unknown");
-  if (m->st)
+  if (m->st && m->stt)
     stt_fill (m);
 }
 
@@ -799,13 +815,56 @@ fill_groups (Mn *m)
   }
 }
 
+/* the budget in money (the first budget row with a price): the index page has no budget rows of its own, so it
+ * looks it up in the status instead */
+static const char *
+money_cap_key (Mn *m)
+{
+  JsonArray *br = arr_of (m->st, "budget_rows");
+  for (guint i = 0; br && i < json_array_get_length (br); i++) {
+    JsonObject *o = json_array_get_object_element (br, i);
+    if (json_object_get_boolean_member (o, "money"))
+      return str_of (o, "key");
+  }
+  return NULL;
+}
+
+/* this month's spend, as Budget's row and the index's status card show it */
+static char *
+spend_text (Mn *m)
+{
+  JsonObject *b = obj_of (m->st, "budget"), *labels = obj_of (mn_ui (m), "status");
+  const char *cap_key = m->cap_key ? m->cap_key : money_cap_key (m);
+  const char *cap = cap_key ? setting (m, cap_key) : "";
+  if (b && json_object_has_member (b, "usage_usd") && !json_node_is_null (json_object_get_member (b, "usage_usd"))) {
+    gboolean over = json_object_get_boolean_member (b, "over");
+    return g_strdup_printf ("$%.2f%s%s%s%s", json_object_get_double_member (b, "usage_usd"),
+                            *cap ? " of €" : "", cap, over ? " • " : "", over ? str_of (labels, "over_cap") : "");
+  }
+  return g_strdup (*cap && g_ascii_strtod (cap, NULL) > 0 ? str_of (labels, "not_checked")
+                                                          : str_of (labels, "no_cap"));
+}
+
+/* the model in use, named as the pickers name it: the effective one, else the configured one */
+static char *
+model_text (Mn *m)
+{
+  const char *id = str_of (obj_of (m->st, "effective"), "main");
+  if (!*id)
+    id = setting (m, "brain.main");
+  return *id ? id_label (m, id) : g_strdup (str_of (obj_of (mn_ui (m), "status"), "no_model"));
+}
+
 static void
 update_fields (Mn *m)
 {
-  fill_value (m->voice_id, setting (m, "voice.voice"));
-  fill_value (m->voice_cap, setting (m, "voice.daily_chars"));
-  fill_value (m->stt_timeout, setting (m, "voice.stt_timeout_s"));
-  for (guint i = 0; i < m->caps->len; i++)
+  if (m->voice_id)
+    fill_value (m->voice_id, setting (m, "voice.voice"));
+  if (m->voice_cap)
+    fill_value (m->voice_cap, setting (m, "voice.daily_chars"));
+  if (m->stt_timeout)
+    fill_value (m->stt_timeout, setting (m, "voice.stt_timeout_s"));
+  for (guint i = 0; m->caps && i < m->caps->len; i++)
     fill_value (m->caps->pdata[i], setting (m, g_object_get_data (m->caps->pdata[i], "mn-key")));
   JsonObject *ev = obj_of (m->st, "events");
   if (ev && m->events) {
@@ -821,15 +880,9 @@ update_fields (Mn *m)
     if (m->bypass)
       ns_switch_quiet (ns_row_get_switch (m->bypass), json_object_get_boolean_member (ev, "bypass"));
   }
-  JsonObject *b = obj_of (m->st, "budget");
-  const char *cap = m->cap_key ? setting (m, m->cap_key) : "";
-  if (b && json_object_has_member (b, "usage_usd") && !json_node_is_null (json_object_get_member (b, "usage_usd"))) {
-    g_autofree char *t = g_strdup_printf ("$%.2f%s%s%s", json_object_get_double_member (b, "usage_usd"),
-                                          *cap ? " of €" : "", cap,
-                                          json_object_get_boolean_member (b, "over") ? " • over the cap" : "");
+  if (m->spent) {
+    g_autofree char *t = spend_text (m);
     ns_row_set_subtitle (m->spent, t);
-  } else {
-    ns_row_set_subtitle (m->spent, *cap && g_ascii_strtod (cap, NULL) > 0 ? "Not checked yet" : "No cap set: no paid use");
   }
 }
 
@@ -844,21 +897,20 @@ status_done (Mn *m, JsonObject *root, const char *err, gpointer data)
   if (m->st)
     json_object_unref (m->st);
   m->st = json_object_ref (root);
-  if (m->groups_only) {
-    if (!m->picks_built) {
-      m->picks_built = TRUE;
-      build_groups (m);
-      ns_prompt_build (m->sg_box, G_OBJECT (m->page), obj_of (m->st, "prompt_ui"));
-    }
-    fill_groups (m);
-    fill_voiceprint (m);
+  if (m->kind == MN_INDEX) {
+    index_fill (m);
     return;
   }
-  if (!m->picks_built)
-    build_rows (m);
-  chain_fill (m);
-  stt_fill (m);
-  notes_fill (m);
+  if (!m->picks_built) {
+    m->picks_built = TRUE;
+    build_page (m);
+  }
+  if (m->chain)
+    chain_fill (m);
+  if (m->stt)
+    stt_fill (m);
+  if (m->notes)
+    notes_fill (m);
   update_fields (m);
   fill_groups (m);
   fill_voiceprint (m);
@@ -895,124 +947,267 @@ mn_free (Mn *m)
   g_free (m);
 }
 
-/* Minerva > Prompt (`--page prompt`): the wake word and reply groups come with the status (data), then the editors
- * (ns-prompt.c) */
-void
-ns_page_prompt (GtkWidget *row, gpointer data)
+/* ---- the pages: the index and the four it lists, all built from minerva_ui.json ----
+ * The index shows the model in use and this month's spend, then one row per page in the file's order, with its
+ * icon, colour, title and subtitle. Each sub-page builds only the cards it has; a refresh fills what is there and
+ * skips the rest. No setting, label or order lives in this file: they are lines of the data. */
+
+/* which page a key of minerva_ui.json's "pages" opens: the data names it, this table says where it goes */
+static const struct {
+  const char *id;
+  NsActivate  page;
+} minerva_pages[] = {
+  { "brain", ns_page_minerva_brain },
+  { "voice", ns_page_minerva_voice },
+  { "prompt", ns_page_prompt },
+  { "people", ns_page_people_index },
+  { "budget", ns_page_minerva_budget },
+};
+
+static JsonObject *
+mn_ui_page (Mn *m, const char *id)
 {
-  GtkWidget *c;
-  AdwNavigationPage *page = ns_page_new ("Prompt", &c);
+  return obj_of (obj_of (mn_ui (m), "pages"), id);
+}
+
+/* a sub-page's title, from the data (it arrives with the status: the page opens with a blank one) */
+static void
+page_title (Mn *m, const char *id)
+{
+  const char *t = str_of (mn_ui_page (m, id), "title");
+  if (*t)
+    ns_page_set_title (m->page, t);
+}
+
+/* a card's title: a missing or empty one in the data is an untitled card */
+static const char *
+ui_title (JsonObject *o, const char *name)
+{
+  const char *t = str_of (o, name);
+  return *t ? t : NULL;
+}
+
+static void
+note_if (JsonObject *notes, const char *name, GtkWidget *content)
+{
+  const char *t = str_of (notes, name);
+  if (*t)
+    ns_note (content, t);
+}
+
+/* the index's status card and its rows, once, with the first status */
+static void
+index_build (Mn *m)
+{
+  JsonObject *ui = mn_ui (m), *labels = obj_of (ui, "status"), *pages = obj_of (ui, "pages");
+  GtkWidget *g = ns_group (m->content, NULL);
+  m->status_model = ns_row_info (g, str_of (labels, "model"), "");
+  m->status_spend = ns_row_info (g, str_of (labels, "spend"), "");
+  JsonArray *order = arr_of (ui, "order");
+  GtkWidget *eg = NULL;
+  for (guint i = 0; order && i < json_array_get_length (order); i++) {
+    const char *id = json_array_get_string_element (order, i);
+    JsonObject *p = obj_of (pages, id);
+    NsActivate page = NULL;
+    for (guint k = 0; k < G_N_ELEMENTS (minerva_pages); k++)
+      if (!g_strcmp0 (minerva_pages[k].id, id))
+        page = minerva_pages[k].page;
+    if (!page || !*str_of (p, "title"))
+      continue;   /* a page this build does not have */
+    if (!eg)
+      eg = ns_group (m->content, NULL);
+    GtkWidget *r = ns_row (eg, str_of (p, "icon"), str_of (p, "color"), str_of (p, "title"), str_of (p, "subtitle"));
+    ns_row_on_activate (r, page, NULL);
+  }
+  m->entries_built = TRUE;
+}
+
+static void
+index_fill (Mn *m)
+{
+  JsonObject *ui = mn_ui (m);
+  if (!*str_of (ui, "title"))
+    return;   /* no data file, or an older minerva-config: the page stays empty, nothing is guessed */
+  ns_page_set_title (m->page, str_of (ui, "title"));
+  if (!m->entries_built)
+    index_build (m);
+  g_autofree char *model = model_text (m), *spend = spend_text (m);
+  ns_row_set_subtitle (m->status_model, model);
+  ns_row_set_subtitle (m->status_spend, spend);
+}
+
+/* the sub-pages: their cards' titles and notes come from minerva_ui.json too */
+static void
+brain_build (Mn *m)
+{
+  JsonObject *p = mn_ui_page (m, "brain"), *s = obj_of (p, "sections"), *n = obj_of (p, "notes");
+  page_title (m, "brain");
+  m->brain_g = ns_group (m->content, ui_title (s, "model"));
+  m->notes = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
+  gtk_box_append (GTK_BOX (m->content), m->notes);
+  m->chain = ns_group (m->content, ui_title (s, "chain"));
+  note_if (n, "chain", m->content);
+  m->roles_g = ns_group (m->content, ui_title (s, "roles"));
+  note_if (n, "roles", m->content);
+}
+
+static void
+voice_build (Mn *m)
+{
+  JsonObject *p = mn_ui_page (m, "voice"), *s = obj_of (p, "sections"), *n = obj_of (p, "notes");
+  page_title (m, "voice");
+  m->voice_g = ns_group (m->content, ui_title (s, "engine"));
+  m->stt = ns_group (m->content, ui_title (s, "stt"));
+  GtkWidget *sg = ns_group (m->content, NULL);
+  m->stt_timeout = field_row (m, sg, "Cloud time limit (seconds)", "voice.stt_timeout_s");
+  note_if (n, "stt", m->content);
+  m->sg_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);   /* the wake word, the reply, the voiceprint */
+  gtk_box_append (GTK_BOX (m->content), m->sg_box);
+  build_groups (m);
+  const char *const stt_args[] = { "stt-status", "--json", NULL };
+  mn_run (m, stt_args, stt_status_done, NULL);   /* the Claude CLI's login, a second or so: shown when it comes */
+}
+
+static void
+budget_build (Mn *m)
+{
+  JsonObject *p = mn_ui_page (m, "budget"), *s = obj_of (p, "sections"), *n = obj_of (p, "notes");
+  page_title (m, "budget");
+  m->cap_key = g_strdup (money_cap_key (m));   /* the spent line is compared with it, the cap row or not */
+  m->budget_g = ns_group (m->content, ui_title (s, "budget"));
+  note_if (n, "budget", m->content);
+}
+
+static void
+prompt_build (Mn *m)
+{
+  page_title (m, "prompt");
+  ns_prompt_build (m->content, G_OBJECT (m->page), obj_of (m->st, "prompt_ui"));
+}
+
+/* called once, with the first status: the page's cards, then the pickers that need the model list */
+static void
+build_page (Mn *m)
+{
+  switch (m->kind) {
+  case MN_BRAIN: brain_build (m); break;
+  case MN_VOICE: voice_build (m); break;
+  case MN_BUDGET: budget_build (m); break;
+  case MN_PROMPT: prompt_build (m); break;
+  default: break;
+  }
+  build_rows (m);
+}
+
+/* a page of Minerva's: its title and its texts arrive with the status, so it opens blank and fills */
+static Mn *
+mn_new (MnKind kind, GtkWidget **content)
+{
+  AdwNavigationPage *page = ns_page_new ("", content);
   Mn *m = g_new0 (Mn, 1);
+  m->kind = kind;
   m->page = page;
-  m->groups_only = TRUE;
+  m->content = *content;
   g_object_set_data_full (G_OBJECT (page), "mn", m, (GDestroyNotify) mn_free);
-  m->msg = ns_note (c, "");
+  m->msg = ns_note (*content, "");
   gtk_widget_set_visible (m->msg, FALSE);
   gtk_widget_set_margin_top (m->msg, 0);
   m->srows = g_ptr_array_new ();
   m->vp_actions = g_ptr_array_new ();
-  m->sg_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-  gtk_box_append (GTK_BOX (c), m->sg_box);
-  mn_refresh (m);
-  ns_push (page);
+  return m;
 }
 
+static void
+mn_page_open (MnKind kind)
+{
+  GtkWidget *c;
+  Mn *m = mn_new (kind, &c);
+  mn_refresh (m);
+  ns_push (m->page);
+}
+
+/* Minerva (`--page minerva`): the index. Model in use and this month's spend, then the pages */
 void
 ns_page_minerva (GtkWidget *row, gpointer data)
 {
-  GtkWidget *c;
-  AdwNavigationPage *page = ns_page_new ("Minerva", &c);
-  Mn *m = g_new0 (Mn, 1);
-  m->page = page;
-  g_object_set_data_full (G_OBJECT (page), "mn", m, (GDestroyNotify) mn_free);
-
-  m->msg = ns_note (c, "");
-  gtk_widget_set_visible (m->msg, FALSE);
-  gtk_widget_set_margin_top (m->msg, 0);
-
-  m->brain_g = ns_group (c, "Brain");
-  m->notes = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
-  gtk_box_append (GTK_BOX (c), m->notes);
-
-  m->chain = ns_group (c, "Fallback chain");
-  ns_note (c, "Tried in this order when the main model cannot answer. A gateway's models fall back inside the "
-              "gateway; free opencode models are the last resort when no paid provider is reachable.");
-
-  m->roles_g = ns_group (c, "Models by role");
-  ns_note (c, "Eyes and Mailbox are saved, but nothing reads them yet.");
-
-  m->voice_g = ns_group (c, "Voice");
-
-  m->srows = g_ptr_array_new ();
-  m->vp_actions = g_ptr_array_new ();
-
-  m->stt = ns_group (c, "Speech recognition");
-  GtkWidget *sg = ns_group (c, NULL);
-  m->stt_timeout = field_row (m, sg, "Cloud time limit (seconds)", "voice.stt_timeout_s");
-  ns_note (c, "What you say after the wake word is sent to the first recognizer that is ready, in this order; one that "
-              "fails or takes longer than the time limit (1 to 10 s) passes it to the next. Vosk runs on the phone and "
-              "is always the last. The wake word itself is always recognized on the phone.");
-
-  m->caps = g_ptr_array_new ();
-  m->budget_g = ns_group (c, "Budgets");   /* its rows come with the status: one per provider with a budget */
-  ns_note (c, "Empty or 0 means no paid use: the paid models stay off, and only the free ones answer, until you set a "
-              "cap. Over the cap, Minerva falls back to the free models until the month turns. Checked hourly.");
-
-  GtkWidget *pg = ns_group (c, NULL);   /* wake word, reply, system prompt, state template: the Prompt page */
-  ns_row (pg, "format-justify-left-symbolic", "violet", "Prompt", "Wake word • Reply • System prompt • State template");
-  ns_row_on_activate (gtk_widget_get_last_child (pg), ns_page_prompt, NULL);
-  ns_people_add_entry (c, G_OBJECT (page));   /* Persone: its row and texts come from `people ui` */
-
-  GtkWidget *kg = ns_group (c, NULL);
-  ns_row (kg, NULL, NULL, "API keys", "Providers and their keys • Accounts");
-  ns_row_on_activate (gtk_widget_get_last_child (kg), ns_page_api_keys, NULL);
-  ns_note (c, "Keys for every provider, and endpoints of your own, are managed under Accounts. Without a key only the "
-              "free opencode models are used.");
-
-  say (m, "", FALSE);
-  mn_refresh (m);
-  const char *const stt_args[] = { "stt-status", "--json", NULL };
-  mn_run (m, stt_args, stt_status_done, NULL);   /* the Claude CLI's login, a second or so: shown when it comes */
-  ns_push (page);
+  mn_page_open (MN_INDEX);
 }
 
-/* the pickers and the voice card need the model list and the values, so they wait for the first status */
+/* Minerva > Cervello (`--page brain`): the model, its fallback chain, the models by role */
+void
+ns_page_minerva_brain (GtkWidget *row, gpointer data)
+{
+  mn_page_open (MN_BRAIN);
+}
+
+/* Minerva > Voce (`--page voice`): the speech engines, the recognizers, the wake word and the reply */
+void
+ns_page_minerva_voice (GtkWidget *row, gpointer data)
+{
+  mn_page_open (MN_VOICE);
+}
+
+/* Minerva > Budget (`--page budget`): every quota, the events' day and their bypass */
+void
+ns_page_minerva_budget (GtkWidget *row, gpointer data)
+{
+  mn_page_open (MN_BUDGET);
+}
+
+/* Minerva > Prompt (`--page prompt`): the system prompt and the state template (ns-prompt.c) */
+void
+ns_page_prompt (GtkWidget *row, gpointer data)
+{
+  mn_page_open (MN_PROMPT);
+}
+
+/* the pickers and the voice card need the model list and the values, so they wait for the first status. A page has
+ * only its own cards (the others are NULL), so each block checks for its group: the index and the Prompt page build
+ * none. */
 static void
 build_rows (Mn *m)
 {
   m->picks_built = TRUE;
-  choice_row (m, m->brain_g, "Main model", "brain.main", NULL, FALSE);
-  choice_row (m, m->roles_g, "Messages", "roles.chat", "Same as main", FALSE);
-  choice_row (m, m->roles_g, "Events", "roles.events", "Same as main", FALSE);
-  choice_row (m, m->roles_g, "Eyes (looks at pictures)", "roles.eyes", "Same as main", TRUE);
-  choice_row (m, m->roles_g, "Mailbox (other agents)", "roles.mailbox", "Same as main", FALSE);
-  JsonArray *ve = arr_of (m->st, "voice_engines");   /* the phone's own, then every provider with a voice */
-  g_autoptr (GPtrArray) labels = g_ptr_array_new ();
-  guint sel = 0;
-  for (guint i = 0; ve && i < json_array_get_length (ve); i++) {
-    JsonObject *o = json_array_get_object_element (ve, i);
-    g_ptr_array_add (labels, (char *) str_of (o, "label"));
-    if (!g_strcmp0 (str_of (o, "id"), setting (m, "voice.engine")))
-      sel = i;
+  if (m->brain_g)
+    choice_row (m, m->brain_g, "Main model", "brain.main", NULL, FALSE);
+  if (m->roles_g) {
+    choice_row (m, m->roles_g, "Messages", "roles.chat", "Same as main", FALSE);
+    choice_row (m, m->roles_g, "Events", "roles.events", "Same as main", FALSE);
+    choice_row (m, m->roles_g, "Eyes (looks at pictures)", "roles.eyes", "Same as main", TRUE);
+    choice_row (m, m->roles_g, "Mailbox (other agents)", "roles.mailbox", "Same as main", FALSE);
   }
-  g_ptr_array_add (labels, NULL);
-  ns_row_pick (m->voice_g, "Speech engine", (const char *const *) labels->pdata, sel, engine_picked, m);
-  m->voice_id = field_row (m, m->voice_g, "Cloud voice name", "voice.voice");
-  m->voice_cap = field_row (m, m->voice_g, "Characters per day", "voice.daily_chars");
-  JsonArray *br = arr_of (m->st, "budget_rows");
-  for (guint i = 0; br && i < json_array_get_length (br); i++) {
-    JsonObject *o = json_array_get_object_element (br, i);
-    GtkWidget *r = field_row (m, m->budget_g, str_of (o, "label"), str_of (o, "key"));
-    g_object_set_data_full (G_OBJECT (r), "mn-key", g_strdup (str_of (o, "key")), g_free);
-    g_ptr_array_add (m->caps, r);
-    if (!m->cap_key && json_object_get_boolean_member (o, "money"))
-      m->cap_key = g_strdup (str_of (o, "key"));
+  if (m->voice_g) {
+    JsonArray *ve = arr_of (m->st, "voice_engines");   /* the phone's own, then every provider with a voice */
+    g_autoptr (GPtrArray) labels = g_ptr_array_new ();
+    guint sel = 0;
+    for (guint i = 0; ve && i < json_array_get_length (ve); i++) {
+      JsonObject *o = json_array_get_object_element (ve, i);
+      g_ptr_array_add (labels, (char *) str_of (o, "label"));
+      if (!g_strcmp0 (str_of (o, "id"), setting (m, "voice.engine")))
+        sel = i;
+    }
+    g_ptr_array_add (labels, NULL);
+    ns_row_pick (m->voice_g, "Speech engine", (const char *const *) labels->pdata, sel, engine_picked, m);
+    m->voice_id = field_row (m, m->voice_g, "Cloud voice name", "voice.voice");
+    m->voice_cap = field_row (m, m->voice_g, "Characters per day", "voice.daily_chars");
   }
-  m->events = ns_row_info (m->budget_g, "Events today", "");
-  m->bypass = ns_row_switch (m->budget_g, "Bypass the events limit today",
-                             "The events keep reaching her until tomorrow, whatever the quota says", NULL, NULL);
-  g_signal_connect (ns_row_get_switch (m->bypass), "notify::active", G_CALLBACK (bypass_toggled), m);
-  m->spent = ns_row_info (m->budget_g, "Spent this month", "");
+  if (m->budget_g) {
+    m->caps = g_ptr_array_new ();
+    JsonArray *br = arr_of (m->st, "budget_rows");
+    for (guint i = 0; br && i < json_array_get_length (br); i++) {
+      JsonObject *o = json_array_get_object_element (br, i);
+      GtkWidget *r = field_row (m, m->budget_g, str_of (o, "label"), str_of (o, "key"));
+      g_object_set_data_full (G_OBJECT (r), "mn-key", g_strdup (str_of (o, "key")), g_free);
+      g_ptr_array_add (m->caps, r);
+      if (!m->cap_key && json_object_get_boolean_member (o, "money"))
+        m->cap_key = g_strdup (str_of (o, "key"));
+    }
+    m->events = ns_row_info (m->budget_g, "Events today", "");
+    m->bypass = ns_row_switch (m->budget_g, "Bypass the events limit today",
+                               "The events keep reaching her until tomorrow, whatever the quota says", NULL, NULL);
+    g_signal_connect (ns_row_get_switch (m->bypass), "notify::active", G_CALLBACK (bypass_toggled), m);
+    m->spent = ns_row_info (m->budget_g, "Spent this month", "");
+  }
 }
 
 /* ---- the model list as a page of its own (Permissions > Classifier) ----
