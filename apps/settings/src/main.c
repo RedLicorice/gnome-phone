@@ -45,7 +45,8 @@ static const Entry entries[] = {
     "pattern pin swipe password unlock fingerprint finger biometrics", ns_page_lock_screen, NULL, "de.yesman.neo" },
   { NULL },
   { "security-high-symbolic", "purple", "Security and privacy", "Screen lock • Permissions • Usage",
-    "password pin camera microphone history trash ssh keys", ns_page_privacy },
+    "password pin camera microphone history trash ssh keys permissions agent rules classifier allow deny minerva",
+    ns_page_privacy },
   { "find-location-symbolic", "purple", "Location", "Location services • App access",
     "gps geoclue", ns_page_location, NULL, "org.gnome.system.location" },
   { NULL },
@@ -314,6 +315,7 @@ static const struct {
   { "universal-access", ns_page_accessibility }, { "accessibility", ns_page_accessibility },
   { "info-overview", ns_page_about }, { "about", ns_page_about },
   { "minerva", ns_page_minerva }, { "brain", ns_page_minerva },
+  { "permissions", ns_page_permissions }, { "agent-permissions", ns_page_permissions },
 };
 
 static void

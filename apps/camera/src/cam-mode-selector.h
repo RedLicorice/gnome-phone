@@ -15,6 +15,7 @@ typedef enum {
   CAM_MODE_PHOTO,
   CAM_MODE_VIDEO,
   CAM_MODE_SCAN,
+  CAM_MODE_NIGHT,      /* a burst merged into one picture (Minerva's burst CLI) */
   CAM_N_MODES,
 } CamMode;
 

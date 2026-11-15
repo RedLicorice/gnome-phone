@@ -8,12 +8,24 @@
 /* whether `minerva-config` is installed (MINERVA_CONFIG_BIN overrides the path) */
 gboolean ns_minerva_available (void);
 
+/* whether another Minerva program (minerva-perm…) is installed: the same directory, an env var of its own name
+ * overrides the path ("minerva-perm" -> MINERVA_PERM_BIN) */
+gboolean ns_mc_prog_available (const char *prog);
+
 /* `root` is the JSON object the program printed (valid during the call), NULL with `err` when it failed */
 typedef void (*NsMcDone) (JsonObject *root, const char *err, gpointer data);
 
 /* Runs `minerva-config ARGS` without blocking. `stdin_text` (or NULL) goes to its standard input: how a key
  * travels, so it is in no argv and no process list. `owner` is kept alive until the answer comes. */
 void ns_mc_run (GObject *owner, const char *const *args, const char *stdin_text, NsMcDone done, gpointer data);
+
+/* The same for another program of that directory, such as `minerva-perm` (MINERVA_PERM_BIN overrides its path) */
+void ns_mc_run_bin (GObject *owner, const char *prog, const char *const *args, const char *stdin_text,
+                    NsMcDone done, gpointer data);
+
+/* A program that prints a JSON array (`minerva-perm history --json`, `minerva-config models --json`) */
+typedef void (*NsMcListDone) (JsonArray *list, const char *err, gpointer data);
+void ns_mc_run_list (GObject *owner, const char *prog, const char *const *args, NsMcListDone done, gpointer data);
 
 /* members of a JSON object, "" / NULL when absent or of another type */
 const char *ns_json_str (JsonObject *o, const char *member);

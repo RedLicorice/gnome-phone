@@ -12,3 +12,9 @@ DBusActivatable=true
 Categories=AudioVideo;Video;Recorder;GTK;
 Keywords=Camera;Photo;Video;Picture;Selfie;QR;Barcode;
 X-Purism-FormFactor=Workstation;Mobile;
+Actions=ScanKey;
+
+[Desktop Action ScanKey]
+Name=Import key (QR)
+Name[de]=Schlüssel importieren (QR)
+Exec=neo-camera --scan

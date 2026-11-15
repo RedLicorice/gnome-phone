@@ -1,5 +1,7 @@
 /* cam-qr-sheet: see cam-qr-sheet.h. */
 #include "cam-qr-sheet.h"
+#include "cam-dialogs.h"
+#include "cam-key-import.h"
 
 #include <glib/gi18n.h>
 #include <neo.h>
@@ -21,6 +23,7 @@ cam_qr_result_free (CamQrResult *result)
   g_free (result->data);
   g_free (result->uri);
   g_free (result->content);
+  g_free (result->provider);
   g_free (result);
 }
 
@@ -174,6 +177,111 @@ escape (const char *text)
   return g_uri_escape_string (text ? text : "", NULL, FALSE);
 }
 
+void
+cam_scrub (char *secret)
+{
+  if (!secret)
+    return;
+  explicit_bzero (secret, strlen (secret));
+  g_free (secret);
+}
+
+#define KEY_SCHEME "minerva-key:"
+
+gboolean
+cam_qr_is_key (const char *text)
+{
+  while (*text && g_ascii_isspace (*text))
+    text++;
+  return has_prefix_ci (text, KEY_SCHEME);
+}
+
+/* the provider id of a key code for the sheet's line: valid UTF-8 without control characters, at most 48
+ * characters; NULL when nothing is left */
+static char *
+key_provider (const char *decoded)
+{
+  GString *clean = g_string_new (NULL);
+  glong chars = 0;
+
+  if (!decoded || !g_utf8_validate (decoded, -1, NULL))
+    {
+      g_string_free (clean, TRUE);
+      return NULL;
+    }
+  for (const char *p = decoded; *p; p = g_utf8_next_char (p))
+    {
+      gunichar c = g_utf8_get_char (p);
+
+      if (g_unichar_iscntrl (c) || !g_unichar_isdefined (c))
+        continue;
+      if (chars == 48)
+        {
+          g_string_append (clean, "…");
+          break;
+        }
+      g_string_append_unichar (clean, c);
+      chars++;
+    }
+  g_strstrip (clean->str);
+  if (!clean->str[0])
+    {
+      g_string_free (clean, TRUE);
+      return NULL;
+    }
+  return g_string_free (clean, FALSE);
+}
+
+/* "minerva-key:v1?p=<provider>&k=<key>" or "&e=<encrypted>". Only the provider is ever copied out; the key part is
+ * looked at in place and not kept. */
+static void
+classify_key (CamQrResult *result, const char *text)
+{
+  const char *rest = text + strlen (KEY_SCHEME);
+  const char *query = strchr (rest, '?');
+  g_auto(GStrv) params = NULL;
+  gboolean has_k = FALSE, has_e = FALSE;
+
+  result->kind = CAM_QR_KEY;
+  if (!query || (query - rest != 2) || g_ascii_strncasecmp (rest, "v1", 2))
+    {
+      result->data = g_strdup (_("Not a code this app can import"));
+      return;
+    }
+  params = g_strsplit (query + 1, "&", -1);
+  for (int i = 0; params[i]; i++)
+    {
+      const char *value = strchr (params[i], '=');
+      gsize name_len = value ? (gsize) (value - params[i]) : 0;
+
+      if (!value || value[1] == 0)
+        continue;
+      value++;
+      if (name_len == 1 && params[i][0] == 'p' && !result->provider)
+        {
+          g_autofree char *decoded = g_uri_unescape_string (value, NULL);
+
+          result->provider = key_provider (decoded);
+        }
+      else if (name_len == 1 && params[i][0] == 'k')
+        has_k = TRUE;
+      else if (name_len == 1 && params[i][0] == 'e')
+        has_e = TRUE;
+    }
+  result->encrypted = has_e && !has_k;
+  result->importable = result->provider && (has_k != has_e);
+  if (!result->importable)
+    {
+      g_clear_pointer (&result->provider, g_free);
+      result->encrypted = FALSE;
+      result->data = g_strdup (_("Not a code this app can import"));
+    }
+  else if (result->encrypted)
+    result->data = g_strdup_printf (_("%s • passphrase needed"), result->provider);
+  else
+    result->data = g_strdup (result->provider);
+}
+
 CamQrResult *
 cam_qr_classify (const char *raw)
 {
@@ -181,7 +289,12 @@ cam_qr_classify (const char *raw)
   g_autofree char *text = g_strstrip (g_strdup (raw));
 
   result->kind = CAM_QR_TEXT;
-  if (has_prefix_ci (text, "BEGIN:VCARD"))
+  if (has_prefix_ci (text, KEY_SCHEME))
+    {
+      classify_key (result, text);
+      explicit_bzero (text, strlen (text));       /* the copy made for stripping held the key */
+    }
+  else if (has_prefix_ci (text, "BEGIN:VCARD"))
     {
       char *fn = property (text, "FN");
 
@@ -349,6 +462,7 @@ handler (CamQrResult *result)
       return g_app_info_get_default_for_type (result->mime, FALSE);
     case CAM_QR_TEXT:
     case CAM_QR_WIFI:
+    case CAM_QR_KEY:            /* imported by this app itself (cam-key-import) */
       return NULL;
     default:
       scheme = result->uri ? g_uri_parse_scheme (result->uri) : NULL;
@@ -371,6 +485,7 @@ action_title (CamQrKind kind)
     case CAM_QR_ISBN: return _("Lookup this ISBN");
     case CAM_QR_PRODUCT: return _("Lookup product");
     case CAM_QR_VIN: return _("Lookup VIN");
+    case CAM_QR_KEY: return _("Minerva API key");
     default: return _("Text");
     }
 }
@@ -390,6 +505,7 @@ action_icon (CamQrKind kind)
     case CAM_QR_ISBN: return "cam-book-symbolic";
     case CAM_QR_PRODUCT: return "cam-shopping-cart-symbolic";
     case CAM_QR_VIN: return "cam-directions-car-symbolic";
+    case CAM_QR_KEY: return "cam-lock-symbolic";
     default: return NULL;
     }
 }
@@ -410,6 +526,10 @@ struct _CamQrSheet {
   gboolean        closing;
   CamQrDismissed  dismissed;
   gpointer        data;
+  /* a key code: its widgets to update, the scanned text (wiped with the sheet), and whether a run is going */
+  GtkWidget      *title, *line, *import;
+  char           *secret;
+  gboolean        busy;
 };
 
 G_DEFINE_FINAL_TYPE (CamQrSheet, cam_qr_sheet, GTK_TYPE_WIDGET)
@@ -547,6 +667,102 @@ toast (CamQrSheet *self, const char *text)
     gtk_widget_activate_action (window, "win.toast", "s", text);
 }
 
+/* ---- a key code: Import ---------------------------------------------------------------------------------------- */
+
+static void ask_passphrase (CamQrSheet *self, const char *message);
+
+static void
+show_line (CamQrSheet *self, const char *text, gboolean error)
+{
+  gtk_label_set_text (GTK_LABEL (self->line), text);
+  if (error)
+    gtk_widget_add_css_class (self->line, "cam-qr-error");
+  else
+    gtk_widget_remove_css_class (self->line, "cam-qr-error");
+}
+
+static void
+on_import_done (CamKeyResult *key, gpointer data)
+{
+  CamQrSheet *self = data;
+  g_autofree char *text = NULL;
+
+  self->busy = FALSE;
+  if (key->ok)
+    {
+      text = g_strdup_printf (_("Key for %s saved"), key->name ? key->name : self->result->provider);
+      gtk_label_set_text (GTK_LABEL (self->title), _("Key saved"));
+      show_line (self, text, FALSE);
+      gtk_widget_set_visible (self->import, FALSE);
+      cam_scrub (g_steal_pointer (&self->secret));
+      toast (self, text);
+    }
+  else if (key->need_passphrase)
+    {
+      show_line (self, self->result->data, FALSE);
+      gtk_widget_set_sensitive (self->import, TRUE);
+      ask_passphrase (self, key->error);
+    }
+  else
+    {
+      show_line (self, key->error ? key->error : _("The key could not be saved"), TRUE);
+      gtk_widget_set_sensitive (self->import, TRUE);
+      toast (self, _("The key could not be saved"));
+    }
+  g_object_unref (self);
+}
+
+static void
+run_import (CamQrSheet *self, const char *passphrase)
+{
+  self->busy = TRUE;
+  gtk_widget_set_sensitive (self->import, FALSE);
+  show_line (self, _("Saving…"), FALSE);
+  cam_key_import_run (self->secret, passphrase, on_import_done, g_object_ref (self));
+}
+
+static void
+on_passphrase (char *passphrase, gpointer data)
+{
+  CamQrSheet *self = data;
+
+  if (passphrase && *passphrase && self->secret)
+    run_import (self, passphrase);
+  cam_scrub (passphrase);
+  g_object_unref (self);
+}
+
+static void
+ask_passphrase (CamQrSheet *self, const char *message)
+{
+  g_autofree char *text = NULL;
+
+  if (!message || !*message)
+    {
+      text = g_strdup_printf (_("The %s key is protected. Enter the passphrase it was saved with."),
+                              self->result->provider);
+      message = text;
+    }
+  cam_passphrase_dialog (GTK_WIDGET (self), message, on_passphrase, g_object_ref (self));
+}
+
+static void
+start_import (CamQrSheet *self)
+{
+  if (self->busy || !self->secret || !self->result->importable)
+    return;
+  if (self->result->encrypted)
+    ask_passphrase (self, NULL);
+  else
+    run_import (self, NULL);
+}
+
+static void
+on_import (NeoPressable *button, CamQrSheet *self)
+{
+  start_import (self);
+}
+
 static void
 on_card (NeoPressable *card, CamQrSheet *self)
 {
@@ -554,6 +770,11 @@ on_card (NeoPressable *card, CamQrSheet *self)
   g_autoptr(GError) error = NULL;
   gboolean ok = FALSE;
 
+  if (self->result->kind == CAM_QR_KEY)
+    {
+      start_import (self);
+      return;
+    }
   if (!self->app)
     return;
   context = gdk_display_get_app_launch_context (gtk_widget_get_display (GTK_WIDGET (self)));
@@ -595,6 +816,7 @@ cam_qr_sheet_dispose (GObject *object)
   g_clear_pointer (&self->anim, neo_anim_free);
   g_clear_pointer (&self->sheet, gtk_widget_unparent);
   g_clear_pointer (&self->result, cam_qr_result_free);
+  g_clear_pointer (&self->secret, cam_scrub);
   g_clear_object (&self->app);
   G_OBJECT_CLASS (cam_qr_sheet_parent_class)->dispose (object);
 }
@@ -632,13 +854,16 @@ build_sheet (CamQrSheet *self)
   GtkWidget *handle = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
   GtkWidget *row = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
   GtkWidget *texts = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-  GtkWidget *title = gtk_label_new (self->app ? action_title (self->result->kind) : _("Text"));
+  gboolean is_key = self->result->kind == CAM_QR_KEY;
+  GtkWidget *title = gtk_label_new (self->app || is_key ? action_title (self->result->kind) : _("Text"));
   GtkWidget *data = gtk_label_new (self->result->data);
   GtkWidget *copy = neo_icon_button_new ("cam-content-copy-symbolic");
   GtkWidget *card;
   GtkGesture *drag = gtk_gesture_drag_new ();
-  const char *icon_name = self->app ? action_icon (self->result->kind) : NULL;
+  const char *icon_name = self->app || is_key ? action_icon (self->result->kind) : NULL;
 
+  self->title = title;
+  self->line = data;
   gtk_widget_add_css_class (sheet, "cam-qr-sheet");
   /* the drag handle: 32 × 4 dp, 8 dp from the top */
   gtk_widget_set_size_request (handle, 32, 4);
@@ -671,15 +896,35 @@ build_sheet (CamQrSheet *self)
   gtk_widget_add_css_class (data, "cam-qr-data");
   gtk_box_append (GTK_BOX (texts), data);
   gtk_box_append (GTK_BOX (row), texts);
-  /* the copy button: 24 dp icon with 5 dp padding, 16 dp from the card's end */
-  gtk_widget_set_size_request (copy, 34, 34);
-  gtk_widget_set_valign (copy, GTK_ALIGN_CENTER);
-  gtk_widget_set_margin_end (copy, 16);
-  gtk_widget_add_css_class (copy, "cam-qr-copy");
-  gtk_widget_set_tooltip_text (copy, _("Copy to clipboard"));
-  neo_pressable_set_ripple (NEO_PRESSABLE (copy), NEO_RIPPLE_CIRCLE, 20);
-  g_signal_connect (copy, "clicked", G_CALLBACK (on_copy), self);
-  gtk_box_append (GTK_BOX (row), copy);
+  if (is_key)
+    {
+      /* a key is never copied: its code holds the secret. Import takes the copy button's place */
+      if (self->result->importable)
+        {
+          self->import = neo_text_button_new (_("Import"));
+          gtk_widget_set_valign (self->import, GTK_ALIGN_CENTER);
+          gtk_widget_set_margin_end (self->import, 8);
+          gtk_widget_add_css_class (self->import, "cam-qr-import");
+          g_signal_connect (self->import, "clicked", G_CALLBACK (on_import), self);
+          gtk_box_append (GTK_BOX (row), self->import);
+        }
+      else
+        gtk_widget_set_margin_end (texts, 16);
+      g_object_ref_sink (copy);
+      g_object_unref (copy);
+    }
+  else
+    {
+      /* the copy button: 24 dp icon with 5 dp padding, 16 dp from the card's end */
+      gtk_widget_set_size_request (copy, 34, 34);
+      gtk_widget_set_valign (copy, GTK_ALIGN_CENTER);
+      gtk_widget_set_margin_end (copy, 16);
+      gtk_widget_add_css_class (copy, "cam-qr-copy");
+      gtk_widget_set_tooltip_text (copy, _("Copy to clipboard"));
+      neo_pressable_set_ripple (NEO_PRESSABLE (copy), NEO_RIPPLE_CIRCLE, 20);
+      g_signal_connect (copy, "clicked", G_CALLBACK (on_copy), self);
+      gtk_box_append (GTK_BOX (row), copy);
+    }
   card = neo_pressable_new (row);
   neo_pressable_set_ripple (NEO_PRESSABLE (card), NEO_RIPPLE_BOUNDED, 12);
   gtk_widget_set_size_request (card, -1, 72);
@@ -711,7 +956,10 @@ cam_qr_sheet_show (GtkWidget *parent, const char *text, CamQrDismissed dismissed
   self->app = handler (self->result);
   self->dismissed = dismissed;
   self->data = data;
-  g_object_set_data_full (G_OBJECT (self), "cam-qr-text", g_strdup (text), g_free);
+  if (self->result->kind == CAM_QR_KEY)
+    self->secret = g_strdup (text);     /* held for the import, wiped with the sheet; not offered to Copy */
+  else
+    g_object_set_data_full (G_OBJECT (self), "cam-qr-text", g_strdup (text), g_free);
   self->sheet = build_sheet (self);
   gtk_widget_set_parent (self->sheet, GTK_WIDGET (self));
   gtk_overlay_add_overlay (overlay, GTK_WIDGET (self));

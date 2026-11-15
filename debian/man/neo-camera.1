@@ -3,6 +3,7 @@
 neo-camera \- camera for GNOME Phone
 .SH SYNOPSIS
 .B neo-camera
+.RB [ \-\-scan ]
 .SH DESCRIPTION
 LineageOS's Aperture rebuilt in GTK 4 on libcamera and GStreamer. Photos are saved as JPEG with EXIF to
 .IR ~/Pictures/Camera ,
@@ -11,5 +12,16 @@ videos as H.264 and AAC MP4 to
 the scan mode reads barcodes (GStreamer's zxing element). The cameras, their facing and rotation come from libcamera,
 the flash from the LED class, and the video encoder from a measurement of the ones GStreamer has. It is D-Bus
 activatable as de.yesman.Camera; its settings are GSettings de.yesman.Camera.
+.PP
+A scanned
+.B minerva-key:
+code (an API key made by Minerva on a computer) is offered as "Minerva API key" with an Import button, which hands it
+to
+.BR minerva-config (1)
+on its standard input; the key is never shown, copied or logged.
+.SH OPTIONS
+.TP
+.B \-\-scan
+Start in the scan mode (the saved mode is left alone); a running Camera switches to it.
 .SH SEE ALSO
 gst-launch-1.0(1)

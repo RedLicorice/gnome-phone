@@ -235,3 +235,49 @@ cam_location_dialog (GtkWidget *parent, CamLocationDone done, gpointer data)
   g_signal_connect_data (dialog, "response", G_CALLBACK (on_location_response), answer, answer_free, 0);
   neo_dialog_present (dialog, parent);
 }
+
+/* ---- the passphrase -------------------------------------------------------------------------------------------- */
+
+typedef struct {
+  GtkWidget         *entry;
+  CamPassphraseDone  done;
+  gpointer           data;
+} PassphraseAsk;
+
+static void
+on_passphrase_response (NeoDialog *dialog, int response, PassphraseAsk *ask)
+{
+  /* GtkPasswordEntry keeps its text in secure memory; this copy is the caller's to wipe */
+  char *passphrase = response == NEO_RESPONSE_OK ? g_strdup (gtk_editable_get_text (GTK_EDITABLE (ask->entry))) : NULL;
+
+  ask->done (passphrase, ask->data);
+}
+
+static void
+on_passphrase_activate (GtkPasswordEntry *entry, NeoDialog *dialog)
+{
+  neo_dialog_respond (dialog, NEO_RESPONSE_OK);
+}
+
+void
+cam_passphrase_dialog (GtkWidget *parent, const char *message, CamPassphraseDone done, gpointer data)
+{
+  NeoDialog *dialog = neo_dialog_new (_("Passphrase"));
+  GtkWidget *entry = gtk_password_entry_new ();
+  PassphraseAsk *ask = g_new0 (PassphraseAsk, 1);
+
+  gtk_password_entry_set_show_peek_icon (GTK_PASSWORD_ENTRY (entry), TRUE);
+  gtk_widget_add_css_class (entry, "neo-entry");
+  gtk_widget_set_hexpand (entry, TRUE);
+  g_signal_connect (entry, "activate", G_CALLBACK (on_passphrase_activate), dialog);
+  neo_dialog_set_message (dialog, message);
+  neo_dialog_set_content (dialog, entry);
+  neo_dialog_add_button (dialog, _("Cancel"), NEO_RESPONSE_CANCEL);
+  neo_dialog_add_button (dialog, _("Import"), NEO_RESPONSE_OK);
+  gtk_widget_add_css_class (GTK_WIDGET (dialog), "cam-settings-dialog");
+  ask->entry = entry;
+  ask->done = done;
+  ask->data = data;
+  g_signal_connect_data (dialog, "response", G_CALLBACK (on_passphrase_response), ask, answer_free, 0);
+  neo_dialog_present (dialog, parent);
+}

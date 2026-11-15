@@ -6,7 +6,10 @@
  * action. An action is offered only when an app on the phone can do it (a browser for links and lookups, the
  * Contacts app for a vCard, the Calendar for an event, a handler for tel:, sms:, mailto:, geo:); otherwise the code
  * shows as Text. Left out, because nothing here can back them: Share (no share chooser on the phone), Wi-Fi
- * networks (adding one needs NetworkManager and a confirmation; shown as Text), Android's TextClassifier. */
+ * networks (adding one needs NetworkManager and a confirmation; shown as Text), Android's TextClassifier.
+ *
+ * Not from Aperture: a "minerva-key:v1?p=<provider>&k=<key>" (or &e=<encrypted key>) code, made by Minerva on the
+ * computer, shows as "Minerva API key" with the provider and an Import button (cam-key-import.h). */
 #pragma once
 
 #include <gtk/gtk.h>
@@ -33,6 +36,7 @@ typedef enum {
   CAM_QR_PRODUCT,
   CAM_QR_VIN,
   CAM_QR_WIFI,
+  CAM_QR_KEY,
 } CamQrKind;
 
 typedef struct {
@@ -41,7 +45,20 @@ typedef struct {
   char     *uri;            /* what is opened (a URL, tel:…), or NULL */
   char     *content;        /* a vCard or iCalendar to hand over as a file, or NULL */
   const char *mime;         /* its type */
+  /* CAM_QR_KEY only (the key and the encrypted blob are never copied out of the scanned text): the provider's id
+   * as the code names it, cleaned for display; whether a passphrase unlocks the key; whether the code is a key
+   * code this app can hand to `minerva-config` at all (an unknown version or a missing part is not) */
+  char     *provider;
+  gboolean  encrypted;
+  gboolean  importable;
 } CamQrResult;
+
+/* whether a scanned text is a Minerva key code ("minerva-key:", any case): such a text is never logged, shown whole
+ * or copied */
+gboolean cam_qr_is_key (const char *text);
+
+/* a secret string of ours: wiped, then freed */
+void cam_scrub (char *secret);
 
 CamQrResult *cam_qr_classify     (const char *text);
 void         cam_qr_result_free  (CamQrResult *result);

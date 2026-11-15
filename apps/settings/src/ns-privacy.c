@@ -70,6 +70,7 @@ ns_page_privacy (GtkWidget *row, gpointer data)
   ns_row_on_activate (r, ns_page_users, NULL);
   r = ns_row (g, "network-server-symbolic", "violet", "SSH", "Who can log in • My keys");
   ns_row_on_activate (r, ns_page_ssh, NULL);
+  ns_perm_add_row (g);   /* ns-perm.c: what Minerva's agent may do without asking */
 
   GSettings *p = ns_page_settings (page, "org.gnome.desktop.privacy");
   if (!p) {

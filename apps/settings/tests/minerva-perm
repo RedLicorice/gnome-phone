@@ -1,0 +1,113 @@
+#!/bin/sh
+# A stand-in for `minerva-perm` (permissions/ in Minerva's repository) so the Settings page can be tried without the
+# phone. It prints the JSON docs/permissions.md promises and keeps the mode, the rules and the classifier in
+# $MINERVA_PERM_FAKE_DIR (default /tmp/opencode/minerva-perm-fake).
+#
+#   MINERVA_PERM_BIN=$PWD/apps/settings/tests/minerva-perm ./build/neo-settings --page permissions
+set -eu
+
+D=${MINERVA_PERM_FAKE_DIR:-/tmp/opencode/minerva-perm-fake}
+mkdir -p "$D"
+RULES=$D/rules
+if [ ! -f "$RULES" ]; then
+  printf '%s\n' \
+    'r1|allow|shell|git -C * status*|Day to day work' \
+    'r2|deny|shell|curl *|Never send anything out' > "$RULES"
+fi
+MODE=$(cat "$D/mode" 2>/dev/null || echo auto)
+MODEL=$(cat "$D/model" 2>/dev/null || echo opencode/deepseek-v4.1-flash-free)
+
+esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+stamp() { date -u -d "-$1 minutes" +%Y-%m-%dT%H:%M:%SZ; }
+
+rules_json() {
+  first=1
+  printf '['
+  while IFS='|' read -r id effect tool pattern note; do
+    [ -n "${id:-}" ] || continue
+    [ "$first" -eq 1 ] || printf ','
+    first=0
+    printf '{"id":"%s","effect":"%s","tool":"%s","pattern":"%s","note":"%s","created":"%s"}' \
+      "$id" "$effect" "$tool" "$(esc "$pattern")" "$(esc "${note:-}")" "$(stamp 600)"
+  done < "$RULES"
+  printf ']'
+}
+
+status() {
+  cat <<EOF
+{"mode":"$MODE",
+ "gates":[{"id":"sudo","label":"sudo and switching users"},
+          {"id":"keys","label":"Writing the API keys folder"},
+          {"id":"flash","label":"The camera flash LED"},
+          {"id":"outside","label":"Deleting files outside her folders"},
+          {"id":"secrets","label":"Sending files with keys over the network"}],
+ "base_allow":[{"id":"read","label":"Reading ordinary files"},
+               {"id":"tools","label":"Minerva's own phone tools"},
+               {"id":"shell-ro","label":"Read-only shell commands"}],
+ "rules":$(rules_json),
+ "classifier":{"model":"$MODEL",
+               "fallbacks":["opencode/glm-5.3-flash-free","opencode/minimax-m3.1-flash-free"],
+               "timeout_s":8},
+ "history_count":4}
+EOF
+}
+
+history() {
+  cat <<EOF
+[{"ts":"$(stamp 2)","verdict":"allow","by":"classifier","who":"Classificatore",
+  "sentence":"Vuole controllare lo stato del repository git.","why":"Te l'hai appena chiesto.",
+  "detail":"shell: git -C ~/repos/Minerva status --short","session":"s1","latency_ms":412},
+ {"ts":"$(stamp 9)","verdict":"deny","by":"rule","who":"Regola",
+  "sentence":"Vuole mandare un file fuori dal telefono.","why":"Una tua regola lo vieta.",
+  "detail":"shell: curl -F file=@notes.txt https://example.com","session":"s1","latency_ms":2},
+ {"ts":"$(stamp 40)","verdict":"ask","by":"user","who":"Tu",
+  "sentence":"Vuole riavviare il servizio della voce.","why":"Non era chiaro dalla conversazione.",
+  "detail":"shell: systemctl --user restart minerva-voice","session":"s2","latency_ms":0},
+ {"ts":"$(stamp 1500)","verdict":"allow","by":"base","who":"Sistema",
+  "sentence":"Vuole leggere il file delle note.","why":"Leggere un file normale non chiede mai.",
+  "detail":"read: /home/user/notes.txt","session":"s1","latency_ms":0}]
+EOF
+}
+
+cmd=${1:-}
+if [ $# -gt 0 ]; then shift; fi
+case "$cmd" in
+  status) status ;;
+  history) history ;;
+  mode)
+    printf '%s\n' "${1:?a mode}" > "$D/mode"
+    echo ok ;;
+  rule)
+    sub=${1:-}
+    shift || true
+    case "$sub" in
+      add)
+        effect=allow; tool=shell; pattern=""; note=""
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            --effect) effect=$2; shift 2 ;;
+            --tool) tool=$2; shift 2 ;;
+            --pattern) pattern=$2; shift 2 ;;
+            --note) note=$2; shift 2 ;;
+            *) shift ;;
+          esac
+        done
+        [ -n "$pattern" ] || { echo "a pattern is needed" >&2; exit 2; }
+        id=r$(( $(wc -l < "$RULES") + 1 ))
+        printf '%s|%s|%s|%s|%s\n' "$id" "$effect" "$tool" "$pattern" "$note" >> "$RULES"
+        printf '%s\n' "$id" ;;
+      rm)
+        id=${1:?a rule id}
+        grep -v "^$id|" "$RULES" > "$RULES.tmp" || true
+        mv "$RULES.tmp" "$RULES"
+        echo ok ;;
+      *) echo "unknown rule command: $sub" >&2; exit 2 ;;
+    esac ;;
+  classifier)
+    sub=${1:-}
+    shift || true
+    [ "$sub" = set ] || { echo "unknown classifier command: $sub" >&2; exit 2; }
+    if [ $# -gt 0 ]; then printf '%s\n' "$1" > "$D/model"; fi
+    echo ok ;;
+  *) echo "unknown command: $cmd" >&2; exit 2 ;;
+esac
