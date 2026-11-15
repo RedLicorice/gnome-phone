@@ -87,6 +87,8 @@ void     ns_page_account (GtkWidget *row, gpointer data);
 void     ns_page_prompt (GtkWidget *row, gpointer data);
 /* ns-prompt.c: the system prompt and state template editors of Minerva > Prompt; `ui` is `prompt_ui` of the status */
 void     ns_prompt_build (GtkWidget *content, GObject *owner, JsonObject *ui);
+/* ns-events.c: Minerva > Eventi (the apps that send events, their channels' levels, the scheduled wake-ups) */
+void ns_page_events (GtkWidget *row, gpointer data);
 /* ns-people.c: Minerva > Persone (notebook, face samples, voiceprint, contact of each person); `--page people` is
  * the index, then Persone once `people ui` answers; the index's own row opens it directly */
 void     ns_page_people_open (GtkWidget *row, gpointer data);

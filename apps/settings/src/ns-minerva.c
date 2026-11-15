@@ -961,6 +961,7 @@ static const struct {
   { "voice", ns_page_minerva_voice },
   { "prompt", ns_page_prompt },
   { "people", ns_page_people_index },
+  { "events", ns_page_events },
   { "budget", ns_page_minerva_budget },
 };
 
@@ -1172,8 +1173,7 @@ build_rows (Mn *m)
     choice_row (m, m->brain_g, "Main model", "brain.main", NULL, FALSE);
   if (m->roles_g) {
     choice_row (m, m->roles_g, "Messages", "roles.chat", "Same as main", FALSE);
-    choice_row (m, m->roles_g, "Events", "roles.events", "Same as main", FALSE);
-    choice_row (m, m->roles_g, "Eyes (looks at pictures)", "roles.eyes", "Same as main", TRUE);
+      choice_row (m, m->roles_g, "Eyes (looks at pictures)", "roles.eyes", "Same as main", TRUE);
     choice_row (m, m->roles_g, "Mailbox (other agents)", "roles.mailbox", "Same as main", FALSE);
   }
   if (m->voice_g) {
