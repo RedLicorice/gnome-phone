@@ -366,17 +366,36 @@ export class LaunchTransition {
 
         // the app's first window: no map animation, hidden under the splash until it has drawn
         const tracker = Shell.WindowTracker.get_default();
+        // A Wayland window is created before its app id is known: the tracker then gives a window-backed stand-in
+        // ('window:N', no desktop file) and the real app only after notify::wm-class / gtk-application-id. Refusing
+        // that stand-in left the splash waiting its whole timeout for every app (measured 2026-11-15: the window
+        // drew after 0.4 s, the splash stayed 15 s). So claim it, and let go if the real owner is another app.
+        const release = () => {
+            if (!run.window)
+                return;
+            run.windowActor?.disconnectObject(run);
+            if (run.windowActor)
+                run.windowActor.opacity = 255;
+            run.window.disconnectObject(run);
+            run.window = run.windowActor = null;
+        };
         global.display.connectObject('window-created', (_d, win) => {
             if (run.window || win.get_window_type() !== Meta.WindowType.NORMAL)
                 return;
             const owner = tracker.get_window_app(win);
-            if (owner && owner !== app)
+            if (owner && owner !== app && owner.get_app_info())
                 return;
             run.window = win;
             const actor = win.get_compositor_private();
             Main.wm.skipNextEffect(actor);
             actor.opacity = 0;
             run.windowActor = actor;
+            const recheck = () => {
+                const now = tracker.get_window_app(win);
+                if (now && now !== app && now.get_app_info())
+                    release();
+            };
+            win.connectObject('notify::wm-class', recheck, 'notify::gtk-application-id', recheck, run);
             actor.connectObject('first-frame', () => {
                 run.drawn = true;
                 if (run.timeoutId)
@@ -397,6 +416,7 @@ export class LaunchTransition {
                 GLib.source_remove(run.timeoutId);
             global.display.disconnectObject(run);
             run.windowActor?.disconnectObject(run);
+            run.window?.disconnectObject(run);
             if (run.windowActor) {
                 run.windowActor.opacity = 255;
                 run.windowActor.translation_y = 0;
