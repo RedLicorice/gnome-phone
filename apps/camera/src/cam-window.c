@@ -16,6 +16,7 @@
 #include "cam-settings.h"
 #include "cam-sounds.h"
 #include "cam-storage.h"
+#include <glib/gstdio.h>
 #include "cam-tone.h"
 #include "cam-tune.h"
 #include "cam-viewfinder.h"
@@ -119,7 +120,7 @@ struct _CamView {
 
   /* captures */
   CamRecorder *recorder;
-  guint        duration_timer, start_timer, flash_timer;
+  guint        duration_timer, start_timer, flash_timer, night_timer;
   gboolean     taking, rec_audio;
   gboolean     scanning_paused;
 
@@ -140,6 +141,8 @@ static void tune_sync (CamView *self);
 static void tune_flush (CamView *self);
 static void slide_pro (CamView *self, gboolean open);
 static void take_photo (CamView *self);
+static void take_night (CamView *self);
+#define is_photo_mode(self) ((self)->mode == CAM_MODE_PHOTO || (self)->mode == CAM_MODE_NIGHT)
 static void start_video (CamView *self);
 
 /* ---- small helpers --------------------------------------------------------------------------------------------- */
@@ -309,11 +312,11 @@ flash_supported (CamView *self, CamFlash flash)
     case FLASH_OFF:
       return TRUE;
     case FLASH_ON:
-      return self->mode == CAM_MODE_PHOTO && has_led (self);
+      return is_photo_mode (self) && has_led (self);
     case FLASH_TORCH:
-      return self->mode != CAM_MODE_PHOTO && has_led (self);
+      return !is_photo_mode (self) && has_led (self);
     case FLASH_SCREEN:
-      return self->mode == CAM_MODE_PHOTO && is_front (self);
+      return is_photo_mode (self) && is_front (self);
     }
   return FALSE;
 }
@@ -321,7 +324,7 @@ flash_supported (CamView *self, CamFlash flash)
 static CamFlash *
 mode_flash (CamView *self)
 {
-  return self->mode == CAM_MODE_PHOTO ? &self->photo_flash : self->mode == CAM_MODE_VIDEO ? &self->video_flash
+  return is_photo_mode (self) ? &self->photo_flash : self->mode == CAM_MODE_VIDEO ? &self->video_flash
                                                                                           : &self->scan_flash;
 }
 
@@ -330,7 +333,7 @@ current_flash (CamView *self)
 {
   CamFlash flash = *mode_flash (self);
 
-  if (self->mode == CAM_MODE_PHOTO && self->force_torch && has_led (self))
+  if (is_photo_mode (self) && self->force_torch && has_led (self))
     return FLASH_TORCH;
   return flash_supported (self, flash) ? flash : FLASH_OFF;
 }
@@ -356,7 +359,7 @@ save_flash (CamView *self)
 {
   static const char *const names[] = { "off", "on", "torch", "screen" };
 
-  if (self->mode == CAM_MODE_PHOTO)
+  if (is_photo_mode (self))
     g_settings_set_string (self->settings, "photo-flash-mode", names[self->photo_flash]);
   else if (self->mode == CAM_MODE_VIDEO)
     g_settings_set_string (self->settings, "video-flash-mode", names[self->video_flash]);
@@ -397,7 +400,7 @@ on_flash_clicked (NeoPressable *button, CamView *self)
 {
   CamFlash *flash = mode_flash (self);
 
-  if (self->mode == CAM_MODE_PHOTO && self->force_torch)
+  if (is_photo_mode (self) && self->force_torch)
     {
       /* torch mode on: a tap only turns it off */
       self->force_torch = FALSE;
@@ -417,7 +420,7 @@ on_flash_clicked (NeoPressable *button, CamView *self)
     }
   save_flash (self);
   update_flash (self);
-  if (self->mode == CAM_MODE_PHOTO && has_led (self)
+  if (is_photo_mode (self) && has_led (self)
       && !g_settings_get_boolean (self->settings, "force-torch-help-shown"))
     neo_snackbar_show (NEO_SNACKBAR (self->snackbar),
                        _("On photo mode, you can long press the flash button to switch into torch mode."), _("OK"),
@@ -427,7 +430,7 @@ on_flash_clicked (NeoPressable *button, CamView *self)
 static void
 on_flash_long_pressed (NeoPressable *button, CamView *self)
 {
-  if (self->mode != CAM_MODE_PHOTO || !has_led (self) || self->state != ST_IDLE)
+  if (!is_photo_mode (self) || !has_led (self) || self->state != ST_IDLE)
     return;
   self->force_torch = !self->force_torch;
   g_settings_set_boolean (self->settings, "force-torch-help-shown", TRUE);
@@ -867,7 +870,7 @@ can_record (CamView *self)
 static void
 update_pro_row (CamView *self)
 {
-  gboolean photo = self->mode == CAM_MODE_PHOTO, video = self->mode == CAM_MODE_VIDEO;
+  gboolean photo = is_photo_mode (self), video = self->mode == CAM_MODE_VIDEO;
   gboolean idle = self->state == ST_IDLE;
   gboolean recording = self->state == ST_RECORDING || self->state == ST_PAUSED;
   static const char *const grid_icons[] = { "cam-grid-3x3-off-symbolic", "cam-grid-3x3-symbolic",
@@ -1183,7 +1186,7 @@ stream_size (CamView *self, int *width, int *height)
       *height = self->quality == 1080 ? 1080 : 720;
       return TRUE;
     }
-  if (self->mode == CAM_MODE_PHOTO && self->wide
+  if (is_photo_mode (self) && self->wide
       && cam_camera_pick_size (self->camera, 16, 9, CAM_STREAM_TARGET_PIXELS, width, height))
     return TRUE;
   if (cam_camera_pick_size (self->camera, 4, 3, CAM_STREAM_TARGET_PIXELS, width, height))
@@ -1195,7 +1198,7 @@ static gboolean
 preview_cover (CamView *self)
 {
   /* PreviewView's fitCenter as the live app shows it: 4:3 whole, 16:9 and video filling the viewfinder */
-  return self->mode == CAM_MODE_VIDEO || (self->mode == CAM_MODE_PHOTO && self->wide);
+  return self->mode == CAM_MODE_VIDEO || (is_photo_mode (self) && self->wide);
 }
 
 /* The process starts afresh, on the camera the settings now name (see cam_pipeline_needs_fresh_process) */
@@ -1360,7 +1363,7 @@ on_flip (CamFlip *flip, CamView *self)
 static void
 set_mode (CamView *self, CamMode mode, gboolean animate)
 {
-  static const char *const names[] = { "photo", "video", "qr" };
+  static const char *const names[] = { "photo", "video", "qr", "night" };
   CamMode old = self->mode;
 
   if (mode == CAM_MODE_VIDEO && cam_encoder_get () && !can_record (self))
@@ -1376,7 +1379,7 @@ set_mode (CamView *self, CamMode mode, gboolean animate)
   cam_mode_selector_set_mode (CAM_MODE_SELECTOR (self->modes), mode, animate);
   slide_pro (self, FALSE);
   neo_snackbar_dismiss (NEO_SNACKBAR (self->snackbar));
-  if (mode != CAM_MODE_PHOTO)
+  if (mode != CAM_MODE_PHOTO && mode != CAM_MODE_NIGHT)
     self->force_torch = FALSE;
   self->scan_flash = FLASH_OFF;
   /* the shutter's morph: photo ↔ video; invisible in SCAN */
@@ -1540,13 +1543,280 @@ take_photo (CamView *self)
     cam_pipeline_grab (self->pipeline, on_grabbed, self);
 }
 
+/* ---- night: a burst merged into one picture ------------------------------------------------------------------- */
+
+/* NIGHT takes NIGHT_FRAMES frames one after the other (the LED, when the flash is on, lit for the series only), saves
+ * each as a JPEG in the cache, and hands them to Minerva's burst CLI (`python -m minerva_eyes.burst`: ECC alignment
+ * and a robust mean, one tested implementation shared with the agent's `look`; this app has no OpenCV and a C port
+ * would be a second copy to keep in step). The merged file keeps the first frame's EXIF and joins the gallery like a
+ * normal shot. Without the CLI the first frame is the photo. The LED is off right after the last grab, and a
+ * watchdog switches it off after NIGHT_LED_MAX_MS whatever happens. */
+#define NIGHT_FRAMES 6
+#define NIGHT_LED_MAX_MS 5000
+
+typedef struct {
+  CamView *view;
+  char    *dir;                 /* the cache directory of the frames */
+  char    *final;               /* the gallery name */
+  int      grabbed, saved, failed;
+  gboolean lit;
+} NightShot;
+
+static void
+night_free (NightShot *shot)
+{
+  g_autoptr(GDir) dir = g_dir_open (shot->dir, 0, NULL);
+  const char *name;
+
+  while (dir && (name = g_dir_read_name (dir)))
+    {
+      g_autofree char *path = g_build_filename (shot->dir, name, NULL);
+      g_unlink (path);
+    }
+  g_rmdir (shot->dir);
+  g_free (shot->dir);
+  g_free (shot->final);
+  g_free (shot);
+}
+
+static char *
+night_frame_path (NightShot *shot, int i)
+{
+  g_autofree char *name = g_strdup_printf ("frame-%d.jpg", i);
+
+  return g_build_filename (shot->dir, name, NULL);
+}
+
+static gboolean
+night_watchdog (gpointer data)
+{
+  CamView *self = data;
+
+  self->night_timer = 0;
+  g_warning ("night: LED still on after %d ms, switching it off", NIGHT_LED_MAX_MS);
+  set_led (self, CAM_LED_OFF);
+  return G_SOURCE_REMOVE;
+}
+
+static void
+night_done (NightShot *shot, gboolean ok, const char *why)
+{
+  CamView *self = shot->view;
+
+  self->taking = FALSE;
+  if (ok)
+    g_message ("photo: %s", shot->final);
+  else
+    {
+      g_warning ("night: %s", why);
+      toast (self, _("The burst could not be saved."));
+    }
+  update_controls (self);
+  update_thumbnail (self);
+  g_application_release (G_APPLICATION (self->app));
+  night_free (shot);
+  g_object_unref (self);
+}
+
+static void
+on_night_merged (GObject *object, GAsyncResult *result, gpointer data)
+{
+  NightShot *shot = data;
+  g_autoptr(GError) error = NULL;
+  g_autofree char *first = night_frame_path (shot, 0);
+  g_autofree char *merged = g_build_filename (shot->dir, "merged.jpg", NULL);
+  g_autoptr(GFile) from = NULL;
+  g_autoptr(GFile) to = g_file_new_for_path (shot->final);
+  gboolean ok = g_subprocess_wait_check_finish (G_SUBPROCESS (object), result, &error);
+
+  if (!ok)
+    g_warning ("night: the merge failed (%s), keeping the first frame", error->message);
+  from = g_file_new_for_path (ok ? merged : first);
+  /* into the gallery under a hidden name first: it never sees half a file */
+  g_autofree char *part = g_strdup_printf ("%s.part", shot->final);
+  g_autoptr(GFile) tmp = g_file_new_for_path (part);
+
+  if (g_file_copy (from, tmp, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL, &error)
+      && g_file_move (tmp, to, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL, &error))
+    night_done (shot, TRUE, NULL);
+  else
+    night_done (shot, FALSE, error->message);
+}
+
+static void
+night_merge (NightShot *shot)
+{
+  const char *python = g_getenv ("NEO_CAMERA_BURST_PYTHON");
+  g_autofree char *default_python = g_build_filename (g_get_home_dir (), ".local/share/minerva/venv/bin/python", NULL);
+  g_autofree char *eyes = g_build_filename (g_get_home_dir (), ".local/share/minerva/eyes", NULL);
+  g_autofree char *merged = g_build_filename (shot->dir, "merged.jpg", NULL);
+  g_autoptr(GPtrArray) argv = g_ptr_array_new_with_free_func (g_free);
+  g_autoptr(GSubprocessLauncher) launcher = g_subprocess_launcher_new (G_SUBPROCESS_FLAGS_STDOUT_SILENCE);
+  g_autoptr(GError) error = NULL;
+  g_autoptr(GSubprocess) proc = NULL;
+
+  if (!python)
+    python = default_python;
+  g_ptr_array_add (argv, g_strdup (python));
+  g_ptr_array_add (argv, g_strdup ("-m"));
+  g_ptr_array_add (argv, g_strdup ("minerva_eyes.burst"));
+  g_ptr_array_add (argv, g_strdup ("--out"));
+  g_ptr_array_add (argv, g_strdup (merged));
+  for (int i = 0; i < NIGHT_FRAMES; i++)
+    g_ptr_array_add (argv, night_frame_path (shot, i));
+  g_ptr_array_add (argv, NULL);
+  g_subprocess_launcher_setenv (launcher, "PYTHONPATH", eyes, TRUE);
+  proc = g_subprocess_launcher_spawnv (launcher, (const char *const *) argv->pdata, &error);
+  if (!proc)
+    {
+      /* no burst CLI on this phone: the first frame is the photo */
+      g_warning ("night: cannot start the merge (%s)", error->message);
+      g_autoptr(GFile) from = g_file_new_for_path (g_ptr_array_index (argv, 5));
+      g_autoptr(GFile) to = g_file_new_for_path (shot->final);
+      g_autoptr(GError) copy_error = NULL;
+
+      night_done (shot, g_file_copy (from, to, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL, &copy_error),
+                  copy_error ? copy_error->message : NULL);
+      return;
+    }
+  g_subprocess_wait_check_async (proc, NULL, on_night_merged, shot);
+}
+
+static void
+on_night_saved (GObject *object, GAsyncResult *result, gpointer data)
+{
+  NightShot *shot = data;
+  g_autoptr(GError) error = NULL;
+  g_autofree char *path = cam_photo_save_finish (result, &error);
+
+  if (!path)
+    {
+      g_warning ("night frame: %s", error->message);
+      shot->failed++;
+    }
+  if (++shot->saved < NIGHT_FRAMES)
+    return;
+  if (shot->failed)
+    night_done (shot, FALSE, "a frame could not be written");
+  else
+    night_merge (shot);
+}
+
+static void night_grab (NightShot *shot);
+
+static void
+on_night_grabbed (GstSample *frame, gpointer data)
+{
+  NightShot *shot = data;
+  CamView *self = shot->view;
+  CamPhoto *photo;
+
+  if (!frame)
+    {
+      g_clear_handle_id (&self->night_timer, g_source_remove);
+      set_led (self, CAM_LED_OFF);
+      end_flash (self);
+      night_done (shot, FALSE, "no frame");
+      return;
+    }
+  if (shot->grabbed == 0)
+    {
+      shot->lit = cam_flash_led_is_lit ();
+      cam_viewfinder_blink (CAM_VIEWFINDER (self->viewfinder));
+      cam_sounds_play (CAM_SOUND_SHUTTER, g_settings_get_boolean (self->settings, "shutter-sound"));
+    }
+  photo = g_new0 (CamPhoto, 1);
+  photo->frame = frame;
+  photo->time = g_date_time_new_now_local ();
+  photo->rotation = capture_rotation (self);
+  photo->mirror = is_front (self) && g_settings_get_boolean (self->settings, "photo-ffc-mirror");
+  photo->zoom = self->zoom;
+  photo->path = night_frame_path (shot, shot->grabbed);
+  if (shot->grabbed == 0)
+    {
+      g_autofree char *save_location = g_settings_get_string (self->settings, "save-location");
+
+      if (g_str_equal (save_location, "on"))
+        photo->location = cam_sensors_get_location (self->sensors);
+    }
+  photo->has_flash = has_led (self);
+  photo->flash_fired = shot->lit;
+  cam_photo_save_async (photo, NULL, on_night_saved, shot);
+  if (++shot->grabbed < NIGHT_FRAMES)
+    {
+      night_grab (shot);
+      return;
+    }
+  /* the series is taken: the light goes off now, not when the merge is done */
+  g_clear_handle_id (&self->night_timer, g_source_remove);
+  end_flash (self);
+}
+
+static void
+night_grab (NightShot *shot)
+{
+  cam_pipeline_grab (shot->view->pipeline, on_night_grabbed, shot);
+}
+
+static gboolean
+on_night_ready (gpointer data)
+{
+  NightShot *shot = data;
+
+  shot->view->flash_timer = 0;
+  night_grab (shot);
+  return G_SOURCE_REMOVE;
+}
+
+static void
+take_night (CamView *self)
+{
+  CamFlash flash = current_flash (self);
+  NightShot *shot;
+  g_autoptr(GDateTime) now = g_date_time_new_now_local ();
+  g_autofree char *dir = g_build_filename (g_get_user_cache_dir (), "neo-camera-night-XXXXXX", NULL);
+
+  if (self->taking)
+    return;
+  if (!g_mkdtemp (dir))
+    {
+      toast (self, _("The burst could not be saved."));
+      return;
+    }
+  self->taking = TRUE;
+  g_object_ref (self);
+  g_application_hold (G_APPLICATION (self->app));
+  update_controls (self);
+  shot = g_new0 (NightShot, 1);
+  shot->view = self;
+  shot->dir = g_steal_pointer (&dir);
+  shot->final = cam_storage_new_path (self->storage, FALSE, now);
+  if (flash == FLASH_ON || flash == FLASH_SCREEN)
+    self->night_timer = g_timeout_add (NIGHT_LED_MAX_MS, night_watchdog, self);
+  if (flash == FLASH_ON)
+    {
+      set_led (self, CAM_LED_FLASH);
+      self->flash_timer = g_timeout_add (FLASH_SETTLE_MS, on_night_ready, shot);
+    }
+  else if (flash == FLASH_SCREEN)
+    {
+      gtk_widget_set_visible (self->white, TRUE);
+      keep_bright (self, TRUE);
+      self->flash_timer = g_timeout_add (SCREEN_FLASH_MS, on_night_ready, shot);
+    }
+  else
+    night_grab (shot);
+}
+
 /* ---- the countdown (§10) --------------------------------------------------------------------------------------- */
 
 static void
 on_countdown_finished (CamCountdown *countdown, CamView *self)
 {
   set_state (self, ST_IDLE);
-  if (self->mode == CAM_MODE_PHOTO)
+  if (self->mode == CAM_MODE_NIGHT)
+    take_night (self);
+  else if (is_photo_mode (self))
     take_photo (self);
   else
     start_video (self);
@@ -1561,7 +1831,9 @@ start_timer_and_run (CamView *self)
       cam_countdown_start (CAM_COUNTDOWN (self->countdown), self->timer);
       return;
     }
-  if (self->mode == CAM_MODE_PHOTO)
+  if (self->mode == CAM_MODE_NIGHT)
+    take_night (self);
+  else if (is_photo_mode (self))
     take_photo (self);
   else
     start_video (self);
@@ -1692,7 +1964,7 @@ shutter (CamView *self)
 {
   if (!self->running || !cam_pipeline_is_streaming (self->pipeline))
     return;
-  if (self->mode == CAM_MODE_PHOTO)
+  if (is_photo_mode (self))
     {
       if (self->state != ST_IDLE || self->taking)
         return;
@@ -2425,7 +2697,8 @@ restore (CamView *self)
   g_autofree char *photo_flash = g_settings_get_string (self->settings, "photo-flash-mode");
   g_autofree char *video_flash = g_settings_get_string (self->settings, "video-flash-mode");
   CamMode last = g_str_equal (mode, "video") ? CAM_MODE_VIDEO : g_str_equal (mode, "qr") ? CAM_MODE_SCAN
-                                                                                          : CAM_MODE_PHOTO;
+                                                                                          : g_str_equal (mode, "night") ? CAM_MODE_NIGHT
+                                                                                                                        : CAM_MODE_PHOTO;
 
   if (start_scan)
     last = CAM_MODE_SCAN;           /* `--scan`: this once; the saved mode stays what it was */

@@ -174,7 +174,7 @@ static void
 cam_mode_selector_init (CamModeSelector *self)
 {
   /* camera_mode_photo / _video / _qr, upper-cased by textAllCaps */
-  const char *names[CAM_N_MODES] = { C_("mode", "PHOTO"), C_("mode", "VIDEO"), C_("mode", "SCAN") };
+  const char *names[CAM_N_MODES] = { C_("mode", "PHOTO"), C_("mode", "VIDEO"), C_("mode", "SCAN"), C_("mode", "NIGHT") };
 
   self->pill_x = -1;
   for (int i = 0; i < CAM_N_MODES; i++)
