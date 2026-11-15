@@ -299,6 +299,20 @@ function systemIconsLayout(state, end) {
     return at;
 }
 
+// The tap box [x0, x1] (screen px) of each drawn status item, from the cluster's right edge @end: the shade header's
+// status items open Settings on a tap, and an item that is not drawn has no box
+export function systemIconBoxes(state, end) {
+    const at = systemIconsLayout(state, end);
+    const boxes = {};
+    if (at.battery !== undefined)
+        boxes.battery = [at.battery, at.battery + BATTERY_WIDTH(state.battery)];
+    if (at.wifi !== undefined)
+        boxes.wifi = [at.wifi, at.wifi + WIFI_W];
+    if (at.signal !== undefined)
+        boxes.mobile = [at.signal, at.signal + SIGNAL_W];
+    return boxes;
+}
+
 // The right-hand system icons: the camera chip while a camera is in use, mobile signal, Wi-Fi, battery, right-aligned
 // at @end (screen px) and centred on @centerY; the shade header draws the same cluster
 export function paintSystemIcons(cr, state, end, centerY) {

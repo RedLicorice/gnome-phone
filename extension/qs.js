@@ -16,7 +16,7 @@ import {Canvas, hasIcon, paintIcon, VectorIcon} from './icons.js';
 import {animate, animateSpring, clamp, lerp, Spring} from './motion.js';
 import {bindColor, bindFont, Color, cogl, gild, mix, restyleActor, rgba, setSource, SurfaceEffect} from './palette.js';
 import {openSettings} from './settings.js';
-import {inkBox, SystemIcons} from './statusbar.js';
+import {inkBox, SystemIcons, systemIconBoxes} from './statusbar.js';
 import {px, screenPixels, SCALE, SCREEN_H, SCREEN_W} from './units.js';
 
 // --- geometry, screen px (spec §3)
@@ -74,6 +74,7 @@ const CARRIER_QS_TOP = 110;
 const HEADER_FADE_OUT = 0.14;           // combined_qs_header_scene.xml keyframes
 const HEADER_FADE_IN = 0.58;
 const HEADER_DISPLACEMENT = 0.1066;
+const TAP_BAND = 120;                   // the status items' tap band through the icon row (the icons are 39 px tall)
 
 // fonts fitted to the stills' pixels (Google Sans Flex, rounded)
 const TILE_LABEL_FONT = [14, 600];              // variable-title-small-emphasized
@@ -95,6 +96,14 @@ const TILE_COLORS = {
 
 const MOBILE_ICONS = ['ic_signal_cellular_0_4_bar', 'ic_signal_cellular_1_4_bar', 'ic_signal_cellular_2_4_bar',
     'ic_signal_cellular_3_4_bar', 'ic_signal_cellular_4_4_bar'];
+
+// The header's status items (Android's status bar icons as the shade shows them): a tap opens Neo Settings on the page
+// that item is about. The tiles below keep their toggle; a long press on one opens the same page.
+const STATUS_ITEMS = [
+    {key: 'mobile', panel: 'wwan', name: 'Mobile data'},
+    {key: 'wifi', panel: 'wifi', name: 'Wi-Fi'},
+    {key: 'battery', panel: 'battery', name: 'Battery'},
+];
 
 
 // The tiles of this phone, in AOSP's default order (no power-profiles-daemon: battery saver shows unavailable)
@@ -555,9 +564,10 @@ class FooterButton extends St.Button {
 
 const ShadeHeader = GObject.registerClass(
 class ShadeHeader extends St.Widget {
-    constructor(state) {
+    constructor(state, shade) {
         super({width: px(SCREEN_W), height: px(260)});
         this._state = state;
+        this._shade = shade;
 
         this._clock = bindColor(bindFont(new Clutter.Text(), ...CLOCK_FONT), Color.onWall);
         this._bigClock = bindColor(bindFont(new Clutter.Text({visible: false}), ...CLOCK_BIG_FONT), Color.onWall);
@@ -567,12 +577,50 @@ class ShadeHeader extends St.Widget {
         for (const child of [this._icons, this._clock, this._bigClock, this._date, this._carrier])
             this.add_child(child);
 
+        // the status items take a tap: the cluster's icons themselves, moved with it (they fade with it too). Above the
+        // icons but clear of the camera chip, which lies left of the signal bars
+        this._status = [];
+        for (const item of STATUS_ITEMS) {
+            const button = new St.Button({
+                reactive: true, can_focus: true, visible: false, accessible_name: item.name,
+                style: 'background-color: transparent;',
+            });
+            button.connect('clicked', () => {
+                this._shade?.close?.();
+                openSettings(item.panel);
+            });
+            this._status.push({item, button});
+            this.add_child(button);
+        }
+        this._iconsPos = ICONS_QQS;
+        this._iconsAlpha = 1;
+
         this._wallClock = new GnomeDesktop.WallClock({time_only: true});
         this._wallClock.connectObject('notify::clock', () => this._syncTime(), this);
-        state.connectObject('changed', () => this._syncCarrier(), this);
+        state.connectObject('changed', () => {
+            this._syncCarrier();
+            this._syncStatusItems();
+        }, this);
         this._q = 0;
         this._syncTime();
         this._syncCarrier();
+    }
+
+    // each status item's tap box over its icon: the item, its box [x0, x1] from the icons' layout, and a finger's band
+    // of height for the vertical
+    _syncStatusItems() {
+        const boxes = systemIconBoxes(this._state, ICONS_QQS[0]);
+        const [x, y] = this._iconsPos, alpha = this._iconsAlpha;
+        for (const {item, button} of this._status) {
+            const box = boxes[item.key];
+            button.visible = !!box && alpha > 0;
+            button.opacity = Math.round(255 * alpha);
+            if (!box)
+                continue;
+            const [x0, x1] = box;
+            button.set_position(px(x - ICONS_QQS[0] + x0), px(y - TAP_BAND / 2));
+            button.set_size(px(x1 - x0), px(TAP_BAND));
+        }
     }
 
     _syncTime() {
@@ -628,6 +676,9 @@ class ShadeHeader extends St.Widget {
         const icons = keyed(ICONS_QQS, ICONS_QS);
         this._icons.set_position(px(icons.x - ICONS_QQS[0]), px(icons.y - ICONS_QQS[1]));
         this._icons.opacity = Math.round(255 * icons.alpha);
+        this._iconsPos = [icons.x, icons.y];
+        this._iconsAlpha = icons.alpha;
+        this._syncStatusItems();
 
         // the carrier only fades in, from 58 %
         const ink = inkBox(this._carrier);
@@ -646,7 +697,7 @@ class QSPanel extends St.Widget {
         this._state = state;
         this._shade = shade;
 
-        this._header = new ShadeHeader(state);
+        this._header = new ShadeHeader(state, shade);
         this.add_child(this._header);
 
         this._brightness = new BrightnessSlider(state, shade);
