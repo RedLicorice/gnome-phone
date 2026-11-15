@@ -19,4 +19,9 @@ void cam_list_dialog     (GtkWidget *parent, const char *title, const char *cons
 typedef void (*CamLocationDone) (gboolean turn_on, gpointer data);
 void cam_location_dialog (GtkWidget *parent, CamLocationDone done, gpointer data);
 
+/* A passphrase asked for (an API key code that is encrypted): `message` under the title, a hidden field, Cancel and
+ * Import. @passphrase is handed over (wipe it with cam_scrub), or NULL for Cancel, Back or a tap outside. */
+typedef void (*CamPassphraseDone) (char *passphrase, gpointer data);
+void cam_passphrase_dialog (GtkWidget *parent, const char *message, CamPassphraseDone done, gpointer data);
+
 G_END_DECLS

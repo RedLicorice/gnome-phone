@@ -2405,6 +2405,14 @@ grid_from_name (const char *name)
          : g_str_equal (name, "golden") ? CAM_GRID_GOLDEN : CAM_GRID_OFF;
 }
 
+static gboolean start_scan = FALSE;
+
+void
+cam_window_set_start_scan (gboolean scan)
+{
+  start_scan = scan;
+}
+
 static void
 restore (CamView *self)
 {
@@ -2419,6 +2427,8 @@ restore (CamView *self)
   CamMode last = g_str_equal (mode, "video") ? CAM_MODE_VIDEO : g_str_equal (mode, "qr") ? CAM_MODE_SCAN
                                                                                           : CAM_MODE_PHOTO;
 
+  if (start_scan)
+    last = CAM_MODE_SCAN;           /* `--scan`: this once; the saved mode stays what it was */
   self->grid = grid_from_name (grid);
   self->timer = g_settings_get_int (self->settings, "timer-mode");
   self->wide = g_str_equal (aspect, "16:9");
@@ -2469,7 +2479,8 @@ on_barcode_found (CamPipeline *pipeline, const char *text, CamView *self)
   if (self->mode != CAM_MODE_SCAN || self->scanning_paused || !self->running)
     return;
   self->scanning_paused = TRUE;
-  g_message ("scan: %s", text);
+  /* a key code is a secret: never in the log */
+  g_message ("scan: %s", cam_qr_is_key (text) ? "(a Minerva key code)" : text);
   cam_qr_sheet_show (GTK_WIDGET (self), text, on_qr_dismissed, g_object_ref (self));
 }
 
@@ -2611,4 +2622,19 @@ cam_window_volume_key (GtkWindow *window, int direction)
 
   if (content && CAM_IS_VIEW (content))
     volume_key (CAM_VIEW (content), direction);
+}
+
+void
+cam_window_show_scan (GtkWindow *window)
+{
+  GtkWidget *content = neo_window_get_overlay (GTK_WIDGET (window))
+                       ? gtk_overlay_get_child (neo_window_get_overlay (GTK_WIDGET (window))) : NULL;
+  CamView *self;
+
+  if (!content || !CAM_IS_VIEW (content))
+    return;
+  self = CAM_VIEW (content);
+  if (self->state == ST_IDLE && self->mode != CAM_MODE_SCAN
+      && cam_mode_selector_is_available (CAM_MODE_SELECTOR (self->modes), CAM_MODE_SCAN))
+    set_mode (self, CAM_MODE_SCAN, TRUE);
 }

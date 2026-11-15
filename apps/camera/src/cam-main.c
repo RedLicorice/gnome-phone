@@ -5,7 +5,11 @@
  * knows a phone: the cameras, their facing and rotation come from libcamera, the flash from the LED class, the
  * encoder from a measurement (cam-encoder.h). The app's settings are GSettings de.yesman.Camera.
  *
- * `neo-camera --probe-encoder ELEMENT` is the encoder measurement's child process (cam-encoder.h). */
+ * `neo-camera --probe-encoder ELEMENT` is the encoder measurement's child process (cam-encoder.h).
+ *
+ * `neo-camera --scan` starts straight in SCAN (the QR and barcode reader), as Settings' "Import from QR code" does;
+ * the saved mode is left as it was. If the Camera is already running, that window switches to SCAN and this process
+ * exits at once. */
 #include "cam-encoder.h"
 #include "cam-window.h"
 
@@ -69,6 +73,37 @@ on_activate (GApplication *app, gpointer data)
   gtk_window_present (window);
 }
 
+/* `--scan`, before the application is registered: a running Camera is told through its "scan" action, a new one
+ * starts in SCAN */
+static gint
+on_local_options (GApplication *app, GVariantDict *options, gpointer data)
+{
+  if (!g_variant_dict_contains (options, "scan"))
+    return -1;
+  g_application_register (app, NULL, NULL);
+  if (g_application_get_is_remote (app))
+    {
+      g_action_group_activate_action (G_ACTION_GROUP (app), "scan", NULL);
+      return 0;
+    }
+  cam_window_set_start_scan (TRUE);
+  return -1;
+}
+
+static void
+on_scan (GSimpleAction *action, GVariant *parameter, gpointer data)
+{
+  GtkWindow *window = gtk_application_get_active_window (GTK_APPLICATION (data));
+
+  if (window)
+    cam_window_show_scan (window);
+  else
+    {
+      cam_window_set_start_scan (TRUE);
+      g_application_activate (G_APPLICATION (data));
+    }
+}
+
 /* SIGTERM (the session ending) and SIGINT close the windows as a close would: a recording is finished (the app is
  * held until its file is whole) and the flash LED goes off */
 static gboolean
@@ -97,6 +132,11 @@ main (int argc, char **argv)
 {
   static const GActionEntry actions[] = {
     { .name = "volume-key", .activate = on_volume_key, .parameter_type = "i" },
+    { .name = "scan", .activate = on_scan },
+  };
+  static const GOptionEntry options[] = {
+    { "scan", 0, 0, G_OPTION_ARG_NONE, NULL, "Start in SCAN, the QR and barcode reader", NULL },
+    { NULL }
   };
   g_autoptr(GtkApplication) app = NULL;
 
@@ -112,6 +152,8 @@ main (int argc, char **argv)
 
   app = gtk_application_new (APP_ID, G_APPLICATION_DEFAULT_FLAGS);
   g_action_map_add_action_entries (G_ACTION_MAP (app), actions, G_N_ELEMENTS (actions), app);
+  g_application_add_main_option_entries (G_APPLICATION (app), options);
+  g_signal_connect (app, "handle-local-options", G_CALLBACK (on_local_options), NULL);
   g_signal_connect (app, "startup", G_CALLBACK (on_startup), NULL);
   g_signal_connect (app, "activate", G_CALLBACK (on_activate), NULL);
   g_unix_signal_add (SIGTERM, on_terminate, app);

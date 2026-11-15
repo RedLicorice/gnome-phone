@@ -18,6 +18,8 @@ struct Ak {
   JsonObject *data;         /* the last `providers list --json` */
   Detail     *detail;       /* the provider page that is open, to refresh in place */
   gboolean    busy;
+  gboolean    scanning;     /* the camera was opened to scan a key and the list has not been read since */
+  gboolean    watching;     /* the window's "is-active" is followed (once) */
 };
 
 /* a provider page: what it is, its key, and for the owner's own endpoints Edit and Delete */
@@ -472,6 +474,59 @@ add_clicked (GtkWidget *row, gpointer data)
   provider_form (data, NULL);
 }
 
+/* ---- import from a QR code ----
+ * The camera does the scanning and the import (neo-camera --scan hands a "minerva-key:" code to
+ * `minerva-config key import`); this page only opens it and reads the list again when it is done. */
+
+/* the camera's process ended: a key may have been saved */
+static void
+camera_exited (GObject *src, GAsyncResult *res, gpointer data)
+{
+  AdwNavigationPage *page = data;
+  Ak *ak = g_object_get_data (G_OBJECT (page), "ak");
+  g_autoptr (GError) e = NULL;
+  g_subprocess_wait_finish (G_SUBPROCESS (src), res, &e);
+  if (ak) {
+    ak->scanning = FALSE;
+    ak_refresh (ak);
+  }
+  g_object_unref (page);
+}
+
+/* a camera that was running already hands the scan over and exits at once: read the list when the window is
+ * back in front instead */
+static void
+window_activity (GObject *window, GParamSpec *pspec, gpointer data)
+{
+  Ak *ak = g_object_get_data (G_OBJECT (data), "ak");   /* the page: the signal is tied to its life */
+  if (ak && gtk_window_is_active (GTK_WINDOW (window)) && ak->scanning) {
+    ak->scanning = FALSE;
+    ak_refresh (ak);
+  }
+}
+
+static void
+import_clicked (GtkWidget *row, gpointer data)
+{
+  Ak *ak = data;
+  g_autoptr (GError) err = NULL;
+  GSubprocess *p = g_subprocess_new (G_SUBPROCESS_FLAGS_NONE, &err, "neo-camera", "--scan", NULL);
+  if (!p) {
+    g_autofree char *t = g_strdup_printf ("Could not open the camera: %s", err->message);
+    say (ak, t, TRUE);
+    return;
+  }
+  say (ak, "", FALSE);
+  ak->scanning = TRUE;
+  GtkRoot *root = gtk_widget_get_root (row);
+  if (!ak->watching && GTK_IS_WINDOW (root)) {
+    ak->watching = TRUE;
+    g_signal_connect_object (root, "notify::is-active", G_CALLBACK (window_activity), ak->page, 0);
+  }
+  g_subprocess_wait_async (p, NULL, camera_exited, g_object_ref (ak->page));
+  g_object_unref (p);
+}
+
 /* ---- the list ---- */
 
 static void
@@ -533,6 +588,10 @@ ns_page_api_keys (GtkWidget *row, gpointer data)
   ak->msg = ns_note (c, "");
   gtk_widget_set_visible (ak->msg, FALSE);
   gtk_widget_set_margin_top (ak->msg, 0);
+
+  GtkWidget *scan = ns_group (c, NULL);
+  GtkWidget *import = ns_row (scan, "camera-photo-symbolic", "blue", "Import from QR code", "Scan a key from another device");
+  ns_row_on_activate (import, import_clicked, ak);
 
   ak->list = ns_group (c, "Providers");
   ns_note (c, "Tap a provider to set or remove its key. A key is never shown again, only its last four characters. "

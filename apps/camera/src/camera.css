@@ -147,6 +147,15 @@ neo-snackbar-host.cam-snackbar .neo-text-button {
   font-weight: 700;
 }
 
+/* a key code's Import button and a failed import's line */
+.cam-qr-import {
+  color: @neo_secondary;
+}
+
+.cam-qr-data.cam-qr-error {
+  color: @neo_error;
+}
+
 /* --- the dialogs (themes_settingslib: AlertDialogs in colorSurface, 16 dp corners) */
 neo-dialog-scrim.cam-settings-dialog > .neo-dialog,
 neo-dialog-scrim.cam-location > .neo-dialog {

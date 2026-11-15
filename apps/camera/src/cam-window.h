@@ -15,6 +15,10 @@ GtkWindow *cam_window_new        (GtkApplication *app);
 /* the shell's "volume-key" action: +1 up, -1 down */
 void       cam_window_volume_key (GtkWindow *window, int direction);
 
+/* `neo-camera --scan`: the next window starts in SCAN, and an open one switches to it */
+void       cam_window_set_start_scan (gboolean scan);
+void       cam_window_show_scan      (GtkWindow *window);
+
 /* argv of the process, for starting it afresh (cam_pipeline_needs_fresh_process) */
 void       cam_window_remember_argv (char **argv);
 
