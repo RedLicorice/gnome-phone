@@ -672,6 +672,13 @@ font_row (GtkWidget *g, GSettings *look, const char *title, const char *key, gbo
   g_settings_schema_unref (schema);
 }
 
+static gboolean
+renaissance_get (GValue *value, GVariant *v, gpointer data)
+{
+  g_value_set_boolean (value, !g_strcmp0 (g_variant_get_string (v, NULL), "renaissance"));
+  return TRUE;
+}
+
 void
 ns_page_display (GtkWidget *row, gpointer data)
 {
@@ -685,6 +692,20 @@ ns_page_display (GtkWidget *row, gpointer data)
     static const char *const looks[] = { "default", "renaissance", NULL };
     static const char *const look_labels[] = { "Stock", "Cyberpunk Renaissance", NULL };
     ns_row_choice (g, "Look", look, "name", looks, look_labels);
+    /* the two variants: the day one is used while Dark mode (below) is off, the night one while it is on. Picking
+     * applies at once (the choice writes the setting, libneo, the shell and this window follow it live). Older schemas
+     * have no such keys. */
+    if (ns_has_key (look, "day-look") && ns_has_key (look, "night-look")) {
+      static const char *const days[] = { "marble", "sea", NULL };
+      static const char *const day_labels[] = { "Marmo", "Marino", NULL };
+      static const char *const nights[] = { "forest", "plum", NULL };
+      static const char *const night_labels[] = { "Bosco", "Prugna", NULL };
+      GtkWidget *day = ns_row_choice (g, "Day look", look, "day-look", days, day_labels);
+      GtkWidget *night = ns_row_choice (g, "Night look", look, "night-look", nights, night_labels);
+      /* they only mean something while the Renaissance look is on */
+      g_settings_bind_with_mapping (look, "name", day, "visible", G_SETTINGS_BIND_GET, renaissance_get, NULL, NULL, NULL);
+      g_settings_bind_with_mapping (look, "name", night, "visible", G_SETTINGS_BIND_GET, renaissance_get, NULL, NULL, NULL);
+    }
     GSettingsSchema *schema = NULL;
     g_object_get (look, "settings-schema", &schema, NULL);
     if (g_settings_schema_has_key (schema, "font-display")) {

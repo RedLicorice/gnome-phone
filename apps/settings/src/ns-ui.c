@@ -1,5 +1,6 @@
 /* Neo Settings' building blocks (see ns-ui.h). */
 #include "ns-ui.h"
+#include "ns-look.h"
 
 #include <math.h>
 
@@ -345,8 +346,8 @@ ns_row (GtkWidget *group, const char *icon, const char *color, const char *title
   gtk_widget_add_css_class (row, "ns-row");
   GtkWidget *h = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 18);
   if (icon) {
-    GtkWidget *bubble = gtk_image_new_from_icon_name (icon);
-    gtk_image_set_pixel_size (GTK_IMAGE (bubble), 20);
+    GtkWidget *bubble = gtk_image_new ();
+    ns_look_set_icon (GTK_IMAGE (bubble), icon);   /* the icon theme's, or the Renaissance look's bare glyph */
     gtk_widget_set_valign (bubble, GTK_ALIGN_CENTER);
     gtk_widget_add_css_class (bubble, "ns-icon");
     g_autofree char *cls = g_strconcat ("ns-", color ? color : "blue", NULL);

@@ -2,5 +2,9 @@
 <gresources>
   <gresource prefix="/de/yesman/NeoSettings">
     <file>style.css</file>
+    <file>looks/ns-look-marble.css</file>
+    <file>looks/ns-look-sea.css</file>
+    <file>looks/ns-look-forest.css</file>
+    <file>looks/ns-look-plum.css</file>
   </gresource>
 </gresources>

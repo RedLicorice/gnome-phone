@@ -42,55 +42,40 @@ static const struct {
   [NEO_WHITE]                     = { "neo_white",                     0xffffff },
 };
 
-/* "Cyberpunk meets Italian Renaissance", the optional look (setting de.yesman.GnomePhone.Theme name=renaissance):
- * an OLED night of lapis-tinted black, gold leaf as the accent, terracotta for the second one, parchment text and
- * amber (the camera eye) as the only warm edge light. Same roles, other values, so every widget follows; neo-renaissance.css adds the
- * ornament. Michelangelus (not shipped) is named in that file with fallbacks. */
-static const guint32 renaissance_rgb[NEO_N_COLORS] = {
-  [NEO_PRIMARY]                   = 0xd9b26a,
-  [NEO_ON_PRIMARY]                = 0x2a1d04,
-  [NEO_PRIMARY_CONTAINER]         = 0x26242f,   /* lapis only as a small accent (neo_lapis), fills stay dark */
-  [NEO_ON_PRIMARY_CONTAINER]      = 0xf3dc9f,
-  [NEO_INVERSE_PRIMARY]           = 0x8a6a2c,
-  [NEO_SECONDARY]                 = 0xe0936f,
-  [NEO_ON_SECONDARY]              = 0x3d1a0b,
-  [NEO_SECONDARY_CONTAINER]       = 0x4a2a1c,
-  [NEO_ON_SECONDARY_CONTAINER]    = 0xf6cdb8,
-  [NEO_TERTIARY]                  = 0xff9f2e,
-  [NEO_ON_TERTIARY]               = 0x00343c,
-  [NEO_TERTIARY_CONTAINER]        = 0x0a4650,
-  [NEO_ON_TERTIARY_CONTAINER]     = 0xb2f5ff,
-  [NEO_ERROR]                     = 0xff6f9c,
-  [NEO_ERROR_CONTAINER]           = 0x6b1237,
-  [NEO_SURFACE]                   = 0x08070d,
-  [NEO_SURFACE_CONTAINER_LOWEST]  = 0x000000,
-  [NEO_SURFACE_CONTAINER_LOW]     = 0x0d0c15,
-  [NEO_SURFACE_CONTAINER]         = 0x13121e,
-  [NEO_SURFACE_CONTAINER_HIGH]    = 0x1a1927,
-  [NEO_SURFACE_CONTAINER_HIGHEST] = 0x211f31,
-  [NEO_SURFACE_BRIGHT]            = 0x2a283d,
-  [NEO_ON_SURFACE]                = 0xf0e6d0,
-  [NEO_ON_SURFACE_VARIANT]        = 0xbdb299,
-  [NEO_OUTLINE]                   = 0x6e7280,   /* silver-dim: tools/theme/palette.json */
-  [NEO_OUTLINE_VARIANT]           = 0x3a3d4a,
-  [NEO_INVERSE_SURFACE]           = 0xf3ead7,
-  [NEO_WHITE]                     = 0xffffff,
-};
+#include "neo-looks.h"   /* generated from tools/theme/palette.json: the four looks' role tables and extras */
 
-static gboolean       renaissance;       /* the theme in force */
-static GtkCssProvider *provider, *theme_provider;
-static GSettings      *theme_settings;
+/* "Cyberpunk meets Italian Renaissance", the optional look (setting de.yesman.GnomePhone.Theme name=renaissance), in
+ * four variants: Giorno Marmo and Marino (light), Notte Bosco and Prugna (dark). The effective one is the Theme's
+ * night-look when the system style (org.gnome.desktop.interface color-scheme) is prefer-dark, else its day-look. Same
+ * roles, other values, so every widget follows; neo-renaissance.css adds the ornament, from the look's extras (the
+ * gold, silver, card and scrim colours: @neo_gold ...). Michelangelus (not shipped) is named in that file with
+ * fallbacks. */
+static const NeoLook   *look;            /* the look in force, NULL in the stock look */
+static GtkCssProvider  *provider, *theme_provider;
+static GSettings       *theme_settings, *iface_settings;
 
 static guint32
 rgb_of (NeoColor color)
 {
-  return renaissance ? renaissance_rgb[color] : palette[color].rgb;
+  return look ? look->role[color] : palette[color].rgb;
 }
 
 gboolean
 neo_theme_is_renaissance (void)
 {
-  return renaissance;
+  return look != NULL;
+}
+
+const char *
+neo_theme_look (void)
+{
+  return look ? look->id : NULL;
+}
+
+gboolean
+neo_theme_is_day (void)
+{
+  return look && look->day;
 }
 
 GdkRGBA
@@ -134,6 +119,24 @@ palette_css (void)
   GString *css = g_string_new (NULL);
   for (int i = 0; i < NEO_N_COLORS; i++)
     g_string_append_printf (css, "@define-color %s #%06x;\n", palette[i].css, rgb_of (i));
+  if (look)
+    {
+      /* the look's extras (palette.json), for neo-renaissance.css: colour names are per sheet, so every sheet that
+       * names them gets the definitions */
+      const struct { const char *css; guint32 rgb; } extra[] = {
+        { "neo_ink", look->ink }, { "neo_gold", look->gold }, { "neo_gold_hi", look->gold_hi },
+        { "neo_accent", look->accent }, { "neo_silver", look->silver }, { "neo_silver_dim", look->silver_dim },
+        { "neo_wall_a", look->wall_a }, { "neo_wall_b", look->wall_b }, { "neo_wall_vein", look->wall_vein },
+        { "neo_card", look->card }, { "neo_line", look->line }, { "neo_hover", look->hover },
+        { "neo_scrim", look->scrim }, { "neo_chisel_lit", look->chisel_lit },
+        { "neo_chisel_dark", look->chisel_dark }, { "neo_amber", look->glow }, { "neo_lapis", look->lapis },
+      };
+      for (guint i = 0; i < G_N_ELEMENTS (extra); i++)
+        g_string_append_printf (css, "@define-color %s #%06x;\n", extra[i].css, extra[i].rgb);
+      g_string_append_printf (css, "@define-color neo_card_a %s;\n@define-color neo_rim %s;\n"
+                                   "@define-color neo_cardsh %s;\n",
+                              look->card_a, look->rim, look->cardsh);
+    }
   return css;
 }
 
@@ -181,7 +184,7 @@ fonts_css (GString *css)
 
 /* the palette as @define-color lines, then neo.css. The Renaissance theme is a second sheet above the apps' own (USER
  * priority, with the palette again: colour names are per sheet): the ornament, and the recoloured palettes of the
- * apps that carry their own (neo-renaissance-apps.css, generated) */
+ * apps that carry their own (neo-renaissance-apps-day.css or -night.css, generated, by the look's scheme) */
 static void
 load_css (void)
 {
@@ -191,9 +194,10 @@ load_css (void)
   g_string_free (css, TRUE);
 
   css = palette_css ();
-  if (renaissance)
+  if (look)
     {
-      add_sheet (css, "/de/yesman/neo/neo-renaissance-apps.css");
+      add_sheet (css, look->day ? "/de/yesman/neo/neo-renaissance-apps-day.css"
+                                : "/de/yesman/neo/neo-renaissance-apps-night.css");
       add_sheet (css, "/de/yesman/neo/neo-renaissance.css");
       if (theme_settings)
         fonts_css (css);
@@ -202,30 +206,90 @@ load_css (void)
   g_string_free (css, TRUE);
 }
 
-/* the setting, when its schema is installed (a phone without the theme setting stays on the stock look) */
-static gboolean
-theme_wanted (void)
+/* a key of the theme setting, when the schema has it (a phone with an older schema has no day-look and night-look) */
+static char *
+theme_string (const char *key)
 {
-  if (!theme_settings)
-    return FALSE;
-  g_autofree char *name = g_settings_get_string (theme_settings, "name");
-  return g_strcmp0 (name, "renaissance") == 0;
+  GSettingsSchema *schema = NULL;
+  char *value = NULL;
+
+  g_object_get (theme_settings, "settings-schema", &schema, NULL);
+  if (schema && g_settings_schema_has_key (schema, key))
+    value = g_settings_get_string (theme_settings, key);
+  g_clear_pointer (&schema, g_settings_schema_unref);
+  return value;
 }
 
+/* The look in force: none while the setting is not 'renaissance' (or its schema is not installed: such a phone stays on
+ * the stock look); else the night-look when the system style is dark, the day-look when it is not. An older schema
+ * without the two keys has the one look of v3, plum, at night, and marble by day. */
+static const NeoLook *
+look_wanted (void)
+{
+  g_autofree char *name = theme_settings ? g_settings_get_string (theme_settings, "name") : NULL;
+  if (g_strcmp0 (name, "renaissance") != 0)
+    return NULL;
+  gboolean dark = iface_settings && g_settings_get_enum (iface_settings, "color-scheme") == 1;   /* prefer-dark */
+  g_autofree char *id = theme_string (dark ? "night-look" : "day-look");
+  if (!id)
+    id = g_strdup (dark ? "plum" : "marble");
+  for (guint i = 0; i < G_N_ELEMENTS (neo_looks); i++)
+    if (g_strcmp0 (neo_looks[i].id, id) == 0)
+      return &neo_looks[i];
+  for (guint i = 0; i < G_N_ELEMENTS (neo_looks); i++)
+    if (neo_looks[i].day == !dark)
+      return &neo_looks[i];
+  return NULL;
+}
+
+/* GTK's own scheme for the widgets libneo leaves to the theme (scrollbars, popovers, menus): dark in the stock look and
+ * in the night looks (the apps are always dark there, whatever the system's preference: Theme.DeskClock's parent is a
+ * Dark theme), light in the day looks */
+static void
+apply_gtk_scheme (void)
+{
+  gboolean day = look && look->day;
+#if GTK_CHECK_VERSION (4, 20, 0)
+  g_object_set (gtk_settings_get_default (), "gtk-interface-color-scheme",
+                day ? GTK_INTERFACE_COLOR_SCHEME_LIGHT : GTK_INTERFACE_COLOR_SCHEME_DARK, NULL);
+#else
+  g_object_set (gtk_settings_get_default (), "gtk-application-prefer-dark-theme", !day, NULL);
+#endif
+}
+
+/* the look's classes on a neo window: neo-look-day or neo-look-night, and neo-look-<id>; none in the stock look */
+static void
+mark_window (GtkWidget *window)
+{
+  static const char *const classes[] = { "neo-look-day", "neo-look-night", "neo-look-marble", "neo-look-sea",
+                                         "neo-look-forest", "neo-look-plum" };
+  for (guint i = 0; i < G_N_ELEMENTS (classes); i++)
+    gtk_widget_remove_css_class (window, classes[i]);
+  if (!look)
+    return;
+  g_autofree char *id = g_strconcat ("neo-look-", look->id, NULL);
+  gtk_widget_add_css_class (window, look->day ? "neo-look-day" : "neo-look-night");
+  gtk_widget_add_css_class (window, id);
+}
+
+/* the theme setting or the system style changed: the look is worked out again, and everything follows it, live */
 static void
 on_theme_changed (GSettings *settings, const char *key, gpointer data)
 {
-  gboolean want = theme_wanted ();
+  const NeoLook *want = look_wanted ();
   /* a font chain changed while the look is on: reload the sheet, the widgets re-lay out on their own */
-  if (want == renaissance && !(renaissance && g_str_has_prefix (key, "font-")))
+  if (want == look && !(look && g_str_has_prefix (key, "font-")))
     return;
-  renaissance = want;
+  look = want;
+  apply_gtk_scheme ();
   load_css ();
   /* widgets that draw with neo_color () pick the new values on their next draw */
   GListModel *windows = gtk_window_get_toplevels ();
   for (guint i = 0; i < g_list_model_get_n_items (windows); i++)
     {
       GtkWidget *w = g_list_model_get_item (windows, i);
+      if (gtk_widget_has_css_class (w, "neo"))
+        mark_window (w);
       gtk_widget_queue_draw (w);
       g_object_unref (w);
     }
@@ -280,12 +344,39 @@ hls_to_rgb (double h, double l, double s, GdkRGBA *out)
 GdkRGBA
 neo_theme_map_rgba (const GdkRGBA *c)
 {
-  if (!renaissance)
+  if (!look)
     return *c;
   double h, l, s;
   GdkRGBA out = { 0, 0, 0, c->alpha };
   rgb_to_hls (c->red, c->green, c->blue, &h, &l, &s);
   double deg = h * 360;
+  if (look->day)
+    {
+      /* by day the apps' dark surfaces turn light and their light text dark (same hue families): neutrals invert
+       * their lightness, dark teal (bars, containers) turns pale gold, pastel teal (FABs, accents) turns deep gold */
+      if (s < 0.14)
+        {
+          if (l > 0.93)
+            out = (GdkRGBA) { 0x2b / 255., 0x2c / 255., 0x31 / 255., c->alpha };
+          else if (l > 0.75)
+            hls_to_rgb (225. / 360, 0.2 + (1 - l) * 0.9, 0.08, &out);
+          else if (l < 0.45)
+            hls_to_rgb (40. / 360, 0.97 - l * 0.45, 0.10, &out);
+          else
+            hls_to_rgb (225. / 360, l * 0.85, 0.06, &out);
+        }
+      else if (deg >= 140 && deg <= 230 && s < 0.95)
+        {
+          if (l < 0.42)
+            hls_to_rgb (41. / 360, 0.97 - l * 0.45, 0.45, &out);
+          else
+            hls_to_rgb (38. / 360, 0.62 - (MIN (l, 0.78) - 0.42) * 0.55, 0.52, &out);
+        }
+      else
+        return *c;
+      out.alpha = c->alpha;
+      return out;
+    }
   if (s < 0.14)
     {
       if (l > 0.93)
@@ -320,15 +411,24 @@ neo_init (void)
 
   GSettingsSchemaSource *source = g_settings_schema_source_get_default ();
   GSettingsSchema *schema = source ? g_settings_schema_source_lookup (source, "de.yesman.GnomePhone.Theme", TRUE) : NULL;
+  GSettingsSchema *iface = source ? g_settings_schema_source_lookup (source, "org.gnome.desktop.interface", TRUE) : NULL;
+  if (iface && g_settings_schema_has_key (iface, "color-scheme"))
+    {
+      iface_settings = g_settings_new_full (iface, NULL, NULL);
+      g_signal_connect (iface_settings, "changed::color-scheme", G_CALLBACK (on_theme_changed), NULL);
+    }
+  g_clear_pointer (&iface, g_settings_schema_unref);
   if (schema)
     {
       theme_settings = g_settings_new_full (schema, NULL, NULL);
       g_settings_schema_unref (schema);
       g_signal_connect (theme_settings, "changed::name", G_CALLBACK (on_theme_changed), NULL);
+      g_signal_connect (theme_settings, "changed::day-look", G_CALLBACK (on_theme_changed), NULL);
+      g_signal_connect (theme_settings, "changed::night-look", G_CALLBACK (on_theme_changed), NULL);
       g_signal_connect (theme_settings, "changed::font-display", G_CALLBACK (on_theme_changed), NULL);
       g_signal_connect (theme_settings, "changed::font-body", G_CALLBACK (on_theme_changed), NULL);
       g_signal_connect (theme_settings, "changed::font-mono", G_CALLBACK (on_theme_changed), NULL);
-      renaissance = theme_wanted ();
+      look = look_wanted ();
     }
 
   provider = gtk_css_provider_new ();
@@ -340,12 +440,7 @@ neo_init (void)
   gtk_style_context_add_provider_for_display (gdk_display_get_default (), GTK_STYLE_PROVIDER (theme_provider),
                                               GTK_STYLE_PROVIDER_PRIORITY_USER);
 
-  /* the apps are always dark, whatever the system's preference (Theme.DeskClock's parent is a Dark theme) */
-#if GTK_CHECK_VERSION (4, 20, 0)
-  g_object_set (gtk_settings_get_default (), "gtk-interface-color-scheme", GTK_INTERFACE_COLOR_SCHEME_DARK, NULL);
-#else
-  g_object_set (gtk_settings_get_default (), "gtk-application-prefer-dark-theme", TRUE, NULL);
-#endif
+  apply_gtk_scheme ();
 }
 
 /* ---- the window ------------------------------------------------------------------------------------------------ */
@@ -417,6 +512,7 @@ neo_window_new (GtkApplication *app)
   static gboolean shots;
   GtkWidget *window = gtk_application_window_new (app);
   gtk_widget_add_css_class (window, "neo");
+  mark_window (window);
   /* no title bar: the app draws its own 64 dp app bar, and on the phone the shell shows every window full screen */
   gtk_window_set_decorated (GTK_WINDOW (window), FALSE);
   gtk_window_set_default_size (GTK_WINDOW (window), 360, 760);

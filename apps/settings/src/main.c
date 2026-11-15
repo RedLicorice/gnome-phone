@@ -2,6 +2,7 @@
  * phone does; each entry is one of our own pages (ns-pages.h), or an app (Software). The services the pages
  * follow (NetworkManager, BlueZ, the sound server) are connected at start, in the background. */
 #include "ns-bt.h"
+#include "ns-look.h"
 #include "ns-net.h"
 #include "ns-pages.h"
 #include "ns-mc.h"
@@ -227,18 +228,6 @@ dark_changed (AdwStyleManager *sm, GParamSpec *ps, GtkWidget *win)
     gtk_widget_remove_css_class (win, "ns-dark");
 }
 
-/* the optional Renaissance look (de.yesman.GnomePhone.Theme name): a class on the window that style.css keys on, live
- * with the setting. (The theme's wallpaper is swapped in by the shell extension, theme.js.) */
-static void
-theme_changed (GSettings *theme, const char *key, GtkWidget *win)
-{
-  g_autofree char *name = g_settings_get_string (theme, "name");
-  if (g_strcmp0 (name, "renaissance") == 0)
-    gtk_widget_add_css_class (win, "ns-ren");
-  else
-    gtk_widget_remove_css_class (win, "ns-ren");
-}
-
 static GtkWidget *nav_view;
 
 static void
@@ -249,12 +238,6 @@ activate (GtkApplication *app, gpointer data)
     gtk_window_present (have);
     return;
   }
-  GtkCssProvider *css = gtk_css_provider_new ();
-  gtk_css_provider_load_from_resource (css, "/de/yesman/NeoSettings/style.css");
-  gtk_style_context_add_provider_for_display (gdk_display_get_default (), GTK_STYLE_PROVIDER (css),
-                                              GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-  g_object_unref (css);
-
   GtkWidget *win = adw_application_window_new (app);
   gtk_window_set_title (GTK_WINDOW (win), "Settings");
   gtk_window_set_default_size (GTK_WINDOW (win), 360, 720);
@@ -262,12 +245,9 @@ activate (GtkApplication *app, gpointer data)
   AdwStyleManager *sm = adw_style_manager_get_default ();
   g_signal_connect_object (sm, "notify::dark", G_CALLBACK (dark_changed), win, 0);
   dark_changed (sm, NULL, win);
-  GSettings *theme = ns_settings ("de.yesman.GnomePhone.Theme");
-  if (theme) {
-    g_signal_connect_object (theme, "changed::name", G_CALLBACK (theme_changed), win, 0);
-    theme_changed (theme, "name", win);
-    g_object_set_data_full (G_OBJECT (win), "ns-theme", theme, g_object_unref);
-  }
+  /* style.css with the tokens of the Renaissance look in force, and the look's classes on the window, live with the
+   * settings (the theme's wallpaper is swapped in by the shell extension, theme.js) */
+  ns_look_init (win);
   GtkWidget *nav = nav_view = adw_navigation_view_new ();
   ns_ui_init (ADW_NAVIGATION_VIEW (nav));
   adw_navigation_view_add (ADW_NAVIGATION_VIEW (nav), main_page ());
