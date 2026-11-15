@@ -19,6 +19,7 @@ struct Perm {
   GtkWidget *ask_mark, *auto_mark; /* the two mode rows: the chosen one's tick is shown */
   GtkWidget *gates, *base, *rules, *history, *fallbacks;
   GtkWidget *rules_none, *history_none, *model_row;
+  GtkWidget *rem_count, *rem_interval, *rem_final; /* the reminders rows: values of `status.reminders` */
   JsonObject *st;                  /* the last `status --json` */
   gboolean busy;
 };
@@ -375,6 +376,59 @@ classifier_fill (Perm *ak)
   ns_group_set_visible (ak->fallbacks, n > 0);
 }
 
+/* ---- the reminders: an unanswered question is asked again before it counts as a No ---- */
+
+/* `minerva-perm reminders set <flag> <value>` for a row, when the text is a number that makes sense */
+static void
+rem_set (Perm *ak, const char *flag, const char *text, gboolean whole, double lowest)
+{
+  char *end = NULL;
+  double v = g_ascii_strtod (text, &end);
+  if (!*text || *end || v < lowest || (whole && v != (int) v)) {
+    const char *t = whole ? "Reminders: a whole number, 0 or more." : "Seconds: a number, 1 or more.";
+    say (ak, t, TRUE);
+    return;
+  }
+  const char *const args[] = { "reminders", "set", flag, text, NULL };
+  perm_run (ak, args);
+}
+
+static void
+rem_count_entered (const char *text, gpointer data)
+{
+  rem_set (data, "--count", text, TRUE, 0);
+}
+
+static void
+rem_interval_entered (const char *text, gpointer data)
+{
+  rem_set (data, "--interval", text, FALSE, 1);
+}
+
+static void
+rem_final_entered (const char *text, gpointer data)
+{
+  rem_set (data, "--final", text, FALSE, 1);
+}
+
+static char *
+rem_number (JsonObject *r, const char *key)
+{
+  if (!r || !json_object_has_member (r, key))
+    return g_strdup ("");
+  return g_strdup_printf ("%g", json_object_get_double_member (r, key));
+}
+
+static void
+reminders_fill (Perm *ak)
+{
+  JsonObject *r = obj_of (ak->st, "reminders");
+  g_autofree char *c = rem_number (r, "count"), *i = rem_number (r, "interval_s"), *f = rem_number (r, "final_s");
+  ns_row_value_set (ak->rem_count, c);
+  ns_row_value_set (ak->rem_interval, i);
+  ns_row_value_set (ak->rem_final, f);
+}
+
 /* ---- history ---- */
 
 /* "Regola", "Classificatore", "Tu", "Sistema" come from `who`; `by` says the same in the log's own words */
@@ -501,6 +555,13 @@ detail_open (GtkWidget *row, gpointer data)
     ns_row_info (g, "Took", lat);
   g_free (lat);
 
+  if (json_object_has_member (e, "reminders") && json_object_get_int_member (e, "reminders") > 0) {
+    g_autofree char *n = g_strdup_printf ("%d", (int) json_object_get_int_member (e, "reminders"));
+    ns_row_info (g, "Reminders sent", n);
+  }
+  if (!g_strcmp0 (str_of (e, "reason_code"), "timeout"))
+    ns_row_info (g, "Answer", "No answer: counted as a No");
+
   const char *detail = str_of (e, "detail");
   if (*detail) {
     g = ns_group (c, "Details");
@@ -551,6 +612,7 @@ status_fill (Perm *ak)
   base_fill (ak);
   rules_fill (ak);
   classifier_fill (ak);
+  reminders_fill (ak);
 }
 
 static void
@@ -675,6 +737,14 @@ ns_page_permissions (GtkWidget *row, gpointer data)
   ak->fallbacks = ns_group (c, "Fallbacks");
   ns_note (c, "The classifier is only used in Auto. When it fails for any reason, Minerva asks you. The fallbacks "
               "are tried in this order; change them on the Minerva page.");
+
+  g = ns_group (c, "Reminders");
+  ak->rem_count = ns_row_value (g, "Reminders", "", FALSE, rem_count_entered, ak);
+  ak->rem_interval = ns_row_value (g, "Between reminders (s)", "", FALSE, rem_interval_entered, ak);
+  ak->rem_final = ns_row_value (g, "Last wait (s)", "", FALSE, rem_final_entered, ak);
+  ns_note (c, "A question nobody answers is asked again, not refused: this many reminders (notification, a short line "
+              "in Messages, and by voice only while the screen is on), this many seconds apart; after the last one "
+              "and the last wait it counts as a No.");
 
   g_signal_connect (page, "showing", G_CALLBACK (page_showing), ak);
   perm_refresh (ak);

@@ -48,6 +48,8 @@ status() {
  "classifier":{"model":"$MODEL",
                "fallbacks":["opencode/glm-5.3-flash-free","opencode/minimax-m3.1-flash-free"],
                "timeout_s":8},
+ "reminders":{"count":$(cat "$D/rem_count" 2>/dev/null || echo 2),"interval_s":$(cat "$D/rem_interval" 2>/dev/null || echo 60),
+              "final_s":$(cat "$D/rem_final" 2>/dev/null || echo 60),"voice":true,"messages":true,"total_s":180},
  "history_count":4}
 EOF
 }
@@ -108,6 +110,18 @@ case "$cmd" in
     shift || true
     [ "$sub" = set ] || { echo "unknown classifier command: $sub" >&2; exit 2; }
     if [ $# -gt 0 ]; then printf '%s\n' "$1" > "$D/model"; fi
+    echo ok ;;
+  reminders)
+    [ "${1:-}" = set ] || { echo "unknown reminders command: ${1:-}" >&2; exit 2; }
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --count) printf '%s\n' "$2" > "$D/rem_count"; shift 2 ;;
+        --interval) printf '%s\n' "$2" > "$D/rem_interval"; shift 2 ;;
+        --final) printf '%s\n' "$2" > "$D/rem_final"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
     echo ok ;;
   *) echo "unknown command: $cmd" >&2; exit 2 ;;
 esac
