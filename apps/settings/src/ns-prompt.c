@@ -1,7 +1,8 @@
-/* Minerva > Prompt: the two text editors of the page, the system prompt and the state template. Every label comes
- * from `prompt_ui` of `minerva-config status` (data: config/minerva_config/prompt_ui.json); the texts themselves are
- * read and written by `minerva-config prompt …` and `minerva-config state …`, which refuse a template that does not
- * render: the page shows that message under the editor and writes nothing. */
+/* Minerva > Prompt: the two long texts of the page, the system prompt and the state template, are edited in Neo
+ * Prompt (neo-prompt, the same page on the phone's own bar): here only their rows and Reset, the variables of the
+ * state and a preview of the block as it renders now. Every label comes from `prompt_ui` of `minerva-config status`
+ * (config/minerva_config/prompt_ui.json); the texts themselves are read and written by Neo Prompt through
+ * `minerva-config prompt …` and `minerva-config state …`, which refuse a template that does not render. */
 #include "ns-pages.h"
 #include "ns-mc.h"
 #include "ns-ui.h"
@@ -15,7 +16,6 @@
 typedef struct {
   GObject    *owner;       /* the page: kept alive by the running jobs */
   JsonObject *ui;
-  GtkWidget  *sys_view, *state_view;
   GtkWidget  *sys_msg, *state_msg, *vars_g, *preview;
 } Pr;
 
@@ -30,40 +30,6 @@ static const char *
 ui_str (Pr *p, const char *section, const char *key)
 {
   return str_of (obj_of (p->ui, section), key);
-}
-
-static GtkWidget *
-editor_new (void)
-{
-  GtkWidget *view = gtk_text_view_new ();
-  gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (view), GTK_WRAP_WORD_CHAR);
-  gtk_widget_add_css_class (view, "ns-editor");
-  GtkWidget *sw = gtk_scrolled_window_new ();
-  gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (sw), view);
-  gtk_widget_add_css_class (sw, "ns-editor-box");
-  g_object_set_data (G_OBJECT (sw), "pr-view", view);
-  return sw;
-}
-
-static GtkWidget *
-view_of (GtkWidget *sw)
-{
-  return g_object_get_data (G_OBJECT (sw), "pr-view");
-}
-
-static char *
-text_get (GtkWidget *sw)
-{
-  GtkTextBuffer *b = gtk_text_view_get_buffer (GTK_TEXT_VIEW (view_of (sw)));
-  GtkTextIter a, z;
-  gtk_text_buffer_get_bounds (b, &a, &z);
-  return gtk_text_buffer_get_text (b, &a, &z, FALSE);
-}
-
-static void
-text_set (GtkWidget *sw, const char *text)
-{
-  gtk_text_buffer_set_text (gtk_text_view_get_buffer (GTK_TEXT_VIEW (view_of (sw))), text ? text : "", -1);
 }
 
 static void
@@ -110,7 +76,6 @@ state_loaded (JsonObject *root, const char *err, gpointer data)
     msg_set (p->state_msg, err ? err : "?", TRUE);
     return;
   }
-  text_set (p->state_view, str_of (root, "template"));
   vars_fill (p, arr_of (root, "variables"));
   gtk_label_set_text (GTK_LABEL (p->preview), str_of (root, "text"));
   msg_set (p->state_msg, str_of (root, "error"), TRUE);
@@ -123,33 +88,14 @@ state_load (Pr *p)
   ns_mc_run (p->owner, args, NULL, state_loaded, p);
 }
 
-static void
-sys_loaded (JsonObject *root, const char *err, gpointer data)
-{
-  Pr *p = data;
-  if (err || !root) {
-    msg_set (p->sys_msg, err ? err : "?", TRUE);
-    return;
-  }
-  text_set (p->sys_view, str_of (root, "text"));
-}
-
-static void
-sys_load (Pr *p)
-{
-  const char *const args[] = { "prompt", "get", "--json", NULL };
-  ns_mc_run (p->owner, args, NULL, sys_loaded, p);
-}
-
-/* ---- the buttons: one handler per action, the target and the answer text in the closure ---- */
+/* ---- the buttons: Reset only; editing is Neo Prompt's ---- */
 
 typedef struct {
   Pr         *p;
   const char *const *args;   /* static argv */
-  GtkWidget  *view;          /* its text goes to stdin, or NULL */
   GtkWidget  *msg;
   const char *section, *done_key;
-  gboolean    refresh_state, refresh_sys, ask;
+  gboolean    refresh_state, ask;
 } Act;
 
 static void
@@ -164,20 +110,15 @@ act_done (JsonObject *root, const char *err, gpointer data)
     msg_set (a->msg, str_of (root, "error"), TRUE);   /* refused: nothing was written */
     return;
   }
-  if (a->args[1] && !g_strcmp0 (a->args[1], "preview"))
-    gtk_label_set_text (GTK_LABEL (a->p->preview), str_of (root, "text"));   /* the rendered block */
   msg_set (a->msg, ui_str (a->p, a->section, a->done_key), FALSE);
   if (a->refresh_state)
     state_load (a->p);
-  if (a->refresh_sys)
-    sys_load (a->p);
 }
 
 static void
 act_run (Act *a)
 {
-  g_autofree char *text = a->view ? text_get (a->view) : NULL;
-  ns_mc_run (a->p->owner, a->args, text, act_done, a);
+  ns_mc_run (a->p->owner, a->args, NULL, act_done, a);
 }
 
 static void
@@ -206,6 +147,20 @@ button (Pr *p, GtkWidget *group, const char *label, gboolean destructive, Act a)
   g_object_set_data_full (G_OBJECT (row), "pr-act", copy, g_free);
 }
 
+/* ---- the rows that open Neo Prompt ---- */
+
+static void
+open_system (GtkWidget *row, gpointer data)
+{
+  ns_prompt_open ("system-prompt", NULL);
+}
+
+static void
+open_state (GtkWidget *row, gpointer data)
+{
+  ns_prompt_open ("state-template", NULL);
+}
+
 /* the section in front of the page's groups: its own cards, below the wake word and reply ones */
 void
 ns_prompt_build (GtkWidget *content, GObject *owner, JsonObject *ui)
@@ -215,26 +170,23 @@ ns_prompt_build (GtkWidget *content, GObject *owner, JsonObject *ui)
   p->ui = json_object_ref (ui);
   g_object_set_data_full (owner, "pr", p, (GDestroyNotify) pr_free);
 
-  static const char *const sys_save[] = { "prompt", "set", "--json", NULL };
   static const char *const sys_reset[] = { "prompt", "reset", "--json", NULL };
-  static const char *const st_preview[] = { "state", "preview", "--json", NULL };
-  static const char *const st_save[] = { "state", "save", "--json", NULL };
   static const char *const st_reset[] = { "state", "reset", "--json", NULL };
 
   GtkWidget *g = ns_group (content, ui_str (p, "system", "title"));
-  p->sys_view = editor_new ();
-  ns_row_widget (g, ui_str (p, "system", "label"), p->sys_view);
+  GtkWidget *row = ns_row (g, "document-edit-symbolic", "violet", ui_str (p, "system", "edit"),
+                           ui_str (p, "system", "edit_sub"));
   p->sys_msg = msg_new (g);
-  button (p, g, ui_str (p, "system", "save"), FALSE,
-          (Act){ p, sys_save, p->sys_view, p->sys_msg, "system", "saved", FALSE, TRUE, FALSE });
+  ns_row_on_activate (row, open_system, NULL);
   button (p, g, ui_str (p, "system", "reset"), TRUE,
-          (Act){ p, sys_reset, NULL, p->sys_msg, "system", "restored", FALSE, TRUE, TRUE });
+          (Act){ p, sys_reset, p->sys_msg, "system", "restored", FALSE, TRUE });
   ns_note (content, ui_str (p, "system", "note"));
 
   g = ns_group (content, ui_str (p, "state", "title"));
-  p->state_view = editor_new ();
-  ns_row_widget (g, ui_str (p, "state", "label"), p->state_view);
+  row = ns_row (g, "document-edit-symbolic", "violet", ui_str (p, "state", "edit"),
+                ui_str (p, "state", "edit_sub"));
   p->state_msg = msg_new (g);
+  ns_row_on_activate (row, open_state, NULL);
   ns_note (content, ui_str (p, "state", "note"));
 
   p->vars_g = ns_group (content, ui_str (p, "state", "variables"));
@@ -245,14 +197,8 @@ ns_prompt_build (GtkWidget *content, GObject *owner, JsonObject *ui)
   gtk_label_set_wrap (GTK_LABEL (p->preview), TRUE);
   gtk_label_set_xalign (GTK_LABEL (p->preview), 0);
   ns_row_widget (g, NULL, p->preview);
-  /* Anteprima fills the preview label itself: its own handler, the answer is text, not a message */
-  button (p, g, ui_str (p, "state", "preview"), FALSE,
-          (Act){ p, st_preview, p->state_view, p->state_msg, "state", "", FALSE, FALSE, FALSE });
-  button (p, g, ui_str (p, "state", "save"), FALSE,
-          (Act){ p, st_save, p->state_view, p->state_msg, "state", "saved", TRUE, FALSE, FALSE });
   button (p, g, ui_str (p, "state", "reset"), TRUE,
-          (Act){ p, st_reset, NULL, p->state_msg, "state", "restored", TRUE, FALSE, TRUE });
+          (Act){ p, st_reset, p->state_msg, "state", "restored", TRUE, TRUE });
 
-  sys_load (p);
   state_load (p);
 }

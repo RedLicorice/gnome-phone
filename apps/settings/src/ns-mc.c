@@ -1,6 +1,8 @@
 /* Running `minerva-config` (and the other programs beside it); see ns-mc.h. */
 #include "ns-mc.h"
 
+#include <gio/gdesktopappinfo.h>
+
 /* the program's path: `prog`'s own env var ("minerva-perm" -> MINERVA_PERM_BIN) or the Minerva bin directory */
 static char *
 prog_bin (const char *prog)
@@ -139,4 +141,30 @@ ns_json_arr (JsonObject *o, const char *member)
 {
   return o && json_object_has_member (o, member) && JSON_NODE_HOLDS_ARRAY (json_object_get_member (o, member))
            ? json_object_get_array_member (o, member) : NULL;
+}
+
+gboolean
+ns_prompt_open (const char *id, const char *person)
+{
+  g_autoptr (GDesktopAppInfo) info = g_desktop_app_info_new ("de.yesman.NeoPrompt.desktop");
+  g_autoptr (GError) error = NULL;
+  g_autoptr (GFile) file = NULL;
+  g_autofree char *uri = NULL;
+  GList files = { NULL, NULL, NULL };
+
+  if (!info)
+    {
+      g_message ("neo-prompt is not installed");
+      return FALSE;
+    }
+  uri = person && *person ? g_strdup_printf ("neoprompt://open/%s?person=%s", id, person)
+                          : g_strdup_printf ("neoprompt://open/%s", id);
+  file = g_file_new_for_uri (uri);
+  files.data = file;
+  if (!g_app_info_launch (G_APP_INFO (info), &files, NULL, &error))
+    {
+      g_message ("neo-prompt: %s", error ? error->message : "not launched");
+      return FALSE;
+    }
+  return TRUE;
 }

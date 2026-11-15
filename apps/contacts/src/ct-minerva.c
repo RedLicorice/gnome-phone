@@ -23,13 +23,6 @@ typedef struct {
   GPtrArray *pick;              /* the people's ids the picker lists, while it is open */
 } M;
 
-/* the editor page: the person it writes to, whatever the card shows meanwhile */
-typedef struct {
-  M *m;
-  char *pid;
-  GtkWidget *page, *view, *save;
-} Ed;
-
 static JsonObject *ui_cache;    /* `people ui` once per process: the texts do not change under a running app */
 
 static void load (M *m);
@@ -115,114 +108,15 @@ pad (GtkWidget *widget)
   gtk_widget_set_margin_end (widget, (int) CT_QC_ENTRY_PAD_END_DP);
 }
 
-/* ---- Edit: a page with the whole notebook ---- */
-
-static void
-ed_free (gpointer data)
-{
-  Ed *ed = data;
-
-  g_object_unref (ed->m->card);
-  g_free (ed->pid);
-  g_free (ed);
-}
-
-static void
-ed_loaded (JsonObject *root, const char *err, gpointer data)
-{
-  Ed *ed = data;
-  const char *why = refused (ed->m, root, err);
-
-  if (why)
-    {
-      toast (ed->m, why);
-      ct_window_pop (ed->m->window, ed->page);
-      return;
-    }
-  gtk_text_buffer_set_text (gtk_text_view_get_buffer (GTK_TEXT_VIEW (ed->view)), ns_json_str (root, "text"), -1);
-  gtk_widget_set_sensitive (ed->save, TRUE);
-  gtk_widget_set_sensitive (ed->view, TRUE);
-}
-
-static void
-ed_saved (JsonObject *root, const char *err, gpointer data)
-{
-  Ed *ed = data;
-  const char *why = refused (ed->m, root, err);
-
-  if (why)
-    {
-      toast (ed->m, why);
-      gtk_widget_set_sensitive (ed->save, TRUE);
-      return;
-    }
-  toast (ed->m, s (ed->m, "saved"));
-  load (ed->m);
-  ct_window_pop (ed->m->window, ed->page);
-}
-
-static void
-on_save (GtkWidget *button, gpointer data)
-{
-  Ed *ed = data;
-  GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (ed->view));
-  GtkTextIter start, end;
-  g_autofree char *text = NULL;
-  const char *const args[] = { "people", "notebook", ed->pid, "set", "--stdin", "--json", NULL };
-
-  gtk_text_buffer_get_bounds (buffer, &start, &end);
-  text = gtk_text_buffer_get_text (buffer, &start, &end, FALSE);
-  gtk_widget_set_sensitive (ed->save, FALSE);
-  ns_mc_run (G_OBJECT (ed->page), args, text, ed_saved, ed);
-}
+/* ---- Edit: the notebook in Neo Prompt, on this person's document ---- */
 
 static void
 on_edit (GtkWidget *button, gpointer data)
 {
   M *m = data;
-  Ed *ed;
-  GtkWidget *actions, *scroll;
-  g_autofree char *title = NULL;
-  int margin = n (m, "editor_margin_dp");
 
-  if (!m->pid)
-    return;
-  ed = g_new0 (Ed, 1);
-  ed->m = m;
-  ed->pid = g_strdup (m->pid);
-  g_object_ref (m->card);
-  title = fmt (s (m, "editor_title"), m->pname);
-  ed->page = ct_page_new (m->window);
-  g_object_set_data_full (G_OBJECT (ed->page), "ct-minerva-editor", ed, ed_free);
-  gtk_box_append (GTK_BOX (ed->page), ct_page_toolbar (CT_PAGE (ed->page), NULL, "ct-arrow-back-symbolic", _("Back"),
-                                                       title, &actions, NULL));
-  ed->save = ct_text_button (s (m, "save"), "ct-toolbar-text-action");
-  gtk_widget_set_valign (ed->save, GTK_ALIGN_CENTER);
-  gtk_widget_set_sensitive (ed->save, FALSE);   /* until the notebook is read */
-  g_signal_connect (ed->save, "clicked", G_CALLBACK (on_save), ed);
-  gtk_box_append (GTK_BOX (actions), ed->save);
-
-  ed->view = gtk_text_view_new ();
-  gtk_widget_add_css_class (ed->view, "ct-ed-text");
-  gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (ed->view), GTK_WRAP_WORD_CHAR);
-  gtk_text_view_set_left_margin (GTK_TEXT_VIEW (ed->view), margin);
-  gtk_text_view_set_right_margin (GTK_TEXT_VIEW (ed->view), margin);
-  gtk_text_view_set_top_margin (GTK_TEXT_VIEW (ed->view), margin);
-  gtk_text_view_set_bottom_margin (GTK_TEXT_VIEW (ed->view), margin);
-  gtk_widget_set_sensitive (ed->view, FALSE);
-  scroll = gtk_scrolled_window_new ();
-  gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-  gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scroll), ed->view);
-  gtk_widget_set_vexpand (scroll, TRUE);
-  gtk_box_append (GTK_BOX (ed->page), scroll);
-  ct_window_push (m->window, ed->page);
-
-  /* the text as `people notebook get` has it now, not the card's copy */
-  {
-    const char *const args[] = { "people", "notebook", ed->pid, "get", "--json", NULL };
-
-    ns_mc_run (G_OBJECT (ed->page), args, NULL, ed_loaded, ed);
-  }
+  if (m->pid)
+    ns_prompt_open ("notebook", m->pid);
 }
 
 /* ---- Apri in Persone: Neo Settings' launch-panel action, as gnome-phone's panels ask for a page ---- */

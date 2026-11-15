@@ -32,3 +32,7 @@ void ns_mc_run_list (GObject *owner, const char *prog, const char *const *args, 
 const char *ns_json_str (JsonObject *o, const char *member);
 JsonObject *ns_json_obj (JsonObject *o, const char *member);
 JsonArray  *ns_json_arr (JsonObject *o, const char *member);
+
+/* Opens Neo Prompt on one of its documents (`id` of its registry; `person` for a notebook), through
+ * neo-prompt://open/<id>[?person=<id>] and GApplication's Open. FALSE when Neo Prompt is not installed. */
+gboolean ns_prompt_open (const char *id, const char *person);

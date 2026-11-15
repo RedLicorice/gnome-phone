@@ -1,0 +1,145 @@
+/* Neo Prompt's own rules, over libneo's (neo.css). Colours are libneo's roles, never values: the four looks recolor
+ * them. Sizes are dp (one CSS pixel is one dp on the phone). */
+
+window.neo.np {
+  background-color: @neo_surface;
+}
+
+/* --- the top bar: libneo's .neo-app-bar, with the actions at the end */
+
+.np-title {
+  font-size: 22px;
+  font-weight: 800;
+  color: @neo_on_surface;
+}
+
+/* --- cards and rows */
+
+.np-card {
+  margin: 6px 16px 12px 16px;
+  border-radius: 20px;
+  padding: 4px 0;
+}
+
+.np-group {
+  font-size: 13px;
+  font-weight: 800;
+  color: @neo_on_surface_variant;
+  margin: 10px 16px 2px 20px;
+}
+
+.np-row {
+  padding: 12px 16px;
+}
+
+.np-row-title {
+  font-size: 16px;
+  font-weight: 800;
+  color: @neo_on_surface;
+}
+
+.np-sub {
+  font-size: 12px;
+  font-weight: 700;
+  color: @neo_on_surface_variant;
+}
+
+.np-msg {
+  font-size: 13px;
+  font-weight: 700;
+  color: @neo_on_surface_variant;
+  margin: 6px 4px;
+}
+
+.np-error {
+  color: @neo_error;
+}
+
+.np-badge {
+  font-size: 11px;
+  font-weight: 800;
+  color: @neo_on_secondary_container;
+  background-color: @neo_secondary_container;
+  border-radius: 8px;
+  padding: 2px 8px;
+}
+
+/* --- the editor */
+
+.np-editor {
+  font-size: 14px;
+  color: @neo_on_surface;
+  background-color: @neo_surface;
+  padding: 0;
+}
+
+.np-hits {
+  font-size: 12px;
+  font-weight: 800;
+  color: @neo_on_surface_variant;
+  min-width: 28px;
+}
+
+/* --- the index popover */
+
+.np-index-popover {
+  background-color: @neo_surface_container_highest;
+  border-radius: 16px;
+  padding: 4px;
+}
+
+.np-index-row {
+  padding: 10px 16px;
+}
+
+/* --- the context view */
+
+.np-reconstructed {
+  font-size: 12px;
+  font-weight: 700;
+  color: @neo_on_surface_variant;
+  margin: 4px 0 8px 0;
+}
+
+.np-block {
+  padding: 12px 16px;
+}
+
+.np-block-flat {
+  background-color: transparent;
+}
+
+.np-block-note {
+  font-size: 12px;
+  font-weight: 700;
+  color: @neo_on_surface_variant;
+  margin: 0 16px 10px 16px;
+}
+
+.np-cache-warning {
+  font-size: 13px;
+  font-weight: 800;
+  color: @neo_on_surface;
+  background-color: @neo_error_container;
+  border-radius: 12px;
+  padding: 10px 14px;
+}
+
+.np-total {
+  font-size: 12px;
+  font-weight: 700;
+  color: @neo_on_surface_variant;
+  margin-top: 6px;
+}
+
+/* --- the history */
+
+.np-history-row {
+  padding: 12px 16px;
+}
+
+.np-diff-title {
+  font-size: 16px;
+  font-weight: 800;
+  color: @neo_on_surface;
+}

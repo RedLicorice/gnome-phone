@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Neo Prompt
+Comment=I testi lunghi di Minerva e il contesto che riceve l'agente
+Exec=neo-prompt
+Icon=de.yesman.NeoPrompt
+Terminal=false
+StartupNotify=false
+DBusActivatable=true
+Categories=Utility;TextEditor;GTK;
+Keywords=Minerva;Prompt;Editor;Contesto;
+X-Purism-FormFactor=Workstation;Mobile;

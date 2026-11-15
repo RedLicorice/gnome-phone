@@ -92,7 +92,7 @@ typedef struct {
   JsonObject *ui;
   char       *id, *name, *pending_uid, *pending_contact;
   gboolean    enrolled;
-  GtkWidget  *msg, *nb_view, *faces_row, *voice_row, *enroll_btn, *forget_btn, *contact_row, *unlink_btn;
+  GtkWidget  *msg, *faces_row, *voice_row, *enroll_btn, *forget_btn, *contact_row, *unlink_btn;
   guint       poll_id, poll_s;
 } Pd;
 
@@ -115,27 +115,9 @@ pd_free (Pd *d)
   g_free (d);
 }
 
-static GtkWidget *
-editor_new (void)
-{
-  GtkWidget *view = gtk_text_view_new ();
-  gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (view), GTK_WRAP_WORD_CHAR);
-  gtk_widget_add_css_class (view, "ns-editor");
-  GtkWidget *sw = gtk_scrolled_window_new ();
-  gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (sw), view);
-  gtk_widget_add_css_class (sw, "ns-editor-box");
-  g_object_set_data (G_OBJECT (sw), "pp-view", view);
-  return sw;
-}
-
-static GtkTextBuffer *
-buffer_of (GtkWidget *sw)
-{
-  return gtk_text_view_get_buffer (GTK_TEXT_VIEW (g_object_get_data (G_OBJECT (sw), "pp-view")));
-}
-
 static void voice_load (Pd *d);
 static void person_load (Pd *d);
+static void open_notebook (GtkWidget *row, gpointer data);
 
 static gboolean
 poll_tick (gpointer data)
@@ -208,28 +190,10 @@ person_loaded (JsonObject *root, const char *err, gpointer data)
 }
 
 static void
-notebook_loaded (JsonObject *root, const char *err, gpointer data)
-{
-  Pd *d = data;
-  if (problem (root, err)) {
-    msg_set (d->msg, problem (root, err), TRUE);
-    return;
-  }
-  gtk_text_buffer_set_text (buffer_of (d->nb_view), str_of (root, "text"), -1);
-}
-
-static void
 person_load (Pd *d)
 {
   const char *const show[] = { "people", "show", d->id, "--json", NULL };
   ns_mc_run (d->owner, show, NULL, person_loaded, d);
-}
-
-static void
-notebook_load (Pd *d)
-{
-  const char *const get[] = { "people", "notebook", d->id, "get", "--json", NULL };
-  ns_mc_run (d->owner, get, NULL, notebook_loaded, d);
 }
 
 /* an action's answer: the message of the data (`done` key of "detail") or its problem, then the page again */
@@ -248,7 +212,6 @@ answered (JsonObject *root, const char *err, gpointer data)
   else {
     msg_set (d->msg, a->done ? d_str (d, a->done) : "", FALSE);
     person_load (d);
-    notebook_load (d);
   }
   g_free (a);
 }
@@ -261,17 +224,6 @@ run (Pd *d, const char *const *args, const char *stdin_text, const char *done, g
   a->done = done;
   a->pop = pop;
   ns_mc_run (d->owner, args, stdin_text, answered, a);
-}
-
-static void
-save_tapped (GtkWidget *row, gpointer data)
-{
-  Pd *d = data;
-  GtkTextIter s, e;
-  gtk_text_buffer_get_bounds (buffer_of (d->nb_view), &s, &e);
-  g_autofree char *text = gtk_text_buffer_get_text (buffer_of (d->nb_view), &s, &e, FALSE);
-  const char *const args[] = { "people", "notebook", d->id, "set", "--stdin", "--json", NULL };
-  run (d, args, text, "saved", FALSE);
 }
 
 static void
@@ -462,9 +414,8 @@ person_open (JsonObject *ui, const char *id, const char *name)
 
   g_autofree char *nb_label = fmt (d_str (d, "notebook_label"), "name", name, NULL);
   GtkWidget *g = ns_group (c, d_str (d, "notebook"));
-  d->nb_view = editor_new ();
-  ns_row_widget (g, nb_label, d->nb_view);
-  ns_row_button (g, d_str (d, "save"), FALSE, save_tapped, d);
+  GtkWidget *nb_row = ns_row (g, "document-edit-symbolic", "blue", d_str (d, "open"), nb_label);
+  ns_row_on_activate (nb_row, open_notebook, d);
   ns_row_button (g, d_str (d, "clear"), TRUE, clear_tapped, d);
   ns_note (c, d_str (d, "notebook_note"));
 
@@ -487,7 +438,6 @@ person_open (JsonObject *ui, const char *id, const char *name)
 
   /* each time the page shows (also back from Collega): the person again */
   g_signal_connect (page, "showing", G_CALLBACK (person_showing), d);
-  notebook_load (d);
   ns_push (page);
 }
 
@@ -627,6 +577,14 @@ ns_page_people_open (GtkWidget *row, gpointer data)
 }
 
 /* the index's own Persone row: the index is already under the page */
+
+static void
+open_notebook (GtkWidget *row, gpointer data)
+{
+  Pd *d = data;
+  ns_prompt_open ("notebook", d->id);
+}
+
 void
 ns_page_people_index (GtkWidget *row, gpointer data)
 {
