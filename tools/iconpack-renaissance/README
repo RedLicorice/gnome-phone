@@ -1,0 +1,25 @@
+The Renaissance icon packs (neo-launcher/iconpacks/renaissance-*), generated, one script for all four:
+
+    python3 -I make-renaissance-pack.py ../../neo-launcher/iconpacks/renaissance-day          --style framed --mode day
+    python3 -I make-renaissance-pack.py ../../neo-launcher/iconpacks/renaissance-night        --style framed --mode night
+    python3 -I make-renaissance-pack.py ../../neo-launcher/iconpacks/renaissance-glyph-day    --style glyph  --mode day
+    python3 -I make-renaissance-pack.py ../../neo-launcher/iconpacks/renaissance-glyph-night  --style glyph  --mode night
+
+Framed (the launcher's icon pack, `de.yesman.neo icon-pack`): full-bleed 256 px squares, a neon halo round a bevelled
+platinum frame, a marble plate with gears, platinum wires and gilt acanthus corners, a fine-line glyph in the app's neon.
+Day is a milky see-through plate, night a smoky one; Minerva's own icon (`yesman`) is the owl (owl.png, derived from
+the Minerva agent image) in a toothed gear ring. The launcher paints drawn icons at the full icon size over nothing
+(neo-launcher/src/icons.c icons_render), so pack.json has no shape and the plates are not shrunk; `scale` (0.5) and
+`iconback` (the frame and plate alone, no halo) only serve apps the pack does not draw. gnome-map.json is the same
+desktop-id map as the round pack's; appfilter.json is empty.
+
+Glyph (for Neo Settings' rows and search results, not the launcher): only the fine-line glyph and its neon aura on
+transparent, in a marble (day) or granite (night) ink. icons/<name>.png for every icon-name string Neo Settings uses
+(apps/settings/src, "-symbolic" suffix kept) and the short names of the mock-up (wifi bt display sound notif battery
+account lock minerva apps); icons.txt lists them. The colour is the area's.
+
+Glyphs are Material Symbols Outlined, weight 200 (Google, Apache-2.0: glyphs/LICENSE), fetched by fetch-glyphs.sh from
+github.com/google/material-design-icons (symbols/web/<name>/materialsymbolsoutlined/<name>_wght200_48px.svg) and
+committed. The script needs python3-gi with Rsvg 2.0, python3-cairo, python3-numpy and python3-pil. Output is
+deterministic (textures are seeded from the icon's name). To add an app: a line in FRAMED (glyph, neon) and its desktop
+id in MAP; to add a Settings icon: a line in GLYPHS; then run fetch-glyphs.sh and the four commands above.
