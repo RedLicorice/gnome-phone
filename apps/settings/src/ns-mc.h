@@ -1,8 +1,9 @@
 /* `minerva-config` (Minerva's repository, config/) as Neo Settings' one door to the phone agent's configuration: the
- * Minerva page, Accounts > API keys and Battery > Max charge all run it through here. */
+ * Minerva page, Accounts > API keys and Battery > Max charge all run it through here. Needs only GIO and json-glib,
+ * so Neo Contacts builds this file too (its Minerva card, apps/contacts/src/ct-minerva.c). */
 #pragma once
 
-#include <adwaita.h>
+#include <gio/gio.h>
 #include <json-glib/json-glib.h>
 
 /* whether `minerva-config` is installed (MINERVA_CONFIG_BIN overrides the path) */

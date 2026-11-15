@@ -78,6 +78,11 @@ void     ns_page_api_keys (GtkWidget *row, gpointer data);
 void     ns_page_prompt (GtkWidget *row, gpointer data);
 /* ns-prompt.c: the system prompt and state template editors of Minerva > Prompt; `ui` is `prompt_ui` of the status */
 void     ns_prompt_build (GtkWidget *content, GObject *owner, JsonObject *ui);
+/* ns-people.c: Minerva > Persone (notebook, face samples, voiceprint, contact of each person); its row goes into
+ * `content` once `minerva-config people ui` answers, labels and all */
+void     ns_people_add_entry (GtkWidget *content, GObject *owner);
+/* `--page people` (Neo Contacts' "Apri in Persone"): the Minerva page, then Persone once `people ui` answers */
+void     ns_page_people_open (GtkWidget *row, gpointer data);
 /* a page of the models `minerva-config` offers, the current one marked; `picked` gets the model id (the source the
  * Minerva page's own pickers use) */
 typedef void (*NsModelPicked) (const char *id, gpointer data);

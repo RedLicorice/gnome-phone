@@ -319,6 +319,7 @@ static const struct {
   { "accessibility", ns_page_accessibility }, { "universal-access", ns_page_accessibility },
   { "about", ns_page_about }, { "info-overview", ns_page_about },
   { "minerva", ns_page_minerva }, { "brain", ns_page_minerva }, { "minerva-prompt", ns_page_prompt }, { "prompt", ns_page_prompt },
+  { "people", ns_page_people_open }, { "persone", ns_page_people_open },
   { "permissions", ns_page_permissions }, { "agent-permissions", ns_page_permissions },
 };
 

@@ -25,6 +25,7 @@
 #include "ct-quick.h"
 #include "ct-avatar.h"
 #include "ct-dialogs.h"
+#include "ct-minerva.h"
 #include "ct-page.h"
 #include "ct-popup.h"
 #include "ct-settings.h"
@@ -56,6 +57,7 @@ struct _Quick {
 
   GtkWidget *stage, *scrim, *scroll, *content, *header, *cards;
   GtkWidget *actions, *star, *edit, *overflow;
+  GtkWidget *minerva;           /* the Minerva card (ct-minerva.h, a ref kept across rebuilds), NULL without one */
   double max_h, min_h;          /* the header's heights */
   double view_h;                /* the sheet's height */
   SpongyInterp title_curve;
@@ -1140,6 +1142,11 @@ rebuild (Quick *quick)
   about = about_card (quick);
   if (about)
     gtk_box_append (GTK_BOX (quick->cards), about);
+  if (quick->minerva)
+    {
+      ct_minerva_card_update (quick->minerva, quick->name, quick->title_color);
+      gtk_box_append (GTK_BOX (quick->cards), quick->minerva);
+    }
   update_star (quick);
   gtk_accessible_update_property (GTK_ACCESSIBLE (quick->stage), GTK_ACCESSIBLE_PROPERTY_LABEL, quick->name, -1);
   gtk_widget_queue_resize (quick->content);
@@ -1252,6 +1259,7 @@ quick_free (gpointer data)
   g_clear_pointer (&quick->expand_anim, neo_anim_free);
   g_clear_object (&quick->contact);
   g_clear_object (&quick->photo);
+  g_clear_object (&quick->minerva);
   g_free (quick->name);
   g_free (quick->phonetic);
   g_free (quick->uid);
@@ -1329,6 +1337,10 @@ ct_quick_new (GtkWidget *window, const char *uid)
   g_signal_connect (store, "changed", G_CALLBACK (on_store_changed), quick);
   if (profile)
     g_signal_connect (store, "profile-changed", G_CALLBACK (on_store_changed), quick);
+  /* not for "My info": Minerva's owner is a person of her own, not a contact's */
+  quick->minerva = profile ? NULL : ct_minerva_card_new (window, uid);
+  if (quick->minerva)
+    g_object_ref_sink (quick->minerva);
   rebuild (quick);
   return quick->page;
 }

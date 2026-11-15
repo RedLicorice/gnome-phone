@@ -15,6 +15,8 @@ datadir = get_option('prefix') / get_option('datadir')
 # the Dialer's Roboto text boxes, phone number formatting and letter tiles, used as they are (read-only)
 dialer = include_directories('../dialer/src')
 src = include_directories('src')
+# Neo Settings' door to `minerva-config` (ns-mc.c, GIO and json-glib only), for the Minerva card (ct-minerva.c)
+settings = include_directories('../settings/src')
 
 # the contacts, their vCards and the list's rows: no GTK, so the tests and the seeder link them alone
 core = static_library('contacts-core', 'src/ct-contact.c', 'src/ct-vcard.c', 'src/ct-store.c', 'src/ct-rows.c',
@@ -24,10 +26,11 @@ gtk = dependency('gtk4', version: '>= 4.14')
 resources = gnome.compile_resources('contacts-resources', 'src/contacts.gresource.xml', source_dir: ['src', 'data'])
 executable('neo-contacts', 'src/ct-main.c', 'src/ct-window.c', 'src/ct-page.c', 'src/ct-people.c', 'src/ct-list.c',
            'src/ct-quick.c', 'src/ct-editor.c', 'src/ct-picker.c', 'src/ct-settings.c', 'src/ct-dialogs.c',
-           'src/ct-popup.c', 'src/ct-ui.c', 'src/ct-avatar.c', '../dialer/src/text.c',
-           '../dialer/src/phone-number.c', '../dialer/src/avatar.c', resources,
-           include_directories: dialer, link_with: core, install: true,
-           dependencies: [gio, ebook, m, gtk, dependency('neo-1'), dependency('spongy-gtk-1')])
+           'src/ct-popup.c', 'src/ct-ui.c', 'src/ct-avatar.c', 'src/ct-minerva.c', '../dialer/src/text.c',
+           '../dialer/src/phone-number.c', '../dialer/src/avatar.c', '../settings/src/ns-mc.c', resources,
+           include_directories: [dialer, settings], link_with: core, install: true,
+           dependencies: [gio, ebook, m, gtk, dependency('json-glib-1.0'), dependency('neo-1'),
+                          dependency('spongy-gtk-1')])
 
 unit = configuration_data({'bindir': bindir})
 configure_file(input: 'data/de.yesman.Contacts.service.in', output: 'de.yesman.Contacts.service',

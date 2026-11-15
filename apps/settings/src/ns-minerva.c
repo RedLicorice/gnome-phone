@@ -961,6 +961,7 @@ ns_page_minerva (GtkWidget *row, gpointer data)
   GtkWidget *pg = ns_group (c, NULL);   /* wake word, reply, system prompt, state template: the Prompt page */
   ns_row (pg, "format-justify-left-symbolic", "violet", "Prompt", "Wake word • Reply • System prompt • State template");
   ns_row_on_activate (gtk_widget_get_last_child (pg), ns_page_prompt, NULL);
+  ns_people_add_entry (c, G_OBJECT (page));   /* Persone: its row and texts come from `people ui` */
 
   GtkWidget *kg = ns_group (c, NULL);
   ns_row (kg, NULL, NULL, "API keys", "Providers and their keys • Accounts");

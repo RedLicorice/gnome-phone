@@ -1,6 +1,5 @@
 /* Running `minerva-config` (and the other programs beside it); see ns-mc.h. */
 #include "ns-mc.h"
-#include "ns-pages.h"
 
 /* the program's path: `prog`'s own env var ("minerva-perm" -> MINERVA_PERM_BIN) or the Minerva bin directory */
 static char *
