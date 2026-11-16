@@ -122,6 +122,7 @@ export class Power extends Signals.EventEmitter {
         keyguard.connectObject('changed', () => this._syncTimeout(), this);
 
         this._exportScreenSaver();
+        this._watchOutputs();
         this._syncTimeout();
     }
 
@@ -351,6 +352,8 @@ export class Power extends Signals.EventEmitter {
         if (this._panel.hasLowPower || off === (this._outputsAreOff ?? false))
             return;
         this._outputsAreOff = off;
+        if (off)
+            this._displayArmed = false;
         this._monitors.power_save_blocked = !off;
         Gio.DBus.session.call('org.gnome.Mutter.DisplayConfig', '/org/gnome/Mutter/DisplayConfig',
             'org.freedesktop.DBus.Properties', 'Set',
@@ -359,7 +362,10 @@ export class Power extends Signals.EventEmitter {
             null, Gio.DBusCallFlags.NONE, -1, null, (bus, res) => {
                 try {
                     bus.call_finish(res);
+                    // the displays took it: a panel that comes back on from here is not our doing
+                    this._displayArmed = off && !this._destroyed;
                 } catch (e) {
+                    // the panel is lit while this side believes it asleep: the state the watcher above is for
                     log(`gnome-phone: outputs ${off ? 'off' : 'on'}: ${e.message}`);
                 }
             });
@@ -370,6 +376,40 @@ export class Power extends Signals.EventEmitter {
             return;
         this._active = active;
         this._dbus?.emit_signal('ActiveChanged', new GLib.Variant('(b)', [active]));
+    }
+
+    // The outputs' own state, read back from mutter. Asleep, this side lets them power save (_outputsOff: the displays
+    // unblocked, PowerSaveMode off) and mutter brings them back on the first input it sees; the panel then lights while
+    // the phone is still asleep here, the black layer stays up, and the face behind it never wakes (the kiosk's, in
+    // Giuseppe's report: a lit screen with nothing on it). An output that comes back on is a wake, whatever woke it.
+    //
+    // Only once our own "off" has gone through (_displayArmed): the events of the calls before it are still on their
+    // way, and a panel that reports itself on because it cannot power save would otherwise undo every sleep at once.
+    _watchOutputs() {
+        this._displayArmed = false;
+        this._outputsId = Gio.DBus.session.signal_subscribe('org.gnome.Mutter.DisplayConfig',
+            'org.freedesktop.DBus.Properties', 'PropertiesChanged', '/org/gnome/Mutter/DisplayConfig', null,
+            Gio.DBusSignalFlags.NONE, (_c, _s, _p, _i, _sig, params) => {
+                if (this._destroyed || this._panel.hasLowPower)
+                    return;
+                let value;
+                try {
+                    const [iface, changed] = params.deepUnpack();
+                    if (iface !== 'org.gnome.Mutter.DisplayConfig')
+                        return;
+                    value = changed.PowerSaveMode;
+                    if (value?.deepUnpack)
+                        value = value.deepUnpack();
+                } catch (e) {
+                    return;
+                }
+                if (value === POWER_SAVE_OFF) {
+                    this._displayArmed = true;
+                    return;
+                }
+                if (value === POWER_SAVE_ON && this._displayArmed && !this.interactive)
+                    this.wakeUp('display');
+            });
     }
 
     _emitScreenSaver(signal) {
@@ -396,6 +436,7 @@ export class Power extends Signals.EventEmitter {
     }
 
     destroy() {
+        this._destroyed = true;
         this._cancelLongPress();
         this._fadeAnim?.stop();
         if (this._idleWatch)
@@ -403,6 +444,9 @@ export class Power extends Signals.EventEmitter {
         this._sessionManager?.disconnectObject(this);
         this._keyguard.disconnectObject(this);
         this._keys.destroy();
+        if (this._outputsId)
+            Gio.DBus.session.signal_unsubscribe(this._outputsId);
+        this._outputsId = 0;
         if (this._nameId)
             Gio.bus_unown_name(this._nameId);
         this._dbus?.unexport();
