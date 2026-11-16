@@ -952,7 +952,16 @@ mn_free (Mn *m)
  * icon, colour, title and subtitle. Each sub-page builds only the cards it has; a refresh fills what is there and
  * skips the rest. No setting, label or order lives in this file: they are lines of the data. */
 
-/* which page a key of minerva_ui.json's "pages" opens: the data names it, this table says where it goes */
+/* which page a key of minerva_ui.json's "pages" opens: the data names it, this table says where it goes. One entry
+ * opens a document in Neo Prompt instead of a sub-page (Minerva's own notebook, which is hers to edit). */
+static void
+open_self_notebook (GtkWidget *row, gpointer data)
+{
+  (void) row;
+  (void) data;
+  ns_prompt_open ("self-notebook", NULL);
+}
+
 static const struct {
   const char *id;
   NsActivate  page;
@@ -963,6 +972,7 @@ static const struct {
   { "people", ns_page_people_index },
   { "events", ns_page_events },
   { "budget", ns_page_minerva_budget },
+  { "self_notebook", open_self_notebook },
 };
 
 static JsonObject *
@@ -1015,6 +1025,8 @@ index_build (Mn *m)
         page = minerva_pages[k].page;
     if (!page || !*str_of (p, "title"))
       continue;   /* a page this build does not have */
+    if (!g_strcmp0 (id, "self_notebook") && !ns_prompt_installed ())
+      continue;   /* the row opens Neo Prompt: without it the row would do nothing */
     if (!eg)
       eg = ns_group (m->content, NULL);
     GtkWidget *r = ns_row (eg, str_of (p, "icon"), str_of (p, "color"), str_of (p, "title"), str_of (p, "subtitle"));

@@ -144,6 +144,13 @@ ns_json_arr (JsonObject *o, const char *member)
 }
 
 gboolean
+ns_prompt_installed (void)
+{
+  g_autoptr (GDesktopAppInfo) info = g_desktop_app_info_new ("de.yesman.NeoPrompt.desktop");
+  return info != NULL;
+}
+
+gboolean
 ns_prompt_open (const char *id, const char *person)
 {
   g_autoptr (GDesktopAppInfo) info = g_desktop_app_info_new ("de.yesman.NeoPrompt.desktop");
