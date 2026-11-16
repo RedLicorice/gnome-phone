@@ -197,13 +197,14 @@ typedef struct {
   GtkWidget         *content, *msg;
   char              *id, *label;
   JsonObject        *ui;
-  GtkWidget         *status_g, *status_row, *pair_g, *qr_row, *picture, *hint, *wait_row, *scan_row, *token_row;
+  GtkWidget         *status_g, *status_row, *pair_g, *qr_row, *picture, *hint, *wait_row, *scan_row, *token_row, *retry_row;
   GtkWidget         *read_row, *write_row, *unread_row, *ask_row, *whitelist_row;
   GBytes            *qr_bytes;    /* what it held: a new one only when the bytes change */
   GStrv              order;       /* the scopes, in the order the pickers show them */
   GStrv              scope_names; /* their labels, in that order */
   GStrv              whitelist;
-  guint              poll_id, poll_s;
+  guint              poll_id, poll_s, stuck_s;
+  gint64             idle_since;  /* monotonic µs: since when the page has seen neither a code nor a connection */
   char              *kind;        /* the pairing kind of messaging.conf ("" when the provider does not pair) */
   char              *state, *word; /* the last status: its state and the daemon's own label */
   gboolean           scanning;
@@ -316,6 +317,7 @@ qr_draw (Prov *p, const char *png_b64, const char *svg)
   }
   qr_forget (p);
   p->qr_bytes = g_bytes_ref (fresh);
+  p->idle_since = g_get_monotonic_time ();
 }
 
 static void prov_refresh_status (Prov *p);
@@ -328,6 +330,33 @@ token_open (GtkWidget *row, gpointer data)
   AdwNavigationPage *page = ns_page_new (prov_text (p, "labels", "token_title"), &c);
   ns_messaging_token_add (c, page);
   ns_push (page);
+}
+
+static gboolean
+prov_stuck (Prov *p)
+{
+  return !p->qr_bytes && p->stuck_s && (g_get_monotonic_time () - p->idle_since) / G_USEC_PER_SEC >= p->stuck_s;
+}
+
+static void
+retry_done (JsonObject *root, const char *err, gpointer data)
+{
+  Prov *p = data;
+  const char *bad = bad_of (root, err, p->ui);
+  say (p->msg, bad ? bad : prov_text (p, "labels", "retrying"), bad != NULL);
+  p->idle_since = g_get_monotonic_time ();
+  prov_refresh_status (p);
+}
+
+/* "Riprova": the provider drops its connection and starts a clean one now; the session stays */
+static void
+retry_open (GtkWidget *row, gpointer data)
+{
+  Prov *p = data;
+  const char *args[] = { "messaging", "reconnect", p->id, "--json", NULL };
+  say (p->msg, prov_text (p, "labels", "retrying"), FALSE);
+  p->idle_since = g_get_monotonic_time ();
+  ns_mc_run (p->owner, args, NULL, retry_done, p);
 }
 
 /* the camera's process ended: the pairing may be done (a camera that was running already hands the scan over and
@@ -379,6 +408,10 @@ prov_apply (Prov *p)
     return;
   JsonObject *e = prov_entry (p);
   const char *hint = str_of (e, "hint"), *action = str_of (e, "action"), *button = str_of (e, "button");
+  const char *retry = str_of (e, "retry"), *late = str_of (e, "late_hint");
+  gboolean stuck = *retry && prov_stuck (p);
+  if (stuck && *late)
+    hint = late;
   gboolean qr = !g_strcmp0 (action, "qr");
   gboolean scan = !g_strcmp0 (action, "scan"), token = !g_strcmp0 (action, "token");
 
@@ -390,11 +423,14 @@ prov_apply (Prov *p)
     p->scan_row = ns_row_button (p->pair_g, button, FALSE, scan_open, p);
   if (token && !p->token_row)
     p->token_row = ns_row_button (p->pair_g, button, FALSE, token_open, p);
+  if (stuck && !p->retry_row)
+    p->retry_row = ns_row_button (p->pair_g, retry, FALSE, retry_open, p);
+  row_show (p->retry_row, stuck);
   row_show (p->qr_row, qr && p->qr_bytes);
   row_show (p->wait_row, qr && !p->qr_bytes);
   row_show (p->scan_row, scan);
   row_show (p->token_row, token);
-  ns_group_set_visible (p->pair_g, qr || scan || token);
+  ns_group_set_visible (p->pair_g, qr || scan || token || stuck);
 }
 
 static void
@@ -449,10 +485,15 @@ status_loaded (JsonObject *root, const char *err, gpointer data)
   Prov *p = data;
   gboolean ok = !err && ok_of (root);
   const char *state = ok ? str_of (root, "state") : "";
+  const char *word = ok ? str_of (root, "label") : "";
+  if (g_strcmp0 (state, p->state) || g_strcmp0 (word, p->word))
+    p->idle_since = g_get_monotonic_time ();
   g_free (p->state);
   g_free (p->word);
   p->state = g_strdup (state);
-  p->word = g_strdup (ok ? str_of (root, "label") : "");
+  p->word = g_strdup (word);
+  if (g_strcmp0 (state, "pairing"))
+    qr_forget (p);   /* no pairing, no code: a picture left from before would also hide the retry */
   g_autofree char *text = status_text (root, err, p->ui, p->kind);
   ns_row_set_subtitle (p->status_row, text);
   if (!g_strcmp0 (state, "pairing") && !g_strcmp0 (str_of (prov_entry (p), "action"), "qr") && !p->qr_bytes)
@@ -701,6 +742,7 @@ prov_build (Prov *p, JsonObject *root)
   p->label = g_strdup (*label ? label : p->id);
   ns_page_set_title (p->page, p->label);
   p->poll_s = (guint) json_object_get_int_member_with_default (limits, "page_poll_s", 2);
+  p->stuck_s = (guint) json_object_get_int_member_with_default (limits, "stuck_hint_s", 0);
 
   JsonArray *ord = arr_of (scopes, "order");
   JsonObject *scope_labels = obj_of (scopes, "labels");
@@ -809,6 +851,7 @@ ns_page_provider (GtkWidget *row, gpointer data)
   p->id = g_strdup (id);
   p->label = g_strdup (id);
   p->poll_s = 2;
+  p->idle_since = g_get_monotonic_time ();
   g_object_set_data_full (G_OBJECT (page), "mp-prov", p, (GDestroyNotify) prov_free);
   p->msg = ns_note (c, "");
   gtk_widget_set_visible (p->msg, FALSE);
