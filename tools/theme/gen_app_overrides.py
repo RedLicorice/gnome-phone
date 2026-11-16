@@ -46,7 +46,7 @@ def from_hls(h, l, s):
     return "#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
 
 
-def remap_night(h):
+def remap_night(h):                                # a "#rrggbb" string, like remap_day
     hue, l, s = to_hls(parse_hex(h))
     deg = hue * 360
     if s < 0.14:                                  # neutrals
@@ -61,7 +61,7 @@ def remap_night(h):
         if l < 0.42:
             return from_hls(224 / 360, l * 0.85, 0.52)   # dark teal -> lapis
         return from_hls(41 / 360, min(l, 0.78), 0.55)    # light teal -> gold
-    return h                                     # other hues (red, orange, calendar colours) stay
+    return "#" + h                               # other hues (red, orange, calendar colours) stay
 
 
 def remap_day(h):
@@ -181,8 +181,7 @@ def convert(value, role, scheme, bg=None):
     # a shadow, a border or a gradient's stop is left as it was, unless it is a hex colour (as it always was):
     # turning a scrim light would paint a glow, not a day look
     if role == "other" or (role == "surface" and value.lstrip().startswith("linear-gradient")):
-        return HEX.sub(lambda m: "#" + remap_day(m.group(1)) if scheme == "day" else "#" + remap_night(m.group(1)),
-                       value)
+        return HEX.sub(lambda m: remap_day(m.group(1)) if scheme == "day" else remap_night(m.group(1)), value)
     return NAMED_RE.sub(sub_named, COLOR.sub(sub_hex, value))
 
 
