@@ -70,6 +70,25 @@ function setLockedHint(locked) {
 }
 
 // --- the lock screen (§6.1-6.3)
+// The secret checked by gp-auth through PAM, as the bouncer's and the voice service's PIN sheet's (pinask.js): its
+// exit status, 0 right, 1 wrong, 2 could not check (no helper, or PAM did not run)
+export async function checkPin(secret) {
+    const helper = GP_AUTH.find(p => GLib.file_test(p, GLib.FileTest.IS_EXECUTABLE));
+    if (!helper) {
+        log('gnome-phone: no gp-auth to check the lock screen secret with');
+        return 2;
+    }
+    try {
+        const proc = Gio.Subprocess.new([helper],
+            Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE);
+        await proc.communicate_utf8_async(`${secret}\n`, null);
+        return proc.get_if_exited() ? proc.get_exit_status() : 2;
+    } catch (e) {
+        logError(e, 'gnome-phone: gp-auth');
+        return 2;
+    }
+}
+
 const CLOCK_SIZE = 86 * 0.98;           // dp, the small Flex clock
 const CLOCK_WGHT = 550;                 // matched to the reference's ink: 582 px for "05:12"
 const CLOCK_LEFT = 84;                  // 28 dp
@@ -1063,21 +1082,8 @@ export class Keyguard extends Signals.EventEmitter {
         }
     }
 
-    async _check(secret) {
-        const helper = GP_AUTH.find(p => GLib.file_test(p, GLib.FileTest.IS_EXECUTABLE));
-        if (!helper) {
-            log('gnome-phone: no gp-auth to check the lock screen secret with');
-            return 2;
-        }
-        try {
-            const proc = Gio.Subprocess.new([helper],
-                Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE);
-            await proc.communicate_utf8_async(`${secret}\n`, null);
-            return proc.get_if_exited() ? proc.get_exit_status() : 2;
-        } catch (e) {
-            logError(e, 'gnome-phone: gp-auth');
-            return 2;
-        }
+    _check(secret) {
+        return checkPin(secret);
     }
 
     get _lockedOut() {

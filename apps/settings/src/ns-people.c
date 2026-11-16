@@ -91,8 +91,11 @@ typedef struct {
   GObject    *owner;            /* the page: kept alive by the running jobs */
   JsonObject *ui;
   char       *id, *name, *pending_uid, *pending_contact;
-  gboolean    enrolled;
+  gboolean    enrolled, running;
+  gboolean    learning, learn_hold;   /* voice_learn.enabled of the answer; hold: the user's toggle is in flight */
+  gint64      clips, need;            /* voice_learn.clips / .need */
   GtkWidget  *msg, *faces_row, *voice_row, *enroll_btn, *forget_btn, *contact_row, *unlink_btn;
+  GtkWidget  *learn_row, *learn_sw, *clips_btn;
   guint       poll_id, poll_s;
 } Pd;
 
@@ -119,12 +122,41 @@ static void voice_load (Pd *d);
 static void person_load (Pd *d);
 static void open_notebook (GtkWidget *row, gpointer data);
 
+/* the learning row from the last answers: the server's state, never the switch's own (unless a toggle is in flight) */
+static void
+learn_apply (Pd *d)
+{
+  if (!d->learn_row)
+    return;
+  g_autofree char *clips = g_strdup_printf ("%" G_GINT64_FORMAT, d->clips);
+  g_autofree char *need = g_strdup_printf ("%" G_GINT64_FORMAT, d->need);
+  g_autofree char *sub = NULL;
+  if (!d->learning)
+    sub = g_strdup (d_str (d, "learn_off"));
+  else if (d->clips < d->need)
+    sub = fmt (d_str (d, "learn_progress"), "clips", clips, "need", need, NULL);
+  else
+    sub = fmt (d_str (d, "learn_progress_done"), "clips", clips, NULL);
+  ns_row_set_subtitle (d->learn_row, sub);
+  gtk_widget_set_sensitive (d->learn_row, d->running);
+  if (d->learn_sw) {
+    if (!d->learn_hold)
+      ns_switch_quiet (d->learn_sw, d->learning);
+    gtk_widget_set_sensitive (d->learn_sw, d->running);
+  }
+  if (d->clips_btn)
+    gtk_widget_set_visible (d->clips_btn, d->clips > 0);
+}
+
 static gboolean
 poll_tick (gpointer data)
 {
   Pd *d = data;
   d->poll_id = 0;
-  voice_load (d);
+  if (d->learning)
+    person_load (d);   /* the clip count is in `people show`; it loads the voice service after it */
+  else
+    voice_load (d);
   return G_SOURCE_REMOVE;
 }
 
@@ -137,6 +169,9 @@ voice_loaded (JsonObject *root, const char *err, gpointer data)
     return;
   }
   gboolean running = bool_of (root, "running");
+  JsonObject *learn = obj_of (root, "learn");   /* the clips the service keeps (learn.py pos/), and how many it wants */
+  d->clips = int_of (learn, "learned");
+  d->need = int_of (learn, "needed");
   gboolean mine = bool_of (root, "enrolling") && !g_strcmp0 (str_of (root, "person"), d->id);
   gboolean busy = bool_of (root, "enrolling");
   JsonArray *voices = arr_of (root, "voices");
@@ -156,7 +191,9 @@ voice_loaded (JsonObject *root, const char *err, gpointer data)
   gtk_widget_set_visible (d->enroll_btn, running && !busy);
   gtk_widget_set_visible (d->forget_btn, running && !mine);
   gtk_widget_set_sensitive (d->forget_btn, d->enrolled);
-  if (busy && !d->poll_id)
+  d->running = running;
+  learn_apply (d);
+  if ((busy || d->learning) && !d->poll_id)
     d->poll_id = g_timeout_add_seconds (d->poll_s, poll_tick, d);
 }
 
@@ -186,6 +223,8 @@ person_loaded (JsonObject *root, const char *err, gpointer data)
   const char *cname = *str_of (root, "contact_name") ? str_of (root, "contact_name") : str_of (root, "contact_uid");
   ns_row_set_subtitle (d->contact_row, linked ? cname : d_str (d, "contact_none"));
   gtk_widget_set_visible (d->unlink_btn, linked);
+  d->learning = bool_of (obj_of (root, "voice_learn"), "enabled");
+  learn_apply (d);
   voice_load (d);
 }
 
@@ -205,9 +244,11 @@ answered (JsonObject *root, const char *err, gpointer data)
   Ans *a = data;
   Pd *d = a->d;
   const char *why = problem (root, err);
-  if (why)
+  d->learn_hold = FALSE;
+  if (why) {
     msg_set (d->msg, why, TRUE);
-  else if (a->pop)
+    learn_apply (d);   /* a refused toggle: the switch back to what the server holds */
+  } else if (a->pop)
     gtk_widget_activate_action (d->msg, "navigation.pop", NULL);
   else {
     msg_set (d->msg, a->done ? d_str (d, a->done) : "", FALSE);
@@ -280,6 +321,56 @@ forget_tapped (GtkWidget *row, gpointer data)
   Pd *d = data;
   g_autofree char *body = fmt (d_str (d, "voice_forget_body"), "name", d->name, NULL);
   ns_confirm (row, d_str (d, "voice_forget_heading"), body, d_str (d, "voice_forget"), TRUE, forget_confirmed, d);
+}
+
+static void
+learn_consent_given (gboolean yes, gpointer data)
+{
+  Pd *d = data;
+  if (!yes) {
+    d->learn_hold = FALSE;
+    learn_apply (d);
+    return;
+  }
+  /* the consent is the confirmation the user read and accepted, word for word */
+  g_autofree char *consent = fmt (d_str (d, "learn_consent_body"), "name", d->name, NULL);
+  const char *const args[] = { "people", "voice-learn", d->id, "on", "--consent", consent, "--json", NULL };
+  run (d, args, NULL, "learn_enabled", FALSE);
+}
+
+static void
+learn_toggled (GObject *sw, GParamSpec *pspec, gpointer data)
+{
+  Pd *d = data;
+  if (ns_switch_syncing (GTK_WIDGET (sw)))
+    return;
+  d->learn_hold = TRUE;
+  if (gtk_switch_get_active (GTK_SWITCH (sw))) {
+    g_autofree char *heading = fmt (d_str (d, "learn_consent_heading"), "name", d->name, NULL);
+    g_autofree char *body = fmt (d_str (d, "learn_consent_body"), "name", d->name, NULL);
+    ns_confirm (GTK_WIDGET (sw), heading, body, d_str (d, "learn_consent_ok"), FALSE, learn_consent_given, d);
+  } else {
+    const char *const args[] = { "people", "voice-learn", d->id, "off", "--json", NULL };
+    run (d, args, NULL, "learn_disabled", FALSE);
+  }
+}
+
+static void
+clips_confirmed (gboolean yes, gpointer data)
+{
+  Pd *d = data;
+  const char *const args[] = { "people", "voice-clips", d->id, "clear", "--json", NULL };
+  if (yes)
+    run (d, args, NULL, "clips_forgotten", FALSE);
+}
+
+static void
+clips_tapped (GtkWidget *row, gpointer data)
+{
+  Pd *d = data;
+  g_autofree char *clips = g_strdup_printf ("%" G_GINT64_FORMAT, d->clips);
+  g_autofree char *body = fmt (d_str (d, "clips_forget_body"), "clips", clips, "name", d->name, NULL);
+  ns_confirm (row, d_str (d, "clips_forget_heading"), body, d_str (d, "clips_forget"), TRUE, clips_confirmed, d);
 }
 
 static void
@@ -427,6 +518,14 @@ person_open (JsonObject *ui, const char *id, const char *name)
   d->voice_row = ns_row (g, "audio-input-microphone-symbolic", "violet", d_str (d, "voice_row"), "");
   d->enroll_btn = ns_row_button (g, d_str (d, "voice_enroll"), FALSE, enroll_tapped, d);
   d->forget_btn = ns_row_button (g, d_str (d, "voice_forget"), TRUE, forget_tapped, d);
+  d->learn_row = ns_row_toggle (g, "audio-input-microphone-symbolic", "violet", d_str (d, "learn_row"),
+                                d_str (d, "learn_off"));
+  d->learn_sw = ns_row_get_switch (d->learn_row);
+  if (d->learn_sw)
+    g_signal_connect (d->learn_sw, "notify::active", G_CALLBACK (learn_toggled), d);
+  d->clips_btn = ns_row_button (g, d_str (d, "clips_forget"), TRUE, clips_tapped, d);
+  gtk_widget_set_visible (d->clips_btn, FALSE);
+  learn_apply (d);   /* insensitive until the voice service answers */
 
   g = ns_group (c, d_str (d, "contact"));
   d->contact_row = ns_row (g, "contact-new-symbolic", "green", d_str (d, "contact_row"), "");

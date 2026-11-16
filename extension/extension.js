@@ -22,6 +22,7 @@ import {AndroidKeyboard} from './osk.js';
 import {TouchFocusKeyboard} from './oskfocus.js';
 import {TouchKeyboard} from './hkeyboard.js';
 import {overWindows} from './scanout.js';
+import {PinAsk} from './pinask.js';
 import {Power} from './power.js';
 import {PowerMenu} from './powermenu.js';
 import {Rotation} from './rotation.js';
@@ -144,6 +145,8 @@ export default class GnomePhoneExtension extends Extension {
         this._stacks.setKeyguard(this._keyguard);
         this._whenLocked = new WhenLocked(this._keyguard, this._stacks);
         this._rotation.follow(this._keyguard, this._home);
+        // the owner's PIN, asked for by the Minerva voice service (org.minerva.Pin1), never over the lock screen
+        this._pinAsk = new PinAsk(this._keyguard);
         // the volume keys show the volume dialog, over the shade and the lock screen too
         this._volume = new VolumeDialog();
         // ... unless the app in front took them (a ringing timer stops on one)
@@ -232,6 +235,8 @@ export default class GnomePhoneExtension extends Extension {
         this._chord = null;
         this._whenLocked?.destroy();
         this._whenLocked = null;
+        this._pinAsk?.destroy();
+        this._pinAsk = null;
         this._keyguard?.destroy();
         this._keyguard = null;
         this._headsUp?.destroy();
