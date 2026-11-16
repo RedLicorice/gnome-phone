@@ -11,7 +11,8 @@ install -m 644 gnome-phone.service gnome-desktop.service neo-dock.service input-
     neo-wakeup.service /etc/systemd/system/
 install -m 755 neo-dock sim-apn /usr/local/sbin/
 install -m 644 71-neo-dock.rules /etc/udev/rules.d/
-install -m 644 pam.d/gnome-phone /etc/pam.d/
+install -m 644 pam.d/gnome-phone pam.d/gnome-phone-fingerprint pam.d/gnome-phone-voice /etc/pam.d/
+install -m 755 gp-voice-check /usr/local/libexec/
 install -m 644 environment.d/60-spongy.conf /etc/environment.d/
 install -m 644 de.yesman.Wakeup.conf /etc/dbus-1/system.d/
 install -d /etc/systemd/user/org.gnome.Shell@.service.d

@@ -2,7 +2,7 @@
 //   gjs -m extension/tests/lockover.test.js
 import System from 'system';
 
-import {fingerAllowed, mayOcclude, secretRequired, voiceWakeAllowed} from '../lockover.js';
+import {fingerAllowed, mayOcclude, secretRequired, voiceUnlockAllowed, voiceWakeAllowed} from '../lockover.js';
 
 let failed = 0;
 function check(name, ok, detail = '') {
@@ -63,5 +63,18 @@ check('Lockdown is the reason over the PIN not entered', voiceWakeAllowed({...vo
     lockedDown: true}) === 'locked-down');
 check('the PIN timeout is the reason over the PIN not entered', voiceWakeAllowed({...voice, afterRestart: true,
     lockedOut: true}) === 'locked-out');
+
+// --- the voice's way in (voiceUnlockAllowed): off unless the owner turned it on, and never before a PIN
+const unlockable = {enabled: true, showing: true, secure: true, afterRestart: false, lockedDown: false,
+    unlocking: false, lockedOut: false, misses: 0, max: 5};
+check('the switch on, a secret, and the way is there', voiceUnlockAllowed(unlockable));
+check('the switch off offers nothing', !voiceUnlockAllowed({...unlockable, enabled: false}));
+check('after a boot the PIN comes first', !voiceUnlockAllowed({...unlockable, afterRestart: true}));
+check('in Lockdown no voice unlocks', !voiceUnlockAllowed({...unlockable, lockedDown: true}));
+check('its own misses used up: the PIN', !voiceUnlockAllowed({...unlockable, misses: 5}));
+check('an unlock under way is not interrupted', !voiceUnlockAllowed({...unlockable, unlocking: true}));
+check('a swipe lock has no secret to check against', !voiceUnlockAllowed({...unlockable, secure: false}));
+
+System.exit(failed ? 1 : 0);
 
 System.exit(failed ? 1 : 0);

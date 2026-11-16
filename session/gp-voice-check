@@ -1,0 +1,27 @@
+#!/bin/sh
+# gp-voice-check: the PAM step behind "gnome-phone-voice", which gp-auth --voice runs for the lock screen.
+#
+# It asks the Minerva voice service for a live check: org.minerva.Voice1.VerifyUnlock records a few seconds from the
+# microphone, compares them with the owner's voiceprint and answers with the decision, after applying the rules that
+# keep voice unlock narrow (off unless enabled, only within N hours of a PIN or a finger, never after a boot, a
+# stricter threshold, a limit on misses). Every attempt is in the permission history with its score and time.
+#
+# Exit status: 0 the voice may unlock, 1 it may not, 2 the service could not be asked. pam_exec turns 0 into success
+# and anything else into a failure, so a service that is not there leaves the lock screen locked.
+set -u
+
+# PAM may hand us an environment without the session bus: the user's own bus is the one the voice service is on
+DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}
+export DBUS_SESSION_BUS_ADDRESS
+
+BUS_NAME=org.minerva.Voice1
+OBJ_PATH=/org/minerva/Voice1
+IFACE=org.minerva.Voice1
+
+answer=$(timeout 20 gdbus call --session --dest "$BUS_NAME" --object-path "$OBJ_PATH" \
+    --method "$IFACE.VerifyUnlock" 2>/dev/null) || exit 2
+[ -n "$answer" ] || exit 2
+# (true, 0.918273, 'sblocco vocale accettato')
+printf '%s\n' "$answer" | grep -q '^(true,' && exit 0
+printf '%s\n' "$answer" | grep -q '^(false,' && exit 1
+exit 2

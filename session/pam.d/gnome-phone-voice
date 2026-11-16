@@ -1,0 +1,7 @@
+# gnome-phone's lock screen, the owner's voice (gp-auth --voice): asked one at a time, and only when the lock screen
+# offers it (once the PIN or a finger unlocked since boot, within the window the voice service enforces). The decision
+# is the service's (org.minerva.Voice1.VerifyUnlock): a live recording, the owner's voiceprint, a stricter threshold
+# than the wake word's, a limit on misses, and a row in the permission history for every attempt. gp-voice-check
+# exits 0 only for an accepted voice; anything else leaves the lock screen locked.
+auth	required	pam_exec.so quiet /usr/local/libexec/gp-voice-check
+@include common-account

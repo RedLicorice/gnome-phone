@@ -39,3 +39,12 @@ export function voiceWakeAllowed({secure, afterRestart, lockedDown, lockedOut}) 
         return 'locked-out';
     return 'pin-not-entered';
 }
+
+// Whether the lock screen offers "Sblocca con la voce". Voice is the weakest biometric (a recording of the owner can be
+// replayed), so it is offered only when the owner turned it on, the lock has a secret, a PIN or a finger already
+// unlocked since the boot or the shell started, no lock-down and no PIN timeout is on, and its own misses are not used
+// up. The window (N hours) and the threshold are the voice service's: this is only whether to offer the button.
+export function voiceUnlockAllowed({enabled, showing, secure, afterRestart, lockedDown, unlocking, lockedOut, misses,
+    max}) {
+    return !!enabled && !!showing && !!secure && !afterRestart && !lockedDown && !unlocking && !lockedOut && misses < max;
+}

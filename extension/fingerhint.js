@@ -120,7 +120,11 @@ class PinButton extends St.Widget {
 
     // @kind: the bouncer's kind ('pin' or 'pattern'): the word names the secret, and the button takes its width
     setKind(kind) {
-        const text = secretWord(kind);
+        this.setText(secretWord(kind));
+    }
+
+    // @text: the button's word, any (the voice unlock's is not the secret's); @top: its place, the hint's edge by default
+    setText(text, top = BUTTON.top) {
         if (text === this._text)
             return;
         this._text = text;
@@ -128,7 +132,7 @@ class PinButton extends St.Widget {
         const width = this._label.textWidth + 2 * BUTTON.pad;
         this.width = px(width);
         this.height = px(BUTTON.height);
-        this.set_position(px(SCREEN_W - BUTTON.right - width), px(BUTTON.top));
+        this.set_position(px(SCREEN_W - BUTTON.right - width), px(top));
         this._label.set_position(px(BUTTON.pad - this._label.inset),
             px(BUTTON.inkTop - this._label.inset - this._label.ink.y));
     }

@@ -137,6 +137,14 @@ ns_page_lock_screen (GtkWidget *row, gpointer data)
 
   ns_fprint_lock_group (page, c);
 
+  /* Voice unlock: the switch is the shell's keyguard reading de.yesman.neo voice-unlock; off until the owner turns it
+   * on, and the window, the threshold and the misses are the Minerva voice service's (voice.conf). */
+  g = ns_group (c, "Voice");
+  ns_row_switch (g, "Unlock with the voice", "A recording of your voice can fool it", neo, "voice-unlock");
+  ns_note (c, "Off by default. On, the lock screen offers \"Sblocca con la voce\" only within 4 hours of a PIN or a "
+              "fingerprint unlock, never after a restart, and only for your voiceprint. A recording of your voice can "
+              "fool it: turn it on only if the convenience is worth that. Every attempt is in Security > History.");
+
   g = ns_group (c, "On the lock screen");
   GSettings *n = ns_page_settings (page, "org.gnome.desktop.notifications");
   ns_row_switch (g, "Notifications", "Their apps' icons below the clock", n, "show-in-lock-screen");

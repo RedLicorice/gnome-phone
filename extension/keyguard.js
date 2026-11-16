@@ -42,6 +42,20 @@ Gio._promisify(Gio.File.prototype, 'replace_contents_async');
 
 const GP_AUTH = ['/usr/local/libexec/gp-auth', '/usr/libexec/gp-auth'];
 
+// Voice unlock: the switch Settings owns (de.yesman.neo voice-unlock, off by default, with the warning that a recording
+// can fool it), the Minerva voice service that answers the live check, and the words the lock screen adds around it.
+const VOICE_KEY = 'voice-unlock';
+const VOICE_NAME = 'org.minerva.Voice1';
+const VOICE_PATH = '/org/minerva/Voice1';
+const VOICE_IFACE = 'org.minerva.Voice1';
+const VOICE_WORD = 'Sblocca con la voce';
+const VoiceStrings = {
+    listening: 'Ascolto, parla ora',
+    miss: 'Voce non riconosciuta, riprova',
+    tooMany: 'Troppi tentativi, usa il PIN',
+    unavailable: 'Sblocco vocale non disponibile',
+};
+
 // A finger on the side sensor (gp-auth --fingerprint, pam_fprintd: one try per run) unlocks. The sensor is in the
 // power key and listens while the phone is locked, screen off too: with the screen off a result counts only with the
 // key's press that wakes the phone (Xiaomi's "press to unlock"), a touch in a pocket alone does nothing.
@@ -236,6 +250,8 @@ export class Keyguard extends Signals.EventEmitter {
         this._countdownId = 0;
         this._checking = false;
         this._finger = null;            // the running gp-auth --fingerprint
+        this._voice = null;             // the running gp-auth --voice
+        this._voiceLine = null;         // its one line of words
         this._fingerMisses = 0;
         this._fingerPending = null;     // a screen-off result waiting for the power key's press (wokeUp)
         this._fingerRetries = 0;        // re-arms spent since the sensor last held the device
@@ -397,6 +413,10 @@ export class Keyguard extends Signals.EventEmitter {
         // grab holds; hidden while the lock screen is itself, where the lock icon and the swipe up do.
         this._pinButton = new PinButton(() => this._pinTapped());
         this.actor.add_child(this._pinButton);
+        // voice unlock (docs/voice-unlock.md): the owner's voice, only when Settings offers it and the rules allow it
+        this._voiceButton = new PinButton(() => this._voiceTapped());
+        this._voiceButton.setText(VOICE_WORD, Math.round(SCREEN_H / 2) + 268);
+        this.actor.add_child(this._voiceButton);
         // the sensor's state, on the right edge at the power key (fingerhint.js). In a layer of its own, over the lock
         // screen and over a window that shows over it (setOccluded): there this view draws nothing, and the state of
         // the sensor is all that stays on the screen.
@@ -710,6 +730,12 @@ export class Keyguard extends Signals.EventEmitter {
         }
         const kind = this._lockType === 'pattern' ? 'pattern' : 'pin';
         this._pinButton?.setKind(kind);
+        if (this._voiceButton)
+            this._voiceButton.visible = voiceUnlockAllowed({
+                enabled: this._voiceUnlockOn(), showing: this.showing, secure: this._secure,
+                afterRestart: this._afterRestart, lockedDown: this._lockedDown,
+                unlocking: this._unlockingNow, lockedOut: this._lockedOut,
+                misses: this._fingerMisses, max: this._fingerMaxMisses}) && !(this._bouncerBox?.visible ?? false);
         this._fingerHint.setState(fingerState({
             secure: this._secure,
             bouncer: this._bouncerBox?.visible ?? false,
@@ -802,6 +828,7 @@ export class Keyguard extends Signals.EventEmitter {
             this._fingerMisses = 0;
             this._fingerRetries = 0;
             this._fingerSignal = '';
+            this._noteUnlock('fingerprint');
             // a window over the lock screen: the phone unlocks behind it, where the user is
             if (this.occludedBy)
                 this._unlockOver();
@@ -1172,6 +1199,7 @@ export class Keyguard extends Signals.EventEmitter {
                 this._pinLength = /^[0-9]+$/.test(secret) && secret.length >= MIN_AUTO_CONFIRM ? secret.length : 0;
             this._saveThrottle();
             this._afterRestart = false;
+            this._noteUnlock('pin');
             // the phone has had its secret: the window over the lock screen may come back (whenlocked.js)
             this._syncSecretRequired();
             this._bouncer.disappear(() => this._goingAway());
