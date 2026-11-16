@@ -18,6 +18,7 @@ struct _NeoDialog {
   double     shown;           /* the window animation: 0 .. 1 */
   double     rise;            /* dp the card is below (positive) or above (negative) its place */
   NeoAnim   *anim;
+  GtkEventController *keys;   /* the window's, while the dialog is up */
   gboolean   closing;
   gboolean   flush;
 };
@@ -76,6 +77,25 @@ neo_dialog_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
 
 /* ---- the window animation -------------------------------------------------------------------------------------- */
 
+static gboolean on_key (GtkEventControllerKey *keys, guint keyval, guint keycode, GdkModifierType state,
+                        NeoDialog *self);
+
+/* Escape and Back belong to the dialog while it is up, wherever the focus is: the key controller sits on the window
+ * (not on the dialog, which never takes the focus) and runs in the bubble phase, so a popover inside the dialog and
+ * the text in it still see the key first. */
+static void
+detach_keys (NeoDialog *self)
+{
+  GtkRoot *root = NULL;
+
+  if (!self->keys)
+    return;
+  root = gtk_widget_get_root (GTK_WIDGET (self));
+  if (root)
+    gtk_widget_remove_controller (GTK_WIDGET (root), self->keys);
+  self->keys = NULL;   /* the widget owned it: removing it destroyed it */
+}
+
 static void
 on_anim (NeoAnim *anim, double value, gpointer data)
 {
@@ -85,6 +105,7 @@ on_anim (NeoAnim *anim, double value, gpointer data)
   gtk_widget_queue_draw (GTK_WIDGET (self));
   if (self->closing && !neo_anim_is_running (anim)) {
     GtkWidget *overlay = gtk_widget_get_parent (GTK_WIDGET (self));
+    detach_keys (self);
     if (overlay)
       gtk_overlay_remove_overlay (GTK_OVERLAY (overlay), GTK_WIDGET (self));
   }
@@ -107,6 +128,7 @@ void
 neo_dialog_present (NeoDialog *self, GtkWidget *parent)
 {
   GtkOverlay *overlay = neo_window_get_overlay (parent);
+  GtkRoot *root = NULL;
   g_return_if_fail (overlay != NULL);
   gtk_overlay_add_overlay (overlay, GTK_WIDGET (self));
   /* the scrim covers the whole window and takes every touch outside the card */
@@ -116,6 +138,14 @@ neo_dialog_present (NeoDialog *self, GtkWidget *parent)
   neo_anim_start_cubic (self->anim, 0, 1, ENTER_MS, 0, 0.2f, 0, 0, 1);
   /* the first field takes the keyboard focus (and on the phone opens the keyboard), as the label dialog's does */
   gtk_widget_child_focus (self->card, GTK_DIR_TAB_FORWARD);
+  root = gtk_widget_get_root (GTK_WIDGET (self));
+  if (root && !self->keys)
+    {
+      self->keys = gtk_event_controller_key_new ();
+      gtk_event_controller_set_propagation_phase (self->keys, GTK_PHASE_BUBBLE);
+      g_signal_connect (self->keys, "key-pressed", G_CALLBACK (on_key), self);
+      gtk_widget_add_controller (GTK_WIDGET (root), self->keys);
+    }
 }
 
 static void
@@ -151,6 +181,7 @@ static void
 neo_dialog_dispose (GObject *object)
 {
   NeoDialog *self = NEO_DIALOG (object);
+  detach_keys (self);
   g_clear_pointer (&self->anim, neo_anim_free);
   g_clear_pointer (&self->card, gtk_widget_unparent);
   G_OBJECT_CLASS (neo_dialog_parent_class)->dispose (object);

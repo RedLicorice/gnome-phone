@@ -15,6 +15,8 @@ NpHistory  *np_history_new       (NpStore *store, GtkWindow *window, GtkWidget *
 GtkWidget  *np_history_root      (NpHistory *self);
 void        np_history_set_doc   (NpHistory *self, NpDoc *doc);
 void        np_history_refresh   (NpHistory *self);
+/* the diff goes back to the list of snapshots: TRUE when there was a diff to close, so Back stops there */
+gboolean    np_history_back      (NpHistory *self);
 /* the text the snapshot is compared with (the editor's) */
 void        np_history_set_current_cb (NpHistory *self, char *(*cb) (gpointer), gpointer data);
 /* the snapshot to put back in the editor */

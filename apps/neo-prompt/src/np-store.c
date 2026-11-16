@@ -30,6 +30,12 @@ object_of (JsonObject *o, const char *key)
   return o && json_object_has_member (o, key) ? json_object_get_object_member (o, key) : NULL;
 }
 
+static double
+jdouble (JsonObject *o, const char *key, double fallback)
+{
+  return o && json_object_has_member (o, key) ? json_object_get_double_member (o, key) : fallback;
+}
+
 char *
 np_path_expand (const char *path)
 {
@@ -74,6 +80,59 @@ np_ui (NpStore *self, const char *key)
         return json_object_get_string_member (o, parts[i]);
     }
   return key;
+}
+
+/* the mode file: { "modes": { "markdown": "rendered" } }, the choices the editor has made, per kind */
+static JsonObject *
+state_object (NpStore *self)
+{
+  JsonObject *state = self->conf.state_path ? json_file_object (self->conf.state_path) : NULL;
+
+  return state ? state : json_object_new ();
+}
+
+char *
+np_mode_for (NpStore *self, const char *kind)
+{
+  g_autoptr(JsonObject) state = state_object (self);
+  const char *mode = jstr (object_of (state, "modes"), kind);
+
+  if (!mode && self->conf.modes)
+    mode = jstr (self->conf.modes, kind);
+  return g_strdup (mode && *mode ? mode : "source");
+}
+
+void
+np_mode_set (NpStore *self, const char *kind, const char *mode)
+{
+  g_autoptr(JsonObject) state = NULL;
+  g_autoptr(JsonNode) root = NULL;
+  g_autoptr(JsonGenerator) generator = NULL;
+  g_autofree char *dir = NULL;
+  JsonObject *modes = NULL;
+  char *text = NULL;
+
+  if (!self->conf.state_path || !kind || !*kind)
+    return;
+  state = state_object (self);
+  modes = object_of (state, "modes");
+  if (!modes)
+    {
+      modes = json_object_new ();
+      json_object_set_object_member (state, "modes", modes);
+    }
+  json_object_set_string_member (modes, kind, mode && *mode ? mode : "source");
+  dir = g_path_get_dirname (self->conf.state_path);
+  if (g_mkdir_with_parents (dir, 0700) != 0)
+    return;
+  root = json_node_alloc ();
+  json_node_init_object (root, state);
+  generator = json_generator_new ();
+  json_generator_set_root (generator, root);
+  text = json_generator_to_data (generator, NULL);
+  if (text && g_file_set_contents (self->conf.state_path, text, -1, NULL))
+    g_chmod (self->conf.state_path, 0600);
+  g_free (text);
 }
 
 static char **
@@ -288,6 +347,24 @@ np_store_new (const char *conf_path)
   self->conf.people_root = np_path_expand (jstr (paths, "people_root"));
   self->conf.event_templates = np_path_expand (jstr (paths, "event_templates"));
   self->conf.input_tags = np_path_expand (jstr (paths, "input_tags"));
+  self->conf.state_path = np_path_expand (jstr (paths, "state"));
+  {
+    JsonObject *editor = object_of (conf, "editor");
+    JsonObject *rendered = object_of (editor, "rendered");
+    JsonArray *scales = rendered && json_object_has_member (rendered, "heading_scale")
+                        && JSON_NODE_HOLDS_ARRAY (json_object_get_member (rendered, "heading_scale"))
+                        ? json_object_get_array_member (rendered, "heading_scale") : NULL;
+
+    self->conf.modes = object_of (editor, "modes") ? json_object_ref (object_of (editor, "modes")) : NULL;
+    for (guint i = 0; i < G_N_ELEMENTS (self->conf.render.heading_scale); i++)
+      self->conf.render.heading_scale[i] = scales && i < json_array_get_length (scales)
+                                           ? json_array_get_double_element (scales, i) : 1.0;
+    self->conf.render.heading_above = jint (rendered, "heading_above", 8);
+    self->conf.render.heading_below = jint (rendered, "heading_below", 4);
+    self->conf.render.list_indent = jint (rendered, "list_indent", 16);
+    self->conf.render.quote_indent = jint (rendered, "quote_indent", 12);
+    self->conf.render.chip_scale = jdouble (rendered, "chip_scale", 1.0);
+  }
   self->conf.history_max = jint (limits, "history_max", 40);
   self->conf.chars_per_token = jint (limits, "chars_per_token", 4);
   self->conf.cache_min_tokens = jint (limits, "cache_min_tokens", 1024);
@@ -338,6 +415,9 @@ np_store_free (NpStore *self)
   g_free (self->conf.skills_dir);
   g_free (self->conf.people_root);
   g_free (self->conf.event_templates);
+  g_free (self->conf.state_path);
+  if (self->conf.modes)
+    json_object_unref (self->conf.modes);
   g_free (self->conf.input_tags);
   if (self->conf.block_freq)
     json_object_unref (self->conf.block_freq);

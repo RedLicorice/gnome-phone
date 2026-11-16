@@ -272,6 +272,28 @@ mark_window (GtkWidget *window)
   gtk_widget_add_css_class (window, id);
 }
 
+/* who wants to hear that the look changed (the widgets that draw with colours of their own, not through CSS) */
+typedef struct {
+  void    (*cb) (gpointer);
+  gpointer data;
+} LookHandler;
+
+static GSList *look_handlers;
+
+void
+neo_on_look_changed (void (*cb) (gpointer), gpointer data)
+{
+  LookHandler *handler = NULL;
+
+  if (!cb)
+    return;
+  handler = g_new0 (LookHandler, 1);
+  handler->cb = cb;
+  handler->data = data;
+  /* never removed: a handler lives as long as the widget it belongs to, which is as long as the app */
+  look_handlers = g_slist_append (look_handlers, handler);
+}
+
 /* the theme setting or the system style changed: the look is worked out again, and everything follows it, live */
 static void
 on_theme_changed (GSettings *settings, const char *key, gpointer data)
@@ -292,6 +314,12 @@ on_theme_changed (GSettings *settings, const char *key, gpointer data)
         mark_window (w);
       gtk_widget_queue_draw (w);
       g_object_unref (w);
+    }
+  for (GSList *l = look_handlers; l; l = l->next)
+    {
+      LookHandler *handler = l->data;
+
+      handler->cb (handler->data);
     }
 }
 

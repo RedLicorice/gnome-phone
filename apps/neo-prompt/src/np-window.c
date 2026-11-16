@@ -14,7 +14,8 @@ typedef struct {
   GtkWindow      *win;
   GtkWidget      *stack, *nav, *title, *actions, *snackbar;
   GtkWidget      *files_list, *files_msg, *files_search;
-  GtkWidget      *save_btn, *search_btn, *index_btn, *refresh_btn;
+  GtkWidget      *back_btn, *save_btn, *search_btn, *index_btn, *refresh_btn;
+  GtkWidget      *mode_source_btn, *mode_rendered_btn;
   NpEditor       *editor;
   NpHistory      *history;
   NpContext      *context;
@@ -23,6 +24,7 @@ typedef struct {
 } Win;
 
 static void select_tab (Win *self, guint tab);
+static void back (Win *self);
 
 static void
 on_saved (gpointer data)
@@ -102,6 +104,122 @@ pending_answered (NeoDialog *dialog, int response, gpointer data)
     }
 }
 
+static void
+go_files (Win *self)
+{
+  select_tab (self, 0);
+}
+
+static void
+leave_saved (gboolean ok, gpointer data)
+{
+  Win *self = data;
+
+  if (ok)
+    go_files (self);
+}
+
+/* "Salva / Scarta / Annulla": the one question a Back out of an edited text asks, and it asks it once */
+static void
+leave_answered (NeoDialog *dialog, int response, gpointer data)
+{
+  Win *self = data;
+
+  if (response == NEO_RESPONSE_OK)
+    np_editor_save_then (self->editor, leave_saved, self);
+  else if (response == 2)
+    {
+      np_editor_discard (self->editor);
+      go_files (self);
+    }
+}
+
+static void
+ask_leave (Win *self)
+{
+  NeoDialog *dialog = neo_dialog_new (np_ui (self->store, "editor.unsaved_title"));
+
+  neo_dialog_set_message (dialog, np_ui (self->store, "editor.leave_body"));
+  neo_dialog_add_button (dialog, np_ui (self->store, "save.cancel"), NEO_RESPONSE_CANCEL);
+  neo_dialog_add_button (dialog, np_ui (self->store, "editor.discard"), 2);
+  neo_dialog_add_button (dialog, np_ui (self->store, "editor.save"), NEO_RESPONSE_OK);
+  g_signal_connect (dialog, "response", G_CALLBACK (leave_answered), self);
+  neo_dialog_present (dialog, GTK_WIDGET (self->win));
+}
+
+/* the dialog on top of this window, when one is up */
+static NeoDialog *
+open_dialog (Win *self)
+{
+  GtkWidget *overlay = GTK_WIDGET (neo_window_get_overlay (GTK_WIDGET (self->win)));
+
+  for (GtkWidget *child = overlay ? gtk_widget_get_first_child (overlay) : NULL;
+       child; child = gtk_widget_get_next_sibling (child))
+    if (NEO_IS_DIALOG (child) && gtk_widget_get_visible (child))
+      return NEO_DIALOG (child);
+  return NULL;
+}
+
+/* Back: the dialog that is up first (Annulla), then the diff, then the search, then the page before, and out from the
+ * file list. From the editor it asks first when the text has changed, and leaves only once the text is safe. */
+static void
+back (Win *self)
+{
+  NeoDialog *dialog = open_dialog (self);
+
+  if (dialog)
+    {
+      neo_dialog_respond (dialog, NEO_RESPONSE_CANCEL);
+      return;
+    }
+  if (self->tab == 3 && np_history_back (self->history))
+    return;
+  if (self->tab == 1 && np_editor_search_open (self->editor))
+    {
+      np_editor_search (self->editor);
+      return;
+    }
+  if (self->tab == 0)
+    {
+      gtk_window_close (GTK_WINDOW (self->win));
+      return;
+    }
+  if (self->tab == 1 && np_editor_saving (self->editor))
+    return;
+  if (self->tab == 1 && np_editor_modified (self->editor))
+    {
+      ask_leave (self);
+      return;
+    }
+  go_files (self);
+}
+
+static gboolean
+on_back_action (GtkWidget *widget, GVariant *args, gpointer data)
+{
+  back (data);
+  return TRUE;
+}
+
+static void
+add_back_shortcut (Win *self)
+{
+  GtkEventController *keys = gtk_shortcut_controller_new ();
+
+  gtk_shortcut_controller_add_shortcut (
+    GTK_SHORTCUT_CONTROLLER (keys),
+    gtk_shortcut_new (gtk_alternative_trigger_new (gtk_shortcut_trigger_parse_string ("<Alt>Left"),
+                                                   gtk_shortcut_trigger_parse_string ("Escape")),
+                      gtk_callback_action_new (on_back_action, self, NULL)));
+  gtk_widget_add_controller (GTK_WIDGET (self->win), keys);
+}
+
+static void
+on_back (GtkWidget *button, gpointer data)
+{
+  back (data);
+}
+
 void
 np_window_open_doc (GtkWidget *window, const char *id, const char *person)
 {
@@ -110,8 +228,13 @@ np_window_open_doc (GtkWidget *window, const char *id, const char *person)
 
   if (!id)
     return;
-  if (np_editor_modified (self->editor) && open
-      && (g_strcmp0 (open->id, id) != 0 || g_strcmp0 (open->person, person) != 0))
+  /* the text already open: its buffer is what the user has been editing, so it is shown, not read again */
+  if (open && g_strcmp0 (open->id, id) == 0 && g_strcmp0 (open->person, person) == 0)
+    {
+      select_tab (self, 1);
+      return;
+    }
+  if (np_editor_modified (self->editor) && open)
     {
       NeoDialog *dialog = neo_dialog_new (np_ui (self->store, "editor.unsaved_title"));
 
@@ -236,12 +359,26 @@ files_page (Win *self)
 /* ---- the bar ---- */
 
 static void
+update_mode_buttons (Win *self)
+{
+  const char *kind = np_doc_kind (np_editor_doc (self->editor));
+  gboolean rendered = np_editor_rendered (self->editor);
+  /* a rendered mode is for the texts whose Markdown means something: not JSON, not plain text */
+  gboolean can = g_strcmp0 (kind, "markdown") == 0 || g_strcmp0 (kind, "jinja") == 0;
+
+  gtk_widget_set_visible (self->mode_source_btn, self->tab == 1 && can && rendered);
+  gtk_widget_set_visible (self->mode_rendered_btn, self->tab == 1 && can && !rendered);
+}
+
+static void
 update_bar (Win *self, guint tab)
 {
+  gtk_widget_set_visible (self->back_btn, tab != 0);
   gtk_widget_set_visible (self->save_btn, tab == 1);
   gtk_widget_set_visible (self->search_btn, tab == 1);
   gtk_widget_set_visible (self->index_btn, tab == 1);
   gtk_widget_set_visible (self->refresh_btn, tab == 2);
+  update_mode_buttons (self);
   if (tab == 0)
     gtk_label_set_text (GTK_LABEL (self->title), np_ui (self->store, "app.name"));
   else if (tab == 2)
@@ -316,6 +453,15 @@ on_refresh (GtkWidget *button, gpointer data)
 }
 
 static void
+on_mode (GtkWidget *button, gpointer data)
+{
+  Win *self = data;
+
+  np_editor_set_rendered (self->editor, !np_editor_rendered (self->editor));
+  update_mode_buttons (self);
+}
+
+static void
 on_context_open (gpointer data, const char *id, const char *person)
 {
   Win *self = data;
@@ -370,23 +516,41 @@ np_window_new (GtkApplication *app, NpStore *store)
   gtk_widget_add_css_class (window, "np");
   self->win = GTK_WINDOW (window);
   g_object_set_data_full (G_OBJECT (window), "np-win", self, g_free);
+  add_back_shortcut (self);
 
   bar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 2);
   gtk_widget_add_css_class (bar, "neo-app-bar");
+  /* Back is named as the shell's Back gesture looks for it: the desktop's own translation of "Back", which is the
+   * name libadwaita and GTK give their back buttons, so the gesture finds this one in any locale */
+  self->back_btn = neo_icon_button_new (np_ui (store, "icons.back"));
+  gtk_accessible_update_property (GTK_ACCESSIBLE (self->back_btn), GTK_ACCESSIBLE_PROPERTY_LABEL,
+                                  g_dgettext ("gtk40", "Back"), -1);
+  g_signal_connect (self->back_btn, "clicked", G_CALLBACK (on_back), self);
+  gtk_box_append (GTK_BOX (bar), self->back_btn);
   self->title = np_label (np_ui (store, "app.name"), "neo-app-bar-title");
   gtk_widget_set_hexpand (self->title, TRUE);
   gtk_label_set_ellipsize (GTK_LABEL (self->title), PANGO_ELLIPSIZE_END);
   gtk_box_append (GTK_BOX (bar), self->title);
   self->actions = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
   self->save_btn = neo_text_button_new (np_ui (store, "editor.save"));
-  self->search_btn = neo_icon_button_new ("system-search-symbolic");
-  self->index_btn = neo_icon_button_new ("view-list-symbolic");
-  self->refresh_btn = neo_icon_button_new ("view-refresh-symbolic");
+  self->mode_source_btn = neo_icon_button_new (np_ui (store, "icons.mode_source"));
+  self->mode_rendered_btn = neo_icon_button_new (np_ui (store, "icons.mode_rendered"));
+  self->search_btn = neo_icon_button_new (np_ui (store, "icons.search"));
+  self->index_btn = neo_icon_button_new (np_ui (store, "icons.outline"));
+  self->refresh_btn = neo_icon_button_new (np_ui (store, "icons.refresh"));
+  gtk_accessible_update_property (GTK_ACCESSIBLE (self->mode_source_btn), GTK_ACCESSIBLE_PROPERTY_LABEL,
+                                  np_ui (store, "editor.mode_source_hint"), -1);
+  gtk_accessible_update_property (GTK_ACCESSIBLE (self->mode_rendered_btn), GTK_ACCESSIBLE_PROPERTY_LABEL,
+                                  np_ui (store, "editor.mode_rendered_hint"), -1);
   g_signal_connect (self->save_btn, "clicked", G_CALLBACK (on_save), self);
+  g_signal_connect (self->mode_source_btn, "clicked", G_CALLBACK (on_mode), self);
+  g_signal_connect (self->mode_rendered_btn, "clicked", G_CALLBACK (on_mode), self);
   g_signal_connect (self->search_btn, "clicked", G_CALLBACK (on_search), self);
   g_signal_connect (self->index_btn, "clicked", G_CALLBACK (on_index), self);
   g_signal_connect (self->refresh_btn, "clicked", G_CALLBACK (on_refresh), self);
   gtk_box_append (GTK_BOX (self->actions), self->save_btn);
+  gtk_box_append (GTK_BOX (self->actions), self->mode_source_btn);
+  gtk_box_append (GTK_BOX (self->actions), self->mode_rendered_btn);
   gtk_box_append (GTK_BOX (self->actions), self->search_btn);
   gtk_box_append (GTK_BOX (self->actions), self->index_btn);
   gtk_box_append (GTK_BOX (self->actions), self->refresh_btn);
@@ -416,10 +580,10 @@ np_window_new (GtkApplication *app, NpStore *store)
     gtk_stack_add_named (GTK_STACK (self->stack), missing_config (self), "files");
 
   self->nav = neo_nav_bar_new ();
-  neo_nav_bar_append (NEO_NAV_BAR (self->nav), "folder-symbolic", np_ui (store, "tabs.files"));
-  neo_nav_bar_append (NEO_NAV_BAR (self->nav), "text-x-generic-symbolic", np_ui (store, "tabs.edit"));
-  neo_nav_bar_append (NEO_NAV_BAR (self->nav), "dialog-information-symbolic", np_ui (store, "tabs.context"));
-  neo_nav_bar_append (NEO_NAV_BAR (self->nav), "document-open-recent-symbolic", np_ui (store, "tabs.history"));
+  neo_nav_bar_append (NEO_NAV_BAR (self->nav), np_ui (store, "icons.files"), np_ui (store, "tabs.files"));
+  neo_nav_bar_append (NEO_NAV_BAR (self->nav), np_ui (store, "icons.edit"), np_ui (store, "tabs.edit"));
+  neo_nav_bar_append (NEO_NAV_BAR (self->nav), np_ui (store, "icons.context"), np_ui (store, "tabs.context"));
+  neo_nav_bar_append (NEO_NAV_BAR (self->nav), np_ui (store, "icons.history"), np_ui (store, "tabs.history"));
   g_signal_connect (self->nav, "selected", G_CALLBACK (on_nav), self);
 
   box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);

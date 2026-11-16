@@ -21,13 +21,20 @@ struct _NpHistory {
 
 static void show_diff (NpHistory *self, const char *name);
 
+gboolean
+np_history_back (NpHistory *self)
+{
+  if (g_strcmp0 (gtk_stack_get_visible_child_name (GTK_STACK (self->stack)), "diff") != 0)
+    return FALSE;
+  gtk_stack_set_visible_child_name (GTK_STACK (self->stack), "list");
+  g_clear_pointer (&self->shown, g_free);
+  return TRUE;
+}
+
 static void
 back_clicked (GtkWidget *button, gpointer data)
 {
-  NpHistory *self = data;
-
-  gtk_stack_set_visible_child_name (GTK_STACK (self->stack), "list");
-  g_clear_pointer (&self->shown, g_free);
+  np_history_back (data);
 }
 
 static void
@@ -202,7 +209,7 @@ np_history_new (NpStore *store, GtkWindow *window, GtkWidget *snackbar)
   bar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
   gtk_widget_set_margin_start (bar, 4);
   gtk_widget_set_margin_end (bar, 8);
-  back = neo_icon_button_new ("go-previous-symbolic");
+  back = neo_icon_button_new (np_ui (store, "icons.back"));
   g_signal_connect (back, "clicked", G_CALLBACK (back_clicked), self);
   self->diff_title = np_label ("", "np-diff-title");
   gtk_widget_set_hexpand (self->diff_title, TRUE);

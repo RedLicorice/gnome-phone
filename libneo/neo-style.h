@@ -53,6 +53,9 @@ gboolean neo_theme_is_renaissance (void);
  * name, day-look, night-look and color-scheme live (like the colours, which come from tools/theme/palette.json via
  * the generated neo-looks.h). Every neo window carries the classes neo-look-day or neo-look-night and neo-look-<id>. */
 const char *neo_theme_look (void);
+/* Called when the look changes (the theme setting, the system style, a font): for the widgets that draw with colours
+ * of their own instead of CSS, which work their colours out again and redraw. A handler lives as long as the app. */
+void    neo_on_look_changed (void (*cb) (gpointer), gpointer data);
 /* Whether the look in force is a light one (marble, sea). FALSE in the stock look, which is always dark. */
 gboolean neo_theme_is_day (void);
 /* A colour an app brings of its own, as the Renaissance look wants it (unchanged in the stock look). At night: teal and

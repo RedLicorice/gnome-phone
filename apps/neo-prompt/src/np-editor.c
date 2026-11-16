@@ -18,19 +18,26 @@ struct _NpEditor {
   GtkTextBuffer *buffer;
   GtkWidget    *index_popover, *index_list;
   NpDoc        *doc;
+  char         *mode;          /* "source" (the Markdown as written) or "rendered" (impaginated) */
   char         *loaded_hash;
   GArray       *hit_pos;
   guint         hit_index;
   guint         highlight_id, draft_id, token;
+  int           cursor_line;   /* the line being edited: rendered mode leaves its markers visible */
   gboolean      loading, saving, overwrite;
   GtkTextTag   *t_heading, *t_jinja, *t_code, *t_strong, *t_em, *t_link, *t_comment, *t_quote, *t_hit, *t_mark;
+  GtkTextTag   *t_hidden, *t_h[6], *t_chip, *t_list_indent, *t_quote_indent;
   void        (*saved_cb) (gpointer);
   gpointer      saved_data;
   void        (*changed_cb) (gpointer);
   gpointer      changed_data;
+  void        (*save_done) (gboolean ok, gpointer data);
+  gpointer      save_done_data;
 };
 
-static void highlight (NpEditor *self);
+static void paint (NpEditor *self);
+static void save_finished (NpEditor *self, gboolean ok);
+static void save_now (NpEditor *self);
 
 static void
 snack (NpEditor *self, const char *text)
@@ -47,7 +54,8 @@ np_editor_text (NpEditor *self)
   GtkTextIter start, end;
 
   gtk_text_buffer_get_bounds (self->buffer, &start, &end);
-  return gtk_text_buffer_get_text (self->buffer, &start, &end, FALSE);
+  /* hidden characters are in the text: the rendered mode hides the Markdown markers with a tag, it never drops them */
+  return gtk_text_buffer_get_text (self->buffer, &start, &end, TRUE);
 }
 
 static void
@@ -63,7 +71,7 @@ void
 np_editor_put_text (NpEditor *self, const char *text)
 {
   put_text (self, text, TRUE);
-  highlight (self);
+  paint (self);
 }
 
 NpDoc *
@@ -76,6 +84,45 @@ gboolean
 np_editor_modified (NpEditor *self)
 {
   return gtk_text_buffer_get_modified (self->buffer);
+}
+
+gboolean
+np_editor_saving (NpEditor *self)
+{
+  return self->saving;
+}
+
+gboolean
+np_editor_rendered (NpEditor *self)
+{
+  return g_strcmp0 (self->mode, "rendered") == 0;
+}
+
+static void
+apply_mode (NpEditor *self)
+{
+  gboolean rendered = np_editor_rendered (self);
+
+  gtk_text_view_set_monospace (GTK_TEXT_VIEW (self->view), !rendered);
+  if (rendered)
+    gtk_widget_add_css_class (self->view, "np-rendered");
+  else
+    gtk_widget_remove_css_class (self->view, "np-rendered");
+  paint (self);
+}
+
+void
+np_editor_set_rendered (NpEditor *self, gboolean rendered)
+{
+  const char *mode = rendered ? "rendered" : "source";
+
+  if (g_strcmp0 (self->mode, mode) == 0)
+    return;
+  g_free (self->mode);
+  self->mode = g_strdup (mode);
+  if (self->doc)
+    np_mode_set (self->store, np_doc_kind (self->doc), mode);
+  apply_mode (self);
 }
 
 /* ---- highlighting: Markdown and Jinja2, line by line ---- */
@@ -135,12 +182,15 @@ tag_colours (NpEditor *self)
   np_lookup (self->view, "neo_secondary", &secondary);
 
   tag_set_colour (self->t_heading, &primary);
+  for (guint i = 0; i < G_N_ELEMENTS (self->t_h); i++)
+    tag_set_colour (self->t_h[i], &primary);
   tag_set_colour (self->t_jinja, &tertiary);
   tag_set_colour (self->t_link, &primary);
   tag_set_colour (self->t_comment, &variant);
   tag_set_colour (self->t_quote, &variant);
   tag_set_colour (self->t_mark, &secondary);
   g_object_set (self->t_code, "background-rgba", &container, NULL);
+  g_object_set (self->t_chip, "background-rgba", &container, "foreground-rgba", &tertiary, NULL);
   g_object_set (self->t_hit, "background-rgba", &container, "foreground-rgba", &on_surface, NULL);
 }
 
@@ -150,7 +200,7 @@ highlight_idle (gpointer data)
   NpEditor *self = data;
 
   self->highlight_id = 0;
-  highlight (self);
+  paint (self);
   return G_SOURCE_REMOVE;
 }
 
@@ -163,21 +213,15 @@ schedule_highlight (NpEditor *self)
 }
 
 static void
-highlight (NpEditor *self)
+highlight_source (NpEditor *self)
 {
   g_autoptr(GRegex) re_jinja = NULL, re_heading = NULL, re_strong = NULL, re_em = NULL, re_code = NULL,
                     re_link = NULL, re_comment = NULL, re_mark = NULL;
-  GtkTextIter start, end;
   int lines = 0;
   gboolean fence = FALSE, front = FALSE;
   gboolean is_markdown = g_strcmp0 (np_doc_kind (self->doc), "markdown") == 0;
   gboolean is_jinja = g_strcmp0 (np_doc_kind (self->doc), "jinja") == 0;
 
-  if (!self->doc || !self->buffer)
-    return;
-  tag_colours (self);
-  gtk_text_buffer_get_bounds (self->buffer, &start, &end);
-  gtk_text_buffer_remove_all_tags (self->buffer, &start, &end);
   if (!is_markdown && !is_jinja)
     return;
   re_jinja = g_regex_new ("\\{\\{.*?\\}\\}|\\{%.*?%\\}|\\{#.*?#\\}", G_REGEX_OPTIMIZE, 0, NULL);
@@ -200,7 +244,7 @@ highlight (NpEditor *self)
       le = ls;
       if (!gtk_text_iter_ends_line (&le))
         gtk_text_iter_forward_to_line_end (&le);
-      text = gtk_text_buffer_get_text (self->buffer, &ls, &le, FALSE);
+      text = gtk_text_buffer_get_text (self->buffer, &ls, &le, TRUE);
 
       if (g_str_has_prefix (text, "```") || g_str_has_prefix (text, "~~~"))
         {
@@ -243,6 +287,208 @@ highlight (NpEditor *self)
     }
 }
 
+/* ---- the rendered mode: the same buffer, drawn without the Markdown markers --------------------------
+ *
+ * The text is never rewritten: the markers stay in the buffer and only get an invisible tag, so a save writes
+ * exactly what a save writes in source mode. The line the cursor is on keeps its markers visible (markers are
+ * skipped by the cursor, and a Backspace would delete a hidden one), which is what makes it editable. */
+
+static void
+tag_span (NpEditor *self, int line_a, int start_a, int line_b, int start_b, GtkTextTag *tag)
+{
+  GtkTextIter a, b;
+
+  if (!tag || line_b < line_a || (line_b == line_a && start_b <= start_a) || start_a < 0)
+    return;
+  gtk_text_buffer_get_iter_at_line_index (self->buffer, &a, line_a, start_a);
+  gtk_text_buffer_get_iter_at_line_index (self->buffer, &b, line_b, start_b);
+  gtk_text_buffer_apply_tag (self->buffer, tag, &a, &b);
+}
+
+/* a fence line with its newline: hidden, it takes no room, so a code block starts where the fence was */
+static void
+hide_line (NpEditor *self, int line, int lines, int length)
+{
+  if (line + 1 < lines)
+    tag_span (self, line, 0, line + 1, 0, self->t_hidden);
+  else
+    tag_line (self, line, 0, length, self->t_hidden);
+}
+
+/* a run that wraps its text in markers (`**bold**`, `*italic*`, ``code``): the text is tagged, the markers hidden */
+static void
+wrap_matches (NpEditor *self, int line, const char *text, GRegex *regex, GtkTextTag *tag, gboolean hide,
+              int prefix, int suffix)
+{
+  GMatchInfo *info = NULL;
+  gint pos = 0;
+
+  if (!regex || !tag)
+    return;
+  while (g_regex_match_full (regex, text, -1, pos, 0, &info, NULL))
+    {
+      gint start = 0, end = 0;
+
+      if (!g_match_info_fetch_pos (info, 0, &start, &end) || end <= start)
+        break;
+      tag_line (self, line, start, end, tag);
+      if (hide && end - start > prefix + suffix)
+        {
+          tag_line (self, line, start, start + prefix, self->t_hidden);
+          tag_line (self, line, end - suffix, end, self->t_hidden);
+        }
+      pos = end;
+      g_match_info_free (info);
+      info = NULL;
+    }
+  g_clear_pointer (&info, g_match_info_free);
+}
+
+/* `[the text](the url)`: the text stays, underlined; the brackets and the url go */
+static void
+link_matches (NpEditor *self, int line, const char *text, GRegex *regex, gboolean hide)
+{
+  GMatchInfo *info = NULL;
+  gint pos = 0;
+
+  if (!regex)
+    return;
+  while (g_regex_match_full (regex, text, -1, pos, 0, &info, NULL))
+    {
+      gint start = 0, end = 0;
+      const char *close = NULL;
+      int suffix_at = 0;
+
+      if (!g_match_info_fetch_pos (info, 0, &start, &end) || end <= start)
+        break;
+      close = strchr (text + start, ']');
+      suffix_at = close && (int) (close - text) < end ? (int) (close - text) : start + 1;
+      tag_line (self, line, start, suffix_at, self->t_link);
+      if (hide)
+        {
+          tag_line (self, line, start, start + 1, self->t_hidden);
+          tag_line (self, line, suffix_at, end, self->t_hidden);
+        }
+      pos = end;
+      g_match_info_free (info);
+      info = NULL;
+    }
+  g_clear_pointer (&info, g_match_info_free);
+}
+
+static void
+render (NpEditor *self)
+{
+  g_autoptr(GRegex) re_jinja = NULL, re_heading = NULL, re_strong = NULL, re_em = NULL, re_code = NULL,
+                    re_link = NULL, re_comment = NULL, re_quote = NULL, re_list = NULL;
+  int lines = gtk_text_buffer_get_line_count (self->buffer);
+  gboolean fence = FALSE, front = FALSE;
+
+  re_jinja = g_regex_new ("\\{\\{.*?\\}\\}|\\{%.*?%\\}|\\{#.*?#\\}", G_REGEX_OPTIMIZE, 0, NULL);
+  re_heading = g_regex_new ("^(#{1,6})[ \\t]+", 0, 0, NULL);
+  re_strong = g_regex_new ("\\*\\*[^*\\n]+\\*\\*|__[^_\\n]+__", 0, 0, NULL);
+  re_em = g_regex_new ("(?<!\\*)\\*[^*\\n]+\\*(?!\\*)|(?<!_)_[^_\\n]+_(?!_)", 0, 0, NULL);
+  re_code = g_regex_new ("`[^`\\n]+`", 0, 0, NULL);
+  re_link = g_regex_new ("\\[[^\\]\\n]*\\]\\([^)\\n]*\\)", 0, 0, NULL);
+  re_comment = g_regex_new ("<!--.*?-->", 0, 0, NULL);
+  re_quote = g_regex_new ("^>[ \\t]?", 0, 0, NULL);
+  re_list = g_regex_new ("^[ \\t]*([-*+]|[0-9]+\\.)[ \\t]+", 0, 0, NULL);
+
+  for (int i = 0; i < lines; i++)
+    {
+      GtkTextIter ls, le;
+      g_autofree char *text = NULL;
+      gboolean line_fence = FALSE;
+      gboolean reveal = i == self->cursor_line;   /* the line being edited shows what it is made of */
+      GMatchInfo *info = NULL;
+      gint s = 0, e = 0;
+
+      gtk_text_buffer_get_iter_at_line (self->buffer, &ls, i);
+      le = ls;
+      if (!gtk_text_iter_ends_line (&le))
+        gtk_text_iter_forward_to_line_end (&le);
+      text = gtk_text_buffer_get_text (self->buffer, &ls, &le, TRUE);
+
+      if (g_str_has_prefix (text, "```") || g_str_has_prefix (text, "~~~"))
+        {
+          line_fence = TRUE;
+          fence = !fence;
+          if (!reveal)
+            {
+              hide_line (self, i, lines, strlen (text));
+              continue;
+            }
+        }
+      if (fence || line_fence)
+        {
+          tag_line (self, i, 0, strlen (text), self->t_code);
+          continue;
+        }
+      if (i == 0 && g_strcmp0 (text, "---") == 0)
+        front = TRUE;
+      if (front)
+        {
+          tag_line (self, i, 0, strlen (text), self->t_comment);
+          if (i > 0 && g_strcmp0 (text, "---") == 0)
+            front = FALSE;
+          continue;
+        }
+      if (g_regex_match (re_heading, text, 0, &info))
+        {
+          g_autofree char *hashes = g_match_info_fetch (info, 1);
+          int level = CLAMP ((int) (hashes ? strlen (hashes) : 1), 1, 6);
+
+          g_match_info_fetch_pos (info, 0, &s, &e);
+          tag_line (self, i, e, strlen (text), self->t_h[level - 1]);
+          if (!reveal)
+            tag_line (self, i, s, e, self->t_hidden);
+          g_match_info_free (info);
+          info = NULL;
+        }
+      if (g_regex_match (re_quote, text, 0, &info))
+        {
+          g_match_info_fetch_pos (info, 0, &s, &e);
+          tag_line (self, i, 0, strlen (text), self->t_quote);
+          tag_line (self, i, 0, strlen (text), self->t_quote_indent);
+          if (!reveal)
+            tag_line (self, i, s, e, self->t_hidden);
+          g_match_info_free (info);
+          info = NULL;
+        }
+      if (g_regex_match (re_list, text, 0, &info))
+        {
+          g_match_info_fetch_pos (info, 0, &s, &e);
+          tag_line (self, i, 0, strlen (text), self->t_list_indent);
+          tag_line (self, i, s, e, self->t_mark);   /* the marker stays: it is the bullet */
+          g_match_info_free (info);
+          info = NULL;
+        }
+      link_matches (self, i, text, re_link, !reveal);
+      wrap_matches (self, i, text, re_code, self->t_code, !reveal, 1, 1);
+      wrap_matches (self, i, text, re_strong, self->t_strong, !reveal, 2, 2);
+      wrap_matches (self, i, text, re_em, self->t_em, !reveal, 1, 1);
+      tag_pattern (self, i, text, re_comment, self->t_comment);
+      /* last, over whatever the line already is: a Jinja token is a chip, and it is never altered */
+      wrap_matches (self, i, text, re_jinja, self->t_chip, FALSE, 0, 0);
+    }
+}
+
+static void
+paint (NpEditor *self)
+{
+  GtkTextIter start, end;
+
+  if (!self->doc || !self->buffer)
+    return;
+  tag_colours (self);
+  gtk_text_buffer_get_bounds (self->buffer, &start, &end);
+  gtk_text_buffer_remove_all_tags (self->buffer, &start, &end);
+  if (np_editor_rendered (self))
+    render (self);
+  else
+    highlight_source (self);
+}
+
 /* ---- the index of the headings ---- */
 
 typedef struct {
@@ -281,7 +527,7 @@ index_fill (NpEditor *self)
 
       if (!gtk_text_iter_ends_line (&le))
         gtk_text_iter_forward_to_line_end (&le);
-      text = gtk_text_buffer_get_text (self->buffer, &it, &le, FALSE);
+      text = gtk_text_buffer_get_text (self->buffer, &it, &le, TRUE);
       if (g_str_has_prefix (text, "#"))
         {
           int level = 0;
@@ -398,7 +644,7 @@ search_hits (NpEditor *self)
       le = ls;
       if (!gtk_text_iter_ends_line (&le))
         gtk_text_iter_forward_to_line_end (&le);
-      text = gtk_text_buffer_get_text (self->buffer, &ls, &le, FALSE);
+      text = gtk_text_buffer_get_text (self->buffer, &ls, &le, TRUE);
       while (g_regex_match_full (regex, text, -1, pos, 0, &info, NULL))
         {
           gint s = 0, e = 0;
@@ -437,6 +683,12 @@ on_search_stop (GtkSearchEntry *entry, gpointer data)
   NpEditor *self = data;
 
   gtk_search_bar_set_search_mode (GTK_SEARCH_BAR (self->searchbar), FALSE);
+}
+
+gboolean
+np_editor_search_open (NpEditor *self)
+{
+  return gtk_search_bar_get_search_mode (GTK_SEARCH_BAR (self->searchbar));
 }
 
 void
@@ -493,6 +745,25 @@ on_modified_changed (GtkTextBuffer *buffer, gpointer data)
     self->changed_cb (self->changed_data);
 }
 
+/* rendered mode leaves the markers of the line being edited visible: the cursor skips hidden text, so this is what
+ * keeps a Backspace from eating a `**` it never showed */
+static void
+on_cursor_moved (GtkTextBuffer *buffer, GParamSpec *pspec, gpointer data)
+{
+  NpEditor *self = data;
+  GtkTextIter it;
+  int line = 0;
+
+  if (!np_editor_rendered (self) || !self->doc)
+    return;
+  gtk_text_buffer_get_iter_at_mark (buffer, &it, gtk_text_buffer_get_insert (buffer));
+  line = gtk_text_iter_get_line (&it);
+  if (line == self->cursor_line)
+    return;
+  self->cursor_line = line;
+  schedule_highlight (self);
+}
+
 static void
 on_changed (GtkTextBuffer *buffer, gpointer data)
 {
@@ -513,12 +784,18 @@ conflict_answered (NeoDialog *dialog, int response, gpointer data)
     {
       self->overwrite = TRUE;
       self->saving = FALSE;
-      np_editor_save (self);
+      np_editor_save_then (self, self->save_done, self->save_done_data);
     }
   else if (response == 2)
-    np_editor_reload (self);
+    {
+      np_editor_reload (self);
+      save_finished (self, FALSE);
+    }
   else
-    self->saving = FALSE;
+    {
+      self->saving = FALSE;
+      save_finished (self, FALSE);
+    }
 }
 
 static void
@@ -541,6 +818,19 @@ typedef struct {
   char     *text;
 } Step;
 
+/* the save is over, either way: whoever asked for it learns whether the text is safe (once) */
+static void
+save_finished (NpEditor *self, gboolean ok)
+{
+  void (*done) (gboolean, gpointer) = self->save_done;
+  gpointer data = self->save_done_data;
+
+  self->save_done = NULL;
+  self->save_done_data = NULL;
+  if (done)
+    done (ok, data);
+}
+
 static void
 finish_save (NpEditor *self, const char *text)
 {
@@ -555,6 +845,7 @@ finish_save (NpEditor *self, const char *text)
   snack (self, np_ui (self->store, "editor.saved"));
   if (self->saved_cb)
     self->saved_cb (self->saved_data);
+  save_finished (self, TRUE);
 }
 
 static void
@@ -566,6 +857,7 @@ write_answered (NpAns *ans, gpointer data)
     {
       step->self->saving = FALSE;
       np_msg_set (step->self->error, ans->error ? ans->error : "?", TRUE);
+      save_finished (step->self, FALSE);
     }
   else
     finish_save (step->self, step->text);
@@ -603,6 +895,7 @@ write_it (NpEditor *self, const char *text, const char *fresh)
         {
           self->saving = FALSE;
           np_msg_set (self->error, error->message, TRUE);
+          save_finished (self, FALSE);
           g_free (step->text);
           g_free (step);
           return;
@@ -615,6 +908,7 @@ write_it (NpEditor *self, const char *text, const char *fresh)
     {
       self->saving = FALSE;
       np_msg_set (self->error, "nessuna destinazione", TRUE);
+      save_finished (self, FALSE);
       g_free (step->text);
       g_free (step);
     }
@@ -660,6 +954,7 @@ validate_answered (NpAns *ans, gpointer data)
     {
       self->saving = FALSE;
       np_msg_set (self->error, ans->error ? ans->error : "?", TRUE);
+      save_finished (self, FALSE);
       g_free (step->text);
       g_free (step);
       return;
@@ -668,16 +963,37 @@ validate_answered (NpAns *ans, gpointer data)
 }
 
 void
+np_editor_save_then (NpEditor *self, void (*done) (gboolean, gpointer), gpointer data)
+{
+  if (!self->doc || !self->doc->editable)
+    {
+      if (done)
+        done (FALSE, data);
+      return;
+    }
+  if (self->saving)
+    return;
+  self->save_done = done;
+  self->save_done_data = data;
+  save_now (self);
+}
+
+void
 np_editor_save (NpEditor *self)
+{
+  np_editor_save_then (self, NULL, NULL);
+}
+
+static void
+save_now (NpEditor *self)
 {
   g_autofree char *text = NULL;
   Step *step = NULL;
 
-  if (!self->doc || !self->doc->editable || self->saving)
-    return;
   if (!gtk_text_buffer_get_modified (self->buffer))
     {
       snack (self, np_ui (self->store, "editor.unchanged"));
+      save_finished (self, TRUE);
       return;
     }
   text = np_editor_text (self);
@@ -689,6 +1005,7 @@ np_editor_save (NpEditor *self)
       if (!json_parser_load_from_data (parser, text, -1, &error))
         {
           np_msg_set (self->error, error->message, TRUE);
+          save_finished (self, FALSE);
           return;
         }
     }
@@ -778,7 +1095,7 @@ open_answered (NpAns *ans, gpointer data)
       np_msg_set (self->error, "", FALSE);
       offer_draft (self, ans->text ? ans->text : "");
     }
-  highlight (self);
+  paint (self);
   {
     GtkTextIter start;
 
@@ -809,6 +1126,12 @@ np_editor_open (NpEditor *self, NpDoc *doc)
   self->doc = doc;
   self->saving = FALSE;
   self->overwrite = FALSE;
+  self->save_done = NULL;
+  self->save_done_data = NULL;
+  self->cursor_line = -1;
+  g_free (self->mode);
+  self->mode = np_mode_for (self->store, np_doc_kind (doc));
+  apply_mode (self);
   gtk_text_buffer_set_modified (self->buffer, FALSE);
   self->token++;
   open = g_new0 (Open, 1);
@@ -828,11 +1151,27 @@ np_editor_reload (NpEditor *self)
   np_editor_open (self, np_doc_by_id (self->store, self->doc->id, self->doc->person));
 }
 
+void
+np_editor_discard (NpEditor *self)
+{
+  if (!self->doc)
+    return;
+  np_draft_drop (self->store, self->doc);
+  np_editor_reload (self);
+}
+
 static gboolean
 on_map (GtkWidget *widget, gpointer data)
 {
-  highlight (data);
+  paint (data);
   return FALSE;
+}
+
+/* a tag keeps the colour it was given: when the look changes, the colours are worked out again and the text redrawn */
+static void
+on_look_changed (gpointer data)
+{
+  paint (data);
 }
 
 /* ---- construction ---- */
@@ -865,8 +1204,8 @@ np_editor_new (NpStore *store, GtkWindow *window, GtkWidget *snackbar)
   gtk_search_bar_set_show_close_button (GTK_SEARCH_BAR (self->searchbar), TRUE);
   search_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
   self->hits = np_label ("", "np-hits");
-  prev = neo_icon_button_new ("go-up-symbolic");
-  next = neo_icon_button_new ("go-down-symbolic");
+  prev = neo_icon_button_new (np_ui (store, "icons.hit_prev"));
+  next = neo_icon_button_new (np_ui (store, "icons.hit_next"));
   g_object_set_data (G_OBJECT (prev), "np-step", GINT_TO_POINTER (-1));
   g_object_set_data (G_OBJECT (next), "np-step", GINT_TO_POINTER (1));
   g_signal_connect (prev, "clicked", G_CALLBACK (hit_move), self);
@@ -900,12 +1239,38 @@ np_editor_new (NpStore *store, GtkWindow *window, GtkWidget *snackbar)
   self->t_mark = gtk_text_buffer_create_tag (self->buffer, "np-mark", "weight", PANGO_WEIGHT_BOLD, NULL);
   self->t_hit = gtk_text_buffer_create_tag (self->buffer, "np-hit", NULL);
 
+  /* the rendered mode's tags: what it hides, and how it draws what it keeps */
+  self->t_hidden = gtk_text_buffer_create_tag (self->buffer, "np-hidden", "invisible", TRUE, NULL);
+  self->t_chip = gtk_text_buffer_create_tag (self->buffer, "np-chip", "family", "monospace",
+                                             "weight", PANGO_WEIGHT_BOLD,
+                                             "scale", self->store->conf.render.chip_scale, NULL);
+  for (guint i = 0; i < G_N_ELEMENTS (self->t_h); i++)
+    {
+      g_autofree char *name = g_strdup_printf ("np-h%u", i + 1);
+
+      self->t_h[i] = gtk_text_buffer_create_tag (self->buffer, name,
+                                                 "scale", self->store->conf.render.heading_scale[i],
+                                                 "weight", PANGO_WEIGHT_BOLD,
+                                                 "pixels-above-lines", self->store->conf.render.heading_above,
+                                                 "pixels-below-lines", self->store->conf.render.heading_below,
+                                                 NULL);
+    }
+  self->t_list_indent = gtk_text_buffer_create_tag (self->buffer, "np-list-indent",
+                                                    "left-margin", self->store->conf.render.list_indent, NULL);
+  self->t_quote_indent = gtk_text_buffer_create_tag (self->buffer, "np-quote-indent",
+                                                     "left-margin", self->store->conf.render.quote_indent, NULL);
+
+  self->mode = g_strdup ("source");
+  self->cursor_line = -1;
+  neo_on_look_changed (on_look_changed, self);
+
   self->index_popover = gtk_popover_new ();
   gtk_popover_set_has_arrow (GTK_POPOVER (self->index_popover), FALSE);
   gtk_widget_add_css_class (self->index_popover, "np-index-popover");
 
   g_signal_connect (self->buffer, "changed", G_CALLBACK (on_changed), self);
   g_signal_connect (self->buffer, "modified-changed", G_CALLBACK (on_modified_changed), self);
+  g_signal_connect (self->buffer, "notify::cursor-position", G_CALLBACK (on_cursor_moved), self);
   g_signal_connect (self->view, "map", G_CALLBACK (on_map), self);
   return self;
 }

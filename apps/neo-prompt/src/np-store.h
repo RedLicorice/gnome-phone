@@ -34,6 +34,15 @@ typedef struct {
 } NpDoc;
 
 typedef struct {
+  double heading_scale[6];   /* a heading of level 1..6, over the editor's text size */
+  int    heading_above;
+  int    heading_below;
+  int    list_indent;
+  int    quote_indent;
+  double chip_scale;         /* a Jinja chip */
+} NpRender;
+
+typedef struct {
   char    *conf_path;
   char    *minerva_config;
   char    *registry;
@@ -46,6 +55,9 @@ typedef struct {
   char    *people_root;
   char    *event_templates;
   char    *input_tags;
+  char    *state_path;       /* the mode each kind was last seen in */
+  JsonObject *modes;         /* kind -> the mode its documents open in, from editor.modes */
+  NpRender render;           /* how the rendered mode draws */
   int      history_max;
   int      chars_per_token;
   int      cache_min_tokens;
@@ -76,6 +88,11 @@ void        np_store_free      (NpStore *self);
 const char *np_ui              (NpStore *self, const char *key);
 char       *np_path_expand     (const char *path);
 const char *np_doc_kind        (NpDoc *doc);
+
+/* the mode a document of `kind` opens in: what the editor last chose for that kind (paths.state), else the
+ * default from editor.modes; never NULL ("source"). np_mode_set writes the choice down. */
+char       *np_mode_for        (NpStore *self, const char *kind);
+void        np_mode_set        (NpStore *self, const char *kind, const char *mode);
 
 GPtrArray  *np_docs            (NpStore *self);          /* the openable ones (editable) */
 NpDoc      *np_doc_by_id       (NpStore *self, const char *id, const char *person);
