@@ -19,7 +19,4 @@ void       cam_window_volume_key (GtkWindow *window, int direction);
 void       cam_window_set_start_scan (gboolean scan);
 void       cam_window_show_scan      (GtkWindow *window);
 
-/* argv of the process, for starting it afresh (cam_pipeline_needs_fresh_process) */
-void       cam_window_remember_argv (char **argv);
-
 G_END_DECLS

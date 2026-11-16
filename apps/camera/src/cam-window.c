@@ -12,6 +12,7 @@
 #include "cam-pipeline.h"
 #include "cam-qr-sheet.h"
 #include "cam-recorder.h"
+#include "cam-restart.h"
 #include "cam-sensors.h"
 #include "cam-settings.h"
 #include "cam-sounds.h"
@@ -1203,19 +1204,11 @@ preview_cover (CamView *self)
 }
 
 /* The process starts afresh, on the camera the settings now name (see cam_pipeline_needs_fresh_process) */
-static char **restart_argv = NULL;
-
-void
-cam_window_remember_argv (char **argv)
-{
-  g_strfreev (restart_argv);
-  restart_argv = g_strdupv (argv);
-}
-
 static void
 restart_app (CamView *self)
 {
   g_autofree char *exe = g_file_read_link ("/proc/self/exe", NULL);
+  g_auto(GStrv) argv = cam_restart_argv (exe ? exe : "/proc/self/exe");
 
   g_message ("camera: %s was opened before; a new process opens it (libcamerasrc cannot open it again after another camera)",
              self->camera->id);
@@ -1225,8 +1218,7 @@ restart_app (CamView *self)
   self->led = CAM_LED_OFF;
   cam_flash_led_flush ();
   g_settings_sync ();
-  if (restart_argv)
-    execv (exe ? exe : "/proc/self/exe", restart_argv);  /* by its own path: the process keeps its name */
+  execv (argv[0], argv);  /* by its own path: the process keeps its name */
   g_warning ("camera: cannot start a new process: %s", g_strerror (errno));
   fail (self, _("There was an error while preparing the stream. Please report this to the developers."));
 }

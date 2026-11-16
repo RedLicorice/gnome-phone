@@ -150,7 +150,6 @@ main (int argc, char **argv)
   bindtextdomain (GETTEXT_PACKAGE, LOCALEDIR);
   bind_textdomain_codeset (GETTEXT_PACKAGE, "UTF-8");
   textdomain (GETTEXT_PACKAGE);
-  cam_window_remember_argv (argv);
   gst_init (&argc, &argv);
 
   app = gtk_application_new (APP_ID, G_APPLICATION_DEFAULT_FLAGS);
