@@ -365,7 +365,7 @@ apps_loaded (JsonObject *root, const char *err, gpointer data)
     app_shown (ev, app);
   }
   if (ev->apps->len == 0)
-    ns_note (ev->apps_g, ev->no_apps);
+    ns_row (ev->apps_g, NULL, NULL, ev->no_apps, NULL);
 }
 
 static void
@@ -453,7 +453,7 @@ schedules_loaded (JsonObject *root, const char *err, gpointer data)
     shown++;
   }
   if (shown == 0)
-    ns_note (ev->sched_g, ev->no_schedules);
+    ns_row (ev->sched_g, NULL, NULL, ev->no_schedules, NULL);
 }
 
 static void
