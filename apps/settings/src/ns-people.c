@@ -1,7 +1,9 @@
 /* Minerva > Persone: the people Minerva knows (Minerva's people/ store), each with a notebook, face samples, a
  * voiceprint and a linked contact. Every label comes from `minerva-config people ui` (data:
  * config/minerva_config/people_ui.json); everything is read and written by `minerva-config people … --json`, which
- * answers {"ok": false, "error": …} for what it refused: the page shows that message and changes nothing. */
+ * answers {"ok": false, "error": …} for what it refused: the page shows that message and changes nothing.
+ * The list is `people known`: one archive of people, pets, objects and places, a card per kind in the order the data
+ * gives them, strangers in a card of their own under their kind. */
 #include "ns-pages.h"
 #include "ns-mc.h"
 #include "ns-ui.h"
@@ -54,6 +56,90 @@ fmt_n (const char *tpl, const char *key, gint64 n)
   return fmt (tpl, key, v, NULL);
 }
 
+static double
+dbl_of (JsonObject *o, const char *member)
+{
+  return o && json_object_has_member (o, member) ? json_object_get_double_member_with_default (o, member, 0) : 0;
+}
+
+/* a text of one of the data's maps ("kinds", "kind_one", "kind_icons"…) for `key`, `fallback` when it has none */
+static const char *
+map_str (JsonObject *ui, const char *map, const char *key, const char *fallback)
+{
+  JsonObject *m = obj_of (ui, map);
+  const char *v = m && key ? str_of (m, key) : NULL;
+  return v && *v ? v : fallback;
+}
+
+static const char *
+kind_icon (JsonObject *ui, const char *kind)
+{
+  return map_str (ui, "kind_icons", kind, "avatar-default-symbolic");
+}
+
+static const char *
+kind_color (JsonObject *ui, const char *kind)
+{
+  return map_str (ui, "kind_colors", kind, "blue");
+}
+
+/* a date of the entry (ISO 8601 text or Unix time) in the data's date_format; NULL when it has none */
+static char *
+seen_of (JsonObject *ui, JsonObject *o, const char *member)
+{
+  JsonNode *n = o ? json_object_get_member (o, member) : NULL;
+  if (!n || JSON_NODE_TYPE (n) != JSON_NODE_VALUE)
+    return NULL;
+  const char *df = str_of (obj_of (ui, "list"), "date_format");
+  g_autoptr (GDateTime) t = NULL;
+  if (json_node_get_value_type (n) == G_TYPE_STRING) {
+    const char *v = json_node_get_string (n);
+    if (!v || !*v)
+      return NULL;
+    g_autoptr (GTimeZone) tz = g_time_zone_new_local ();
+    t = g_date_time_new_from_iso8601 (v, tz);
+    if (!t) {
+      g_autofree char *full = g_strconcat (v, "T00:00:00", NULL);
+      t = g_date_time_new_from_iso8601 (full, tz);
+    }
+    if (!t)
+      return g_strdup (v);
+  } else {
+    double v = json_node_get_double (n);
+    if (v <= 0)
+      return NULL;
+    if (v > 1e11)
+      v /= 1000;   /* milliseconds */
+    t = g_date_time_new_from_unix_local ((gint64) v);
+  }
+  return t ? g_date_time_format (t, df && *df ? df : "%x") : NULL;
+}
+
+static gint64
+pct_of (JsonObject *o)
+{
+  return (gint64) (dbl_of (o, "confidence") * 100 + 0.5);
+}
+
+/* an entry's subtitle in the list (and in the Unisci picker): owner • samples, sightings, confidence • last seen •
+ * voice • contact • notes */
+static char *
+entry_sub (JsonObject *ui, JsonObject *o)
+{
+  JsonObject *l = obj_of (ui, "list");
+  g_autofree char *samples = g_strdup_printf ("%" G_GINT64_FORMAT, int_of (o, "samples"));
+  g_autofree char *sightings = g_strdup_printf ("%" G_GINT64_FORMAT, int_of (o, "sightings"));
+  g_autofree char *conf = g_strdup_printf ("%" G_GINT64_FORMAT, pct_of (o));
+  g_autofree char *row = fmt (str_of (l, "row"), "samples", samples, "sightings", sightings, "confidence", conf, NULL);
+  g_autofree char *date = seen_of (ui, o, "last_seen");
+  g_autofree char *seen = date ? fmt (str_of (l, "last_seen"), "date", date, NULL) : g_strdup (str_of (l, "never_seen"));
+  g_autofree char *notes = fmt_n (str_of (l, int_of (o, "notes") == 1 ? "notes_one" : "notes"), "n", int_of (o, "notes"));
+  return g_strdup_printf ("%s%s%s • %s • %s • %s • %s", bool_of (o, "owner") ? str_of (l, "owner") : "",
+                          bool_of (o, "owner") ? " • " : "", row, seen,
+                          str_of (l, bool_of (o, "voiceprint") ? "voice_yes" : "voice_no"),
+                          str_of (l, *str_of (o, "contact_uid") ? "contact_yes" : "contact_no"), notes);
+}
+
 static GtkWidget *
 msg_new (GtkWidget *content)
 {
@@ -97,6 +183,12 @@ typedef struct {
   GtkWidget  *msg, *faces_row, *voice_row, *enroll_btn, *forget_btn, *contact_row, *unlink_btn;
   GtkWidget  *learn_row, *learn_sw, *clips_btn;
   guint       poll_id, poll_s;
+  char       *kind, *pending_into, *pending_into_name;
+  JsonObject *known, *shown;          /* the last `people known` and `people show` answers */
+  GPtrArray  *kind_ids;               /* the kinds of the Tipo picker, in its order */
+  GtkWidget  *manage_g, *rename_row, *kind_row, *merge_row;
+  GtkWidget  *nb_row, *nb_clear, *nb_note, *nb_closed;
+  GtkWidget  *st_samples, *st_sightings, *st_conf, *st_first, *st_last;
 } Pd;
 
 static const char *
@@ -115,12 +207,54 @@ pd_free (Pd *d)
   g_free (d->name);
   g_free (d->pending_uid);
   g_free (d->pending_contact);
+  g_free (d->kind);
+  g_free (d->pending_into);
+  g_free (d->pending_into_name);
+  if (d->known)
+    json_object_unref (d->known);
+  if (d->shown)
+    json_object_unref (d->shown);
+  if (d->kind_ids)
+    g_ptr_array_unref (d->kind_ids);
   g_free (d);
 }
 
 static void voice_load (Pd *d);
 static void person_load (Pd *d);
 static void open_notebook (GtkWidget *row, gpointer data);
+static void known_load (Pd *d);
+static void kind_apply (Pd *d);
+static void rules_open (JsonObject *ui);
+
+static void
+d_reload (Pd *d)
+{
+  person_load (d);
+  known_load (d);
+}
+
+/* the read-only stats from the last answers (max_samples is a rule of `people known`) */
+static void
+stats_apply (Pd *d)
+{
+  JsonObject *o = d->shown;
+  if (!o)
+    return;
+  gint64 max = int_of (obj_of (d->known, "rules"), "max_samples");
+  gint64 n = json_object_has_member (o, "samples") ? int_of (o, "samples") : int_of (o, "faces");
+  g_autofree char *ns = g_strdup_printf ("%" G_GINT64_FORMAT, n);
+  g_autofree char *ms = g_strdup_printf ("%" G_GINT64_FORMAT, max);
+  g_autofree char *sv = max > 0 ? fmt (d_str (d, "stat_samples_value"), "n", ns, "max", ms, NULL) : g_strdup (ns);
+  ns_row_set_subtitle (d->st_samples, sv);
+  g_autofree char *sg = fmt_n (d_str (d, "stat_sightings_value"), "n", int_of (o, "sightings"));
+  ns_row_set_subtitle (d->st_sightings, sg);
+  g_autofree char *cf = fmt_n (d_str (d, "stat_confidence_value"), "n", pct_of (o));
+  ns_row_set_subtitle (d->st_conf, cf);
+  g_autofree char *first = seen_of (d->ui, o, "first_seen");
+  g_autofree char *last = seen_of (d->ui, o, "last_seen");
+  ns_row_set_subtitle (d->st_first, first ? first : d_str (d, "stat_never"));
+  ns_row_set_subtitle (d->st_last, last ? last : d_str (d, "stat_never"));
+}
 
 /* the learning row from the last answers: the server's state, never the switch's own (unless a toggle is in flight) */
 static void
@@ -215,7 +349,23 @@ person_loaded (JsonObject *root, const char *err, gpointer data)
   g_free (d->name);
   d->name = g_strdup (str_of (root, "name"));
   adw_navigation_page_set_title (ADW_NAVIGATION_PAGE (d->owner), d->name);
-  gint64 faces = int_of (root, "faces");
+  ns_row_set_subtitle (d->rename_row, d->name);
+  if (*str_of (root, "kind")) {
+    g_free (d->kind);
+    d->kind = g_strdup (str_of (root, "kind"));
+    kind_apply (d);
+  }
+  if (d->shown)
+    json_object_unref (d->shown);
+  d->shown = json_object_ref (root);
+  stats_apply (d);
+  /* a stranger's notebook is closed until a contact is linked: one note row in place of the editor */
+  gboolean nb = json_object_has_member (root, "notebook_open") ? bool_of (root, "notebook_open") : TRUE;
+  gtk_widget_set_visible (d->nb_row, nb);
+  gtk_widget_set_visible (d->nb_clear, nb);
+  gtk_widget_set_visible (d->nb_note, nb);
+  gtk_widget_set_visible (d->nb_closed, !nb);
+  gint64 faces = json_object_has_member (root, "samples") ? int_of (root, "samples") : int_of (root, "faces");
   g_autofree char *fv = faces ? fmt_n (d_str (d, "faces_value"), "n", faces) : g_strdup (d_str (d, "faces_none"));
   ns_row_set_subtitle (d->faces_row, fv);
   d->enrolled = bool_of (root, "voiceprint");
@@ -248,11 +398,12 @@ answered (JsonObject *root, const char *err, gpointer data)
   if (why) {
     msg_set (d->msg, why, TRUE);
     learn_apply (d);   /* a refused toggle: the switch back to what the server holds */
+    kind_apply (d);    /* a refused kind: the picker back to the entry's */
   } else if (a->pop)
     gtk_widget_activate_action (d->msg, "navigation.pop", NULL);
   else {
     msg_set (d->msg, a->done ? d_str (d, a->done) : "", FALSE);
-    person_load (d);
+    d_reload (d);
   }
   g_free (a);
 }
@@ -398,9 +549,194 @@ delete_tapped (GtkWidget *row, gpointer data)
   ns_confirm (row, heading, d_str (d, "delete_body"), d_str (d, "delete_ok"), TRUE, delete_confirmed, d);
 }
 
-/* ---- Collega: the address book's contacts with a similar name, a tap links one (asked first) ---- */
+/* ---- Nome, Tipo, Unisci ---- */
 
-typedef struct { Pd *d; GObject *page; GtkWidget *group, *msg; } Pick;   /* the Collega page's */
+static void
+rename_entered (const char *text, gpointer data)
+{
+  Pd *d = data;
+  g_autofree char *name = g_strstrip (g_strdup (text ? text : ""));
+  if (!*name || !g_strcmp0 (name, d->name))
+    return;
+  const char *const args[] = { "people", "rename", d->id, name, "--json", NULL };
+  run (d, args, NULL, "renamed", FALSE);
+}
+
+static void
+rename_tapped (GtkWidget *row, gpointer data)
+{
+  Pd *d = data;
+  g_autofree char *body = fmt (d_str (d, "rename_body"), "name", d->name, NULL);
+  ns_ask (row, d_str (d, "rename_heading"), body, d->name, FALSE, d_str (d, "rename_ok"), rename_entered, d);
+}
+
+/* the Tipo picker on the entry's kind (ns_row_pick_select: the callback sees the same kind and does nothing) */
+static void
+kind_apply (Pd *d)
+{
+  if (!d->kind_row || !d->kind_ids)
+    return;
+  for (guint i = 0; i < d->kind_ids->len; i++)
+    if (!g_strcmp0 (g_ptr_array_index (d->kind_ids, i), d->kind))
+      ns_row_pick_select (d->kind_row, i);
+}
+
+static void
+kind_picked (GtkWidget *row, guint index, gpointer data)
+{
+  Pd *d = data;
+  if (!d->kind_ids || index >= d->kind_ids->len)
+    return;
+  const char *kind = g_ptr_array_index (d->kind_ids, index);
+  if (!g_strcmp0 (kind, d->kind))
+    return;
+  const char *const args[] = { "people", "kind", d->id, kind, "--json", NULL };
+  run (d, args, NULL, "kind_changed", FALSE);
+}
+
+typedef struct { Pd *d; GObject *page; GtkWidget *group, *msg; } Pick;   /* the Collega and Unisci pages' */
+
+static void
+merge_answered (JsonObject *root, const char *err, gpointer data)
+{
+  Pick *k = data;
+  const char *why = problem (root, err);
+  if (why) {
+    msg_set (k->msg, why, TRUE);
+    return;
+  }
+  /* the entry is gone: back past its page to the list */
+  GtkWidget *nav = gtk_widget_get_ancestor (k->msg, ADW_TYPE_NAVIGATION_VIEW);
+  AdwNavigationPage *prev = nav ? adw_navigation_view_get_previous_page (ADW_NAVIGATION_VIEW (nav),
+                                                                        ADW_NAVIGATION_PAGE (k->d->owner)) : NULL;
+  if (prev)
+    adw_navigation_view_pop_to_page (ADW_NAVIGATION_VIEW (nav), prev);
+  else
+    gtk_widget_activate_action (k->msg, "navigation.pop", NULL);
+}
+
+static void
+merge_confirmed (gboolean yes, gpointer data)
+{
+  Pick *k = data;
+  const char *const args[] = { "people", "merge", k->d->id, k->d->pending_into, "--json", NULL };
+  if (yes)
+    ns_mc_run (k->page, args, NULL, merge_answered, k);   /* k lives with that page */
+}
+
+static void
+into_tapped (GtkWidget *row, gpointer data)
+{
+  Pick *k = data;
+  Pd *d = k->d;
+  g_free (d->pending_into);
+  g_free (d->pending_into_name);
+  d->pending_into = g_strdup (g_object_get_data (G_OBJECT (row), "pp-id"));
+  d->pending_into_name = g_strdup (g_object_get_data (G_OBJECT (row), "pp-name"));
+  g_autofree char *heading = fmt (d_str (d, "merge_heading"), "name", d->name, "into", d->pending_into_name, NULL);
+  g_autofree char *body = fmt (d_str (d, "merge_body"), "name", d->name, "into", d->pending_into_name, NULL);
+  ns_confirm (row, heading, body, d_str (d, "merge_ok"), TRUE, merge_confirmed, k);
+}
+
+/* the other entries of the same kind, from the last `people known` */
+static guint
+merge_peers (Pd *d, GtkWidget *group, Pick *k)
+{
+  JsonArray *people = arr_of (d->known, "people");
+  guint n = 0;
+  for (guint i = 0; people && i < json_array_get_length (people); i++) {
+    JsonObject *o = json_array_get_object_element (people, i);
+    if (g_strcmp0 (str_of (o, "kind"), d->kind) || !g_strcmp0 (str_of (o, "id"), d->id))
+      continue;
+    n++;
+    if (!group)
+      continue;
+    g_autofree char *sub = entry_sub (d->ui, o);
+    GtkWidget *row = ns_row (group, kind_icon (d->ui, d->kind), kind_color (d->ui, d->kind), str_of (o, "name"), sub);
+    g_object_set_data_full (G_OBJECT (row), "pp-id", g_strdup (str_of (o, "id")), g_free);
+    g_object_set_data_full (G_OBJECT (row), "pp-name", g_strdup (str_of (o, "name")), g_free);
+    ns_row_on_activate (row, into_tapped, k);
+  }
+  return n;
+}
+
+static void
+merge_tapped (GtkWidget *row, gpointer data)
+{
+  Pd *d = data;
+  g_autofree char *title = fmt (d_str (d, "merge_title"), "name", d->name, NULL);
+  GtkWidget *c;
+  AdwNavigationPage *page = ns_page_new (title, &c);
+  Pick *k = g_new0 (Pick, 1);
+  k->d = d;   /* the entry's page stays below this one while it is shown */
+  k->page = G_OBJECT (page);
+  g_object_set_data_full (G_OBJECT (page), "pp-pick", k, g_free);
+  k->msg = msg_new (c);
+  k->group = ns_group (c, NULL);
+  merge_peers (d, k->group, k);
+  g_autofree char *note = fmt (d_str (d, "merge_note"), "name", d->name, NULL);
+  ns_note (c, note);
+  ns_push (page);
+}
+
+static void
+known_loaded (JsonObject *root, const char *err, gpointer data)
+{
+  Pd *d = data;
+  const char *why = problem (root, err);
+  if (why) {
+    msg_set (d->msg, why, TRUE);
+    return;
+  }
+  if (d->known)
+    json_object_unref (d->known);
+  d->known = json_object_ref (root);
+  JsonArray *people = arr_of (root, "people");
+  for (guint i = 0; people && i < json_array_get_length (people); i++) {
+    JsonObject *o = json_array_get_object_element (people, i);
+    if (!g_strcmp0 (str_of (o, "id"), d->id) && *str_of (o, "kind")) {
+      g_free (d->kind);
+      d->kind = g_strdup (str_of (o, "kind"));
+    }
+  }
+  if (!d->kind_row) {   /* the kinds do not change while the page lives: the picker is built once */
+    JsonArray *kinds = arr_of (root, "kinds");
+    d->kind_ids = g_ptr_array_new_with_free_func (g_free);
+    g_autoptr (GPtrArray) labels = g_ptr_array_new ();
+    guint sel = 0;
+    for (guint i = 0; kinds && i < json_array_get_length (kinds); i++) {
+      const char *id = str_of (json_array_get_object_element (kinds, i), "id");
+      if (!g_strcmp0 (id, d->kind))
+        sel = d->kind_ids->len;
+      g_ptr_array_add (d->kind_ids, g_strdup (id));
+      g_ptr_array_add (labels, (gpointer) map_str (d->ui, "kind_one", id, id));
+    }
+    g_ptr_array_add (labels, NULL);
+    d->kind_row = ns_row_pick (d->manage_g, d_str (d, "kind_row"), (const char *const *) labels->pdata, sel,
+                               kind_picked, d);
+    d->merge_row = ns_row (d->manage_g, "edit-copy-symbolic", "violet", d_str (d, "merge_row"),
+                           d_str (d, "merge_sub"));
+    ns_row_on_activate (d->merge_row, merge_tapped, d);
+  }
+  kind_apply (d);
+  gtk_widget_set_visible (d->merge_row, merge_peers (d, NULL, NULL) > 0);
+  stats_apply (d);
+}
+
+static void
+known_load (Pd *d)
+{
+  static const char *const args[] = { "people", "known", "--json", NULL };
+  ns_mc_run (d->owner, args, NULL, known_loaded, d);
+}
+
+static void
+d_rules_tapped (GtkWidget *row, gpointer data)
+{
+  rules_open (((Pd *) data)->ui);
+}
+
+/* ---- Collega: the address book's contacts with a similar name, a tap links one (asked first) ---- */
 
 static void
 link_answered (JsonObject *root, const char *err, gpointer data)
@@ -484,7 +820,7 @@ link_tapped (GtkWidget *row, gpointer data)
 static void
 person_showing (AdwNavigationPage *page, gpointer data)
 {
-  person_load (data);
+  d_reload (data);
 }
 
 static void
@@ -503,12 +839,26 @@ person_open (JsonObject *ui, const char *id, const char *name)
 
   d->msg = msg_new (c);
 
+  /* Nome, then Tipo and Unisci once `people known` answers */
+  d->manage_g = ns_group (c, d_str (d, "manage"));
+  d->rename_row = ns_row (d->manage_g, "document-edit-symbolic", "grey", d_str (d, "rename_row"), name);
+  ns_row_on_activate (d->rename_row, rename_tapped, d);
+
   g_autofree char *nb_label = fmt (d_str (d, "notebook_label"), "name", name, NULL);
   GtkWidget *g = ns_group (c, d_str (d, "notebook"));
-  GtkWidget *nb_row = ns_row (g, "document-edit-symbolic", "blue", d_str (d, "open"), nb_label);
-  ns_row_on_activate (nb_row, open_notebook, d);
-  ns_row_button (g, d_str (d, "clear"), TRUE, clear_tapped, d);
-  ns_note (c, d_str (d, "notebook_note"));
+  d->nb_row = ns_row (g, "document-edit-symbolic", "blue", d_str (d, "open"), nb_label);
+  ns_row_on_activate (d->nb_row, open_notebook, d);
+  d->nb_clear = ns_row_button (g, d_str (d, "clear"), TRUE, clear_tapped, d);
+  d->nb_closed = ns_row (g, NULL, NULL, d_str (d, "notebook_closed"), NULL);
+  gtk_widget_set_visible (d->nb_closed, FALSE);
+  d->nb_note = ns_note (c, d_str (d, "notebook_note"));
+
+  g = ns_group (c, d_str (d, "stats"));
+  d->st_samples = ns_row (g, NULL, NULL, d_str (d, "stat_samples"), "");
+  d->st_sightings = ns_row (g, NULL, NULL, d_str (d, "stat_sightings"), "");
+  d->st_conf = ns_row (g, NULL, NULL, d_str (d, "stat_confidence"), "");
+  d->st_first = ns_row (g, NULL, NULL, d_str (d, "stat_first"), "");
+  d->st_last = ns_row (g, NULL, NULL, d_str (d, "stat_last"), "");
 
   g = ns_group (c, d_str (d, "faces"));
   d->faces_row = ns_row (g, "camera-photo-symbolic", "orange", d_str (d, "faces_row"), "");
@@ -533,10 +883,136 @@ person_open (JsonObject *ui, const char *id, const char *name)
   d->unlink_btn = ns_row_button (g, d_str (d, "unlink"), TRUE, unlink_tapped, d);
 
   g = ns_group (c, NULL);
+  GtkWidget *rules = ns_row (g, "preferences-system-symbolic", "grey", d_str (d, "rules"), d_str (d, "rules_sub"));
+  ns_row_on_activate (rules, d_rules_tapped, d);
+
+  g = ns_group (c, NULL);
   ns_row_button (g, d_str (d, "delete"), TRUE, delete_tapped, d);
 
   /* each time the page shows (also back from Collega): the person again */
   g_signal_connect (page, "showing", G_CALLBACK (person_showing), d);
+  ns_push (page);
+}
+
+/* ======================= Regole ======================= */
+
+typedef struct {
+  GObject    *owner;
+  JsonObject *ui;
+  GtkWidget  *msg, *days, *step, *start, *ceil, *sweep;
+} Rp;
+
+static const char *
+r_str (Rp *r, const char *key)
+{
+  return str_of (obj_of (r->ui, "detail"), key);
+}
+
+static void
+rp_free (Rp *r)
+{
+  json_object_unref (r->ui);
+  g_free (r);
+}
+
+static GtkWidget *
+rules_spin (GtkWidget *g, const char *title, double lo, double hi, double step, guint digits)
+{
+  GtkWidget *s = gtk_spin_button_new_with_range (lo, hi, step);
+  gtk_spin_button_set_digits (GTK_SPIN_BUTTON (s), digits);
+  gtk_widget_set_sensitive (s, FALSE);   /* until the rules arrive */
+  ns_row_widget (g, title, s);
+  return s;
+}
+
+static void
+rules_apply (Rp *r, JsonObject *rules)
+{
+  if (!rules)
+    return;
+  gtk_spin_button_set_value (GTK_SPIN_BUTTON (r->days), (double) int_of (rules, "forget_days"));
+  gtk_spin_button_set_value (GTK_SPIN_BUTTON (r->step), dbl_of (rules, "sight_step"));
+  gtk_spin_button_set_value (GTK_SPIN_BUTTON (r->start), dbl_of (rules, "conf_start"));
+  gtk_spin_button_set_value (GTK_SPIN_BUTTON (r->ceil), dbl_of (rules, "conf_ceil"));
+  GtkWidget *spins[] = { r->days, r->step, r->start, r->ceil };
+  for (guint i = 0; i < G_N_ELEMENTS (spins); i++)
+    gtk_widget_set_sensitive (spins[i], TRUE);
+  g_autofree char *sweep = fmt_n (r_str (r, "rules_sweep"), "days", int_of (rules, "forget_days"));
+  g_autofree char *text = g_strdup_printf ("%s %s", sweep,
+                                           r_str (r, bool_of (rules, "sweep_log_only") ? "rules_sweep_log"
+                                                                                      : "rules_sweep_apply"));
+  gtk_label_set_text (GTK_LABEL (r->sweep), text);
+}
+
+static void
+rules_loaded (JsonObject *root, const char *err, gpointer data)
+{
+  Rp *r = data;
+  const char *why = problem (root, err);
+  msg_set (r->msg, why, TRUE);
+  if (!why)
+    rules_apply (r, obj_of (root, "rules"));
+}
+
+static void
+rules_saved (JsonObject *root, const char *err, gpointer data)
+{
+  Rp *r = data;
+  const char *why = problem (root, err);
+  if (why) {
+    msg_set (r->msg, why, TRUE);
+    return;
+  }
+  msg_set (r->msg, r_str (r, "rules_saved"), FALSE);
+  JsonObject *rules = obj_of (root, "rules");
+  rules_apply (r, rules ? rules : root);
+}
+
+/* key=value with a dot whatever the locale (Italian writes 0,05) */
+static char *
+rule_arg (const char *key, GtkWidget *spin)
+{
+  char buf[G_ASCII_DTOSTR_BUF_SIZE];
+  g_ascii_formatd (buf, sizeof buf, "%.2f", gtk_spin_button_get_value (GTK_SPIN_BUTTON (spin)));
+  return g_strconcat (key, "=", buf, NULL);
+}
+
+static void
+rules_save (GtkWidget *row, gpointer data)
+{
+  Rp *r = data;
+  g_autofree char *days = g_strdup_printf ("forget_days=%d", gtk_spin_button_get_value_as_int (GTK_SPIN_BUTTON (r->days)));
+  g_autofree char *step = rule_arg ("sight_step", r->step);
+  g_autofree char *start = rule_arg ("conf_start", r->start);
+  g_autofree char *ceil = rule_arg ("conf_ceil", r->ceil);
+  const char *const args[] = { "people", "rules-set", days, step, start, ceil, "--json", NULL };
+  ns_mc_run (r->owner, args, NULL, rules_saved, r);
+}
+
+/* a pushed page of its own, reached from the list and from an entry: not in the Minerva index */
+static void
+rules_open (JsonObject *ui)
+{
+  GtkWidget *c;
+  JsonObject *det = obj_of (ui, "detail");
+  AdwNavigationPage *page = ns_page_new (str_of (det, "rules_title"), &c);
+  Rp *r = g_new0 (Rp, 1);
+  r->owner = G_OBJECT (page);
+  r->ui = json_object_ref (ui);
+  g_object_set_data_full (G_OBJECT (page), "pp-rules", r, (GDestroyNotify) rp_free);
+  r->msg = msg_new (c);
+  GtkWidget *g = ns_group (c, r_str (r, "rules_group"));
+  gint64 max = int_of (det, "rules_days_max");
+  r->days = rules_spin (g, r_str (r, "rules_forget_days"), 1, max > 1 ? (double) max : 1, 1, 0);
+  r->step = rules_spin (g, r_str (r, "rules_sight_step"), 0, 1, 0.01, 2);
+  r->start = rules_spin (g, r_str (r, "rules_conf_start"), 0, 1, 0.01, 2);
+  r->ceil = rules_spin (g, r_str (r, "rules_conf_ceil"), 0, 1, 0.01, 2);
+  ns_note (c, r_str (r, "rules_note"));
+  g = ns_group (c, NULL);
+  ns_row_button (g, r_str (r, "rules_save"), FALSE, rules_save, r);
+  r->sweep = ns_note (c, "");
+  static const char *const args[] = { "people", "known", "--json", NULL };
+  ns_mc_run (G_OBJECT (page), args, NULL, rules_loaded, r);
   ns_push (page);
 }
 
@@ -545,7 +1021,7 @@ person_open (JsonObject *ui, const char *id, const char *name)
 typedef struct {
   GObject    *owner;
   JsonObject *ui;
-  GtkWidget  *msg, *list_g;
+  GtkWidget  *msg, *kinds_box;   /* kinds_box: the kinds' cards, built again at each load */
 } Pp;
 
 static const char *
@@ -569,6 +1045,17 @@ person_tapped (GtkWidget *row, gpointer data)
 }
 
 static void
+entry_row (Pp *p, GtkWidget *group, JsonObject *o)
+{
+  const char *kind = str_of (o, "kind");
+  g_autofree char *sub = entry_sub (p->ui, o);
+  GtkWidget *row = ns_row (group, kind_icon (p->ui, kind), kind_color (p->ui, kind), str_of (o, "name"), sub);
+  g_object_set_data_full (G_OBJECT (row), "pp-id", g_strdup (str_of (o, "id")), g_free);
+  g_object_set_data_full (G_OBJECT (row), "pp-name", g_strdup (str_of (o, "name")), g_free);
+  ns_row_on_activate (row, person_tapped, p);
+}
+
+static void
 list_loaded (JsonObject *root, const char *err, gpointer data)
 {
   Pp *p = data;
@@ -576,30 +1063,66 @@ list_loaded (JsonObject *root, const char *err, gpointer data)
   msg_set (p->msg, why, TRUE);
   if (why)
     return;
-  ns_group_clear (p->list_g);
+  GtkWidget *ch;
+  while ((ch = gtk_widget_get_first_child (p->kinds_box)))
+    gtk_box_remove (GTK_BOX (p->kinds_box), ch);
+  JsonArray *kinds = arr_of (root, "kinds");
   JsonArray *people = arr_of (root, "people");
-  guint n = people ? json_array_get_length (people) : 0;
-  if (!n)
-    ns_row (p->list_g, NULL, NULL, l_str (p, "empty"), NULL);
-  for (guint i = 0; i < n; i++) {
-    JsonObject *o = json_array_get_object_element (people, i);
-    g_autofree char *faces = fmt_n (l_str (p, int_of (o, "faces") == 1 ? "faces_one" : "faces"), "n", int_of (o, "faces"));
-    g_autofree char *notes = fmt_n (l_str (p, int_of (o, "notes") == 1 ? "notes_one" : "notes"), "n", int_of (o, "notes"));
-    g_autofree char *sub = g_strdup_printf ("%s%s%s • %s • %s • %s", bool_of (o, "owner") ? l_str (p, "owner") : "",
-                                            bool_of (o, "owner") ? " • " : "", faces,
-                                            l_str (p, bool_of (o, "voiceprint") ? "voice_yes" : "voice_no"),
-                                            l_str (p, *str_of (o, "contact_uid") ? "contact_yes" : "contact_no"), notes);
-    GtkWidget *row = ns_row (p->list_g, "avatar-default-symbolic", "blue", str_of (o, "name"), sub);
-    g_object_set_data_full (G_OBJECT (row), "pp-id", g_strdup (str_of (o, "id")), g_free);
-    g_object_set_data_full (G_OBJECT (row), "pp-name", g_strdup (str_of (o, "name")), g_free);
-    ns_row_on_activate (row, person_tapped, p);
+  guint nk = kinds ? json_array_get_length (kinds) : 0;
+  guint np = people ? json_array_get_length (people) : 0;
+  gint64 days = int_of (obj_of (root, "rules"), "forget_days");
+  g_autofree gboolean *placed = g_new0 (gboolean, np + 1);
+  /* a card per kind in the data's order; its strangers in a card of their own right under it */
+  for (guint k = 0; k < nk; k++) {
+    const char *kid = str_of (json_array_get_object_element (kinds, k), "id");
+    GtkWidget *g = ns_group (p->kinds_box, map_str (p->ui, "kinds", kid, kid));
+    guint shown = 0, strangers = 0;
+    for (guint i = 0; i < np; i++) {
+      JsonObject *o = json_array_get_object_element (people, i);
+      if (g_strcmp0 (str_of (o, "kind"), kid))
+        continue;
+      placed[i] = TRUE;
+      if (bool_of (o, "stranger")) {
+        strangers++;
+        continue;
+      }
+      entry_row (p, g, o);
+      shown++;
+    }
+    if (!shown)
+      ns_row (g, NULL, NULL, l_str (p, !np && !k ? "empty" : "empty_kind"), NULL);
+    if (!strangers)
+      continue;
+    GtkWidget *sg = ns_group (p->kinds_box, l_str (p, "strangers"));
+    for (guint i = 0; i < np; i++) {
+      JsonObject *o = json_array_get_object_element (people, i);
+      if (!g_strcmp0 (str_of (o, "kind"), kid) && bool_of (o, "stranger"))
+        entry_row (p, sg, o);
+    }
+    g_autofree char *note = fmt_n (l_str (p, "stranger_note"), "days", days);
+    ns_note (p->kinds_box, note);
   }
+  /* entries of a kind the data does not list: kept in sight */
+  GtkWidget *other = NULL;
+  for (guint i = 0; i < np; i++) {
+    if (placed[i])
+      continue;
+    if (!other)
+      other = ns_group (p->kinds_box, l_str (p, "other"));
+    entry_row (p, other, json_array_get_object_element (people, i));
+  }
+}
+
+static void
+rules_tapped (GtkWidget *row, gpointer data)
+{
+  rules_open (((Pp *) data)->ui);
 }
 
 static void
 list_load (Pp *p)
 {
-  static const char *const args[] = { "people", "list", "--json", NULL };
+  static const char *const args[] = { "people", "known", "--json", NULL };
   ns_mc_run (p->owner, args, NULL, list_loaded, p);
 }
 
@@ -650,9 +1173,13 @@ ns_page_people (GtkWidget *row, gpointer data)
   p->ui = json_object_ref (ui);
   g_object_set_data_full (G_OBJECT (page), "pp", p, (GDestroyNotify) pp_free);
   p->msg = msg_new (c);
-  p->list_g = ns_group (c, l_str (p, "title"));
+  p->kinds_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+  gtk_box_append (GTK_BOX (c), p->kinds_box);
   ns_note (c, l_str (p, "note"));
   GtkWidget *g = ns_group (c, NULL);
+  GtkWidget *rules = ns_row (g, "preferences-system-symbolic", "grey", l_str (p, "rules"), l_str (p, "rules_sub"));
+  ns_row_on_activate (rules, rules_tapped, p);
+  g = ns_group (c, NULL);
   ns_row_button (g, l_str (p, "add"), FALSE, add_tapped, p);
   /* each time the page shows (also back from a person, who may be gone): the list again */
   g_signal_connect (page, "showing", G_CALLBACK (list_showing), p);
