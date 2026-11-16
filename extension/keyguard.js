@@ -25,6 +25,7 @@ import {fingerState, FingerStrings} from './finger.js';
 import {FingerHint, FingerSensor} from './fingerhint.js';
 import {vibrate} from './haptics.js';
 import {Canvas, paintIcon} from './icons.js';
+import {fingerAllowed, mayOcclude} from './lockover.js';
 import {animate, clamp, EMPHASIZED_ACCELERATE, FAST_OUT_SLOW_IN, lerp, LINEAR, MIN_FLING_VELOCITY,
     TOUCH_RESPONSE, VelocityTracker} from './motion.js';
 import {Color, onRestyle, offRestyle, rgba, SHADE_PANEL} from './palette.js';
@@ -246,6 +247,8 @@ export class Keyguard extends Signals.EventEmitter {
         this._awake = true;             // the screen is on (power.js: goToSleep / wakeUp)
         // an app's window over the lock screen (setOccluded), and the other windows' actors hidden meanwhile
         this.occludedBy = null;
+        // the lock screen has the front back, for the unlock under way: no window goes over it meanwhile
+        this._revealing = false;
         this._occlusionHidden = new Set();
         this._occlusion = {};           // the connections that last while occluded
         this._loadThrottle();
@@ -288,6 +291,12 @@ export class Keyguard extends Signals.EventEmitter {
 
     get _lockType() {
         return this._neo?.get_string('lock-type') ?? 'pin';
+    }
+
+    // the swipe up's slop, in dp, before it starts counting as one (de.yesman.neo lock-swipe-slop)
+    get _swipeSlop() {
+        const dp = neoInt(this._neo, 'lock-swipe-slop');
+        return dp > 0 ? dp * SCALE : SLOP;
     }
 
     get _secure() {
@@ -364,9 +373,13 @@ export class Keyguard extends Signals.EventEmitter {
         });
         this._indication = new AndroidText('', INDICATION_SIZE, INDICATION_WGHT, {colour: Color.onWall, opsz: 16});
         this._content.add_child(this._indication);
-        // the sensor's state, on the right edge at the power key (fingerhint.js)
+        // the sensor's state, on the right edge at the power key (fingerhint.js). In a layer of its own, over the lock
+        // screen and over a window that shows over it (setOccluded): there this view draws nothing, and the state of
+        // the sensor is all that stays on the screen.
         this._fingerHint = new FingerHint();
-        this._content.add_child(this._fingerHint);
+        this.hintLayer = new St.Widget({x: monitor.x, y: monitor.y, width: monitor.width, height: monitor.height,
+            reactive: false, visible: false});
+        this.hintLayer.add_child(this._fingerHint);
 
         this._bouncerBox = new St.Widget({width: monitor.width, height: monitor.height, opacity: 0, visible: false});
         this.actor.add_child(this._bouncerBox);
@@ -517,27 +530,27 @@ export class Keyguard extends Signals.EventEmitter {
 
     // --- occluded: an app's window over the lock screen (whenlocked.js; KeyguardViewMediator.setOccluded)
 
-    // @win: the window that shows over the lock screen, or null for the lock screen itself. Only the keyguard's view
-    // and its grab step aside for it: every other window stays hidden, and the phone stays locked (showing stays
-    // true), so home, recents and the shade stay shut. Unlocked, nothing is occluded.
+    get revealing() {
+        return this._revealing;
+    }
+
+    // @win: the window that shows over the lock screen, or null for the lock screen itself. This view keeps its place
+    // and its modal grab: touches and keys reach the lock screen meanwhile, so the swipe up brings the bouncer and a
+    // finger unlocks as on the lock screen itself, and nothing typed reaches the window (a kiosk disables its chat
+    // meanwhile, chat.show_when_locked). Only this view's drawing steps aside: every other window stays hidden, and
+    // the phone stays locked (showing stays true), so home, recents and the shade stay shut.
     setOccluded(win) {
-        if (this._unlockingNow)
-            return;
-        win = this.showing ? win : null;
+        win = mayOcclude({showing: this.showing, revealing: this._revealing, overWindow: win}) ? win : null;
         if (win === this.occludedBy)
             return;
         this._showHiddenWindows();
         this.occludedBy = win;
-        this._syncFinger();
         if (win) {
-            if (this.bouncerShowing)
+            if (this._bouncerActive)
                 this._hideBouncer(false);
-            this.actor.hide();
-            if (this._grab)
-                Main.popModal(this._grab);
-            this._grab = null;
-            // the locked session mode hides the window group (LayoutManager._updateVisibility): shown for this window,
-            // with every other window in it hidden, the ones that come later too
+            this._setF(1);
+            // the group is hidden by the locked session mode: shown for this window, with every other window in it
+            // hidden, the ones that come later too
             const group = global.window_group;
             group.connectObject(
                 'notify::visible', () => group.show(),
@@ -546,10 +559,43 @@ export class Keyguard extends Signals.EventEmitter {
             for (const actor of global.get_window_actors())
                 this._hideForOcclusion(actor);
         } else if (this.showing) {
-            this.actor.show();
-            this._grab ??= Main.pushModal(this.actor, {actionMode: Shell.ActionMode.LOCK_SCREEN});
             Main.layoutManager._updateVisibility();
         }
+        this._applyOcclusion();
+        this._syncFingerHint();
+        this.emit('changed');
+    }
+
+    // occluded: the screen's input target with nothing drawn, the window showing through it. The modal grab is not
+    // touched here (it is the lock screen's, pushed by lock()): the window gets no touch and no key meanwhile.
+    _applyOcclusion() {
+        const behind = !!this.occludedBy;
+        this.actor.style = behind ? '' : 'background-color: black;';
+        this._wallpaper.visible = !behind;
+        this._blurLayer.visible = !behind;
+        this._scrim.visible = !behind;
+        this._content.visible = !behind;
+    }
+
+    // The lock screen takes the front back from the window over it, for the unlock that follows (the swipe's slop, a
+    // finger). whenlocked.js keeps the window behind while this is true, and it comes back at rest (_atRest).
+    _revealStart() {
+        if (!this.occludedBy)
+            return;
+        this._revealing = true;
+        this.occludedBy = null;
+        this._showHiddenWindows();
+        Main.layoutManager._updateVisibility();
+        this._applyOcclusion();
+        this._syncFingerHint();
+        this.emit('changed');
+    }
+
+    // the lock screen at rest again (f 1, no bouncer): the window over it may come back on top
+    _atRest() {
+        if (!this._revealing || this._bouncerActive || this.bouncerShowing || this._f < 1)
+            return;
+        this._revealing = false;
         this.emit('changed');
     }
 
@@ -599,9 +645,9 @@ export class Keyguard extends Signals.EventEmitter {
     // --- a finger on the sensor
 
     get _fingerAllowed() {
-        return this.showing && this._secure && !this._afterRestart && !this._lockedDown &&
-            !this._unlockingNow && !this.occludedBy && !this._lockedOut &&
-            this._fingerMisses < this._fingerMaxMisses;
+        return fingerAllowed({showing: this.showing, secure: this._secure, afterRestart: this._afterRestart,
+            lockedDown: this._lockedDown, unlocking: this._unlockingNow, lockedOut: this._lockedOut,
+            misses: this._fingerMisses, max: this._fingerMaxMisses});
     }
 
     // The hint is redrawn on the same call sites as the arming: every flag above is one of its states.
@@ -617,6 +663,12 @@ export class Keyguard extends Signals.EventEmitter {
     _syncFingerHint() {
         if (!this._fingerHint)
             return;
+        // unlocked there is nothing to say: finger.js's states do not know about the lock screen going away
+        if (!this.showing) {
+            this._fingerHint.visible = false;
+            this.hintLayer.visible = false;
+            return;
+        }
         this._fingerHint.setState(fingerState({
             secure: this._secure,
             bouncer: this._bouncerBox?.visible ?? false,
@@ -628,6 +680,7 @@ export class Keyguard extends Signals.EventEmitter {
             signal: this._fingerSignal,
             armed: !!this._finger,
         }), this._lockType === 'pattern' ? 'pattern' : 'pin');
+        this.hintLayer.visible = this._fingerHint.visible;
     }
 
     // an arming that found no sensor is retried, as de.yesman.neo allows: fprintd off the bus, the device not
@@ -708,7 +761,10 @@ export class Keyguard extends Signals.EventEmitter {
             this._fingerMisses = 0;
             this._fingerRetries = 0;
             this._fingerSignal = '';
-            if (this.bouncerShowing && this._bouncer)
+            // a window over the lock screen: the phone unlocks behind it, where the user is
+            if (this.occludedBy)
+                this._unlockOver();
+            else if (this.bouncerShowing && this._bouncer)
                 this._bouncer.disappear(() => this._goingAway());
             else
                 this._goingAway();
@@ -762,6 +818,11 @@ export class Keyguard extends Signals.EventEmitter {
                 return Clutter.EVENT_PROPAGATE;
             this._settle?.stop();
             this._settle = null;
+            // a touch while the bouncer is still coming up: it is up, and the touch is the bouncer's
+            if (this._bouncerActive && !this.bouncerShowing) {
+                this._setF(0);
+                this._bouncerShown();
+            }
             this._down = {seq: isTouch ? seq : 'pointer', x, y, t: event.get_time(), f: this._f};
             this._tracking = false;
             this._tracker.clear();
@@ -792,9 +853,11 @@ export class Keyguard extends Signals.EventEmitter {
             return;
         }
         if (!this._tracking) {
-            if (d < SLOP)
+            if (d < this._swipeSlop)
                 return;
             this._tracking = true;
+            // over a window (setOccluded): the lock screen comes back for the rest of this unlock
+            this._revealStart();
             if (this._secure)
                 this._ensureBouncer();
         }
@@ -848,6 +911,7 @@ export class Keyguard extends Signals.EventEmitter {
             onDone: () => {
                 this._settle = null;
                 onDone?.();
+                this._atRest();
             }});
     }
 
@@ -950,6 +1014,7 @@ export class Keyguard extends Signals.EventEmitter {
             this.bouncerShowing = false;
             this.emit('changed');
         }
+        this._atRest();
     }
 
     // auto-confirm on while the last PIN that unlocked was 6 digits or more, and off for the rest of this bouncer once
@@ -991,11 +1056,12 @@ export class Keyguard extends Signals.EventEmitter {
         this._settle = null;
         if (!this._bouncerActive) {
             this._setF(1);
+            this._atRest();
             return;
         }
         if (!animated) {
-            this._dropBouncer();
             this._setF(1);
+            this._dropBouncer();
             return;
         }
         const content = this._content.opacity / 255, box = this._bouncerBox.opacity / 255;
@@ -1009,8 +1075,8 @@ export class Keyguard extends Signals.EventEmitter {
             },
             onDone: () => {
                 this._settle = null;
-                this._dropBouncer();
                 this._f = 1;
+                this._dropBouncer();
                 this._setBackdrop(0);
             }});
     }
@@ -1168,6 +1234,8 @@ export class Keyguard extends Signals.EventEmitter {
             return;
         this._unlockingNow = true;
         this._stopFinger();
+        // the hint's layer is not the view's child (it outlives the view while a window is over the lock screen)
+        this.hintLayer.hide();
         this._settle?.stop();
         this._settle = null;
         if (this._countdownId)
@@ -1220,19 +1288,36 @@ export class Keyguard extends Signals.EventEmitter {
             }});
     }
 
+    // A finger while a window shows over the lock screen: the phone unlocks behind it, with no reveal and no
+    // animation, and the window is the front again (Android's showWhenLocked app: the unlock happens where the user is)
+    _unlockOver() {
+        this._unlockingNow = true;
+        this._stopFinger();
+        this.occludedBy = null;
+        this._showHiddenWindows();
+        this._leaveLockMode();
+        this._finishUnlock();
+    }
+
     _finishUnlock() {
         this._unlockingNow = false;
+        // the window that showed over the lock screen stays where it is, and is the front again
+        this._revealing = false;
+        this.occludedBy = null;
+        this._showHiddenWindows();
         this._lockedDown = false;
         this._dropBouncer();
         this._setBackdrop(0);
         this._f = 1;
         this.actor.hide();
+        this._applyOcclusion();
         this._wallpaper.show();
         if (this._grab)
             Main.popModal(this._grab);
         this._grab = null;
         this.showing = false;
         setLockedHint(false);
+        this._syncFingerHint();
         this.emit('changed');
     }
 
@@ -1268,6 +1353,8 @@ export class Keyguard extends Signals.EventEmitter {
         if (this._grab)
             Main.popModal(this._grab);
         this._grab = null;
+        this._revealing = false;
+        this.occludedBy = null;
         this._showHiddenWindows();
         this._leaveLockMode();
         const group = global.window_group;
@@ -1275,5 +1362,6 @@ export class Keyguard extends Signals.EventEmitter {
         group.scale_x = group.scale_y = 1;
         group.translation_y = 0;
         this.actor.destroy();
+        this.hintLayer?.destroy();
     }
 }

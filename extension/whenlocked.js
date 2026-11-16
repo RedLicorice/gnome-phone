@@ -1,9 +1,11 @@
 // Windows over the lock screen: Android's showWhenLocked. An app whose desktop file says
 // X-GnomePhone-ShowWhenLocked=true (Android declares android:showWhenLocked in the manifest) may show a window over
-// the lock screen: the ringing alarm, an incoming call. While such a window is the top one, the keyguard is occluded
-// (KeyguardViewMediator.setOccluded): its view and its grab step aside for that window, and only for it. The phone stays
-// locked meanwhile: the other windows stay hidden, and home, recents and the shade stay shut (navigation.js, shade.js
-// ask keyguard.showing). When the window closes, or goes behind another, the lock screen is back.
+// the lock screen: the ringing alarm, an incoming call. While such a window is the top one, the keyguard draws nothing
+// and lets the window show through (KeyguardViewMediator.setOccluded), but keeps its place and its modal grab: touches
+// and keys stay the lock screen's, so the swipe up brings the bouncer and a finger unlocks, and nothing typed reaches
+// the window. The phone stays locked meanwhile: the other windows stay hidden, and home, recents and the shade stay
+// shut (navigation.js, shade.js ask keyguard.showing). de.yesman.neo lock-over-window turns the rule off for every app.
+// When the window closes, or goes behind another, or the user is unlocking, the lock screen is back.
 //
 // An app gets on the lock screen this way only by putting its window up while the phone is locked (an alarm that
 // rings, a call coming in), or by having it on top when the phone locks (a call under way), as on Android.
@@ -11,7 +13,12 @@ import Gio from 'gi://Gio';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 
+import {mayOcclude} from './lockover.js';
+
 const KEY = 'X-GnomePhone-ShowWhenLocked';
+// the user's switch, de.yesman.neo lock-over-window: off keeps every app window behind the lock screen
+const SCHEMA = 'de.yesman.neo';
+const OVER_KEY = 'lock-over-window';
 
 // whether @win's app declares that it may show over the lock screen
 export function showsWhenLocked(win) {
@@ -25,6 +32,9 @@ export class WhenLocked {
     constructor(keyguard, stacks) {
         this._keyguard = keyguard;
         this._stacks = stacks;
+        const schema = Gio.SettingsSchemaSource.get_default()?.lookup(SCHEMA, true);
+        this._settings = schema ? new Gio.Settings({settings_schema: schema}) : null;
+        this._settings?.connectObject(`changed::${OVER_KEY}`, () => this._sync(), this);
         keyguard.connectObject('changed', () => this._sync(), this);
         global.display.connectObject(
             'window-created', (_display, win) => this._watch(win),
@@ -32,6 +42,12 @@ export class WhenLocked {
         for (const actor of global.get_window_actors())
             this._watch(actor.meta_window);
         this._sync();
+    }
+
+    // whether the switch allows any window over the lock screen (a schema too old to know the key reads as on)
+    get _allowed() {
+        const settings = this._settings;
+        return settings?.settings_schema?.has_key(OVER_KEY) ? settings.get_boolean(OVER_KEY) : true;
     }
 
     _watch(win) {
@@ -55,11 +71,18 @@ export class WhenLocked {
 
     _sync() {
         const top = this._keyguard.showing ? this._topWindow() : null;
-        this._keyguard.setOccluded(top && showsWhenLocked(top) && this._stacks.mayShowWhenLocked(top) ? top : null);
+        const overWindow = top && showsWhenLocked(top) && this._stacks.mayShowWhenLocked(top) ? top : null;
+        this._keyguard.setOccluded(mayOcclude({
+            showing: this._keyguard.showing,
+            revealing: this._keyguard.revealing,
+            allowed: this._allowed,
+            overWindow,
+        }) ? overWindow : null);
     }
 
     destroy() {
         this._keyguard.disconnectObject(this);
+        this._settings?.disconnectObject(this);
         global.display.disconnectObject(this);
         for (const actor of global.get_window_actors())
             actor.meta_window.disconnectObject(this);

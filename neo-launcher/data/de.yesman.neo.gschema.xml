@@ -126,6 +126,20 @@
       <summary>Fingerprint arming retry delay</summary>
       <description>How long to wait before arming the sensor again, in milliseconds.</description>
     </key>
+    <key name="lock-over-window" type="b">
+      <default>true</default>
+      <summary>App windows over the lock screen</summary>
+      <description>An app whose desktop file says X-GnomePhone-ShowWhenLocked may show its window over the lock screen
+      (the kiosk, a ringing alarm, a call coming in). Off: every app window stays behind the lock screen. Either way
+      the lock screen keeps the input, so a swipe up brings the PIN pad and a finger on the sensor unlocks.</description>
+    </key>
+    <key name="lock-swipe-slop" type="i">
+      <range min="1" max="60"/>
+      <default>8</default>
+      <summary>Lock screen swipe slop</summary>
+      <description>How far a finger travels up the lock screen before the swipe starts, in dp. It applies over an app
+      window too, which the same swipe takes the lock screen back from.</description>
+    </key>
     <key name="double-tap-wake" type="b">
       <default>true</default>
       <summary>Double tap to wake</summary>

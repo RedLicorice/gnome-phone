@@ -140,6 +140,9 @@ export default class GnomePhoneExtension extends Extension {
         this._keyguard = new Keyguard(this._state);
         Main.layoutManager.addTopChrome(this._keyguard.actor);
         overWindows(this._keyguard.actor);
+        // the sensor's hint, over the lock screen and over a window that shows over it (keyguard.hintLayer)
+        Main.layoutManager.addTopChrome(this._keyguard.hintLayer);
+        overWindows(this._keyguard.hintLayer);
         this._service.setKeyguard(this._keyguard);
         // an app's window over the lock screen: the ringing alarm, a call coming in
         this._stacks.setKeyguard(this._keyguard);
