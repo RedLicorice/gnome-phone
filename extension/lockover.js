@@ -1,6 +1,7 @@
-// Four decisions of the lock screen, pure so they are tested under plain gjs (tests/lockover.test.js): whether an app's
-// window shows over the lock screen (whenlocked.js), whether the sensor is armed meanwhile, and whether the phone wants
-// its secret first, and whether a recognized voice may wake the screen (voicewake.js).
+// The decisions of the lock screen, pure so they are tested under plain gjs (tests/lockover.test.js): whether an app's
+// window shows over the lock screen (whenlocked.js), whether the sensor is armed meanwhile, whether the phone wants
+// its secret first, whether the secret has been entered since the boot, and whether a recognized voice may wake the
+// screen (voicewake.js).
 
 // Whether the lock screen steps behind @overWindow: the phone locked, the top window declaring it may show over the lock
 // screen and the stacks allowing it, the user's switch on (de.yesman.neo lock-over-window), no unlock under way
@@ -9,6 +10,13 @@
 // needs, and a window over it would hide the way to it.
 export function mayOcclude({showing, revealing = false, allowed = true, overWindow = null, requiresSecret = false}) {
     return !!showing && !revealing && !requiresSecret && !!allowed && !!overWindow;
+}
+
+// Whether the secret was entered since the boot or the shell started: org.minerva.ScreenWake1's SecretEntered, which
+// every Minerva service waits for before it engages (hears the wake word, speaks, asks, wakes the agent). The swipe lock
+// has no secret to wait for. Unlike secretRequired this is the boot rule alone: Lockdown or a PIN timeout later do not take it back.
+export function secretEntered({secure = true, afterRestart = false}) {
+    return !secure || !afterRestart;
 }
 
 // Whether the phone wants its secret before anything else: the first unlock after a boot or a shell restart

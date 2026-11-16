@@ -2,7 +2,8 @@
 //   gjs -m extension/tests/lockover.test.js
 import System from 'system';
 
-import {fingerAllowed, mayOcclude, secretRequired, voiceUnlockAllowed, voiceWakeAllowed} from '../lockover.js';
+import {fingerAllowed, mayOcclude, secretEntered, secretRequired, voiceUnlockAllowed, voiceWakeAllowed} from
+    '../lockover.js';
 
 let failed = 0;
 function check(name, ok, detail = '') {
@@ -37,6 +38,17 @@ for (const blocked of [{afterRestart: true}, {lockedDown: true}, {lockedOut: tru
     check(`no window over the lock screen for ${Object.keys(blocked)[0]}`,
         !mayOcclude({...over, requiresSecret: secretRequired({...open, ...blocked})}));
 }
+
+// --- the secret entered since the boot: what every Minerva service waits for (org.minerva.ScreenWake1 SecretEntered)
+check('a boot or a shell start has had no secret yet', !secretEntered({secure: true, afterRestart: true}));
+check('the first PIN or pattern since then has', secretEntered({secure: true, afterRestart: false}));
+check('the swipe lock has no secret to wait for', secretEntered({secure: false, afterRestart: true}));
+check('no restart is assumed unless told', secretEntered({}));
+// Lockdown, the PIN timeout and the sensor's misses are secretRequired's, never the boot rule's: the services keep
+// running through them (the phone is locked, the owner is not a stranger)
+for (const later of [{lockedDown: true}, {lockedOut: true}, {misses: 5}, {max: 0}])
+    check(`${Object.keys(later)[0]} does not take the entered secret back`,
+        secretEntered({secure: true, afterRestart: false, ...later}));
 
 // --- the sensor
 const armed = {showing: true, secure: true, afterRestart: false, lockedDown: false, unlocking: false,

@@ -1,8 +1,13 @@
-// A recognized voice, from the Minerva voice service, may wake the screen (org.minerva.ScreenWake1): the lock screen
+// The shell's word to the Minerva services (org.minerva.ScreenWake1). SecretEntered is the one signal they all wait for
+// before they engage with anything (the wake word, a spoken line, a question, an agent turn, the face's chat): false from
+// a boot or a shell start until the first PIN or pattern (lockover.js secretEntered, keyguard.js 'secret-entered').
+//
+// And a recognized voice, from the Minerva voice service, may wake the screen: the lock screen
 // shows with the kiosk face over it, as power.js wakeUp leaves it, and the phone stays locked. When it may is the lock
 // screen's own policy (lockover.js voiceWakeAllowed, pure and tested under plain gjs): the PIN entered since boot or a
 // shell restart first, not in Lockdown, not in the PIN's own timeout.
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 
 import {voiceWakeAllowed} from './lockover.js';
 
@@ -17,6 +22,7 @@ const WAKE_IFACE = `<node>
       <arg name="woke" direction="out" type="b"/>
       <arg name="why" direction="out" type="s"/>
     </method>
+    <property name="SecretEntered" type="b" access="read"/>
   </interface>
 </node>`;
 
@@ -27,6 +33,13 @@ export class VoiceWake {
         this._keyguard = keyguard;
         this._power = power;
         this._export();
+        this._keyguard?.connectObject('secret-entered', (_kg, entered) => this._dbus?.emit_property_changed(
+            'SecretEntered', new GLib.Variant('b', entered)), this);
+    }
+
+    // false while the keyguard is not there to say: the doubtful case is the closed one
+    get SecretEntered() {
+        return !!this._keyguard?.secretEntered;
     }
 
     // '' when a voice may wake the screen now, else why: 'pin-not-entered'|'locked-down'|'locked-out'|'no-keyguard'
@@ -73,6 +86,7 @@ export class VoiceWake {
     }
 
     destroy() {
+        this._keyguard?.disconnectObject(this);
         if (this._nameId)
             Gio.bus_unown_name(this._nameId);
         this._nameId = 0;

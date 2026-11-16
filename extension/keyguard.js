@@ -25,7 +25,8 @@ import {fingerState, FingerStrings} from './finger.js';
 import {FingerHint, FingerSensor, PinButton} from './fingerhint.js';
 import {vibrate} from './haptics.js';
 import {Canvas, paintIcon} from './icons.js';
-import {fingerAllowed, mayOcclude, secretRequired as secretIsRequired, voiceUnlockAllowed} from './lockover.js';
+import {fingerAllowed, mayOcclude, secretEntered as secretIsEntered, secretRequired as secretIsRequired,
+    voiceUnlockAllowed} from './lockover.js';
 import {animate, clamp, EMPHASIZED_ACCELERATE, FAST_OUT_SLOW_IN, lerp, LINEAR, MIN_FLING_VELOCITY,
     TOUCH_RESPONSE, VelocityTracker} from './motion.js';
 import {Color, onRestyle, offRestyle, rgba, SHADE_PANEL} from './palette.js';
@@ -271,6 +272,7 @@ export class Keyguard extends Signals.EventEmitter {
         this._loadThrottle();
         // the last answer of secretRequired, kept to tell whenlocked.js to look again (emits 'changed')
         this._secretRequired = this.secretRequired;
+        this._secretEntered = this.secretEntered;
 
         this._build();
         this._fingerSensor = new FingerSensor(state => {
@@ -337,6 +339,12 @@ export class Keyguard extends Signals.EventEmitter {
             misses: this._fingerMisses,
             max: this._fingerMaxMisses,
         });
+    }
+
+    // The secret was entered since the boot or the shell started (lockover.js): what org.minerva.ScreenWake1 tells the
+    // Minerva services, which engage with nothing before it. Lockdown and the PIN timeout do not take it back.
+    get secretEntered() {
+        return secretIsEntered({secure: this._secure, afterRestart: this._afterRestart});
     }
 
     // the sensor's policy, from de.yesman.neo: no settings, no sensor (the schema is installed with the extension,
@@ -712,11 +720,21 @@ export class Keyguard extends Signals.EventEmitter {
     // whenlocked.js looks again when what the lock screen wants changes: the window over it steps aside for the PIN
     // and comes back once it has been given
     _syncSecretRequired() {
+        this._syncSecretEntered();
         const required = this.secretRequired;
         if (required === this._secretRequired)
             return;
         this._secretRequired = required;
         this.emit('changed');
+    }
+
+    // 'secret-entered' tells voicewake.js to say so on the bus, the moment the first secret after a boot is given
+    _syncSecretEntered() {
+        const entered = this.secretEntered;
+        if (entered === this._secretEntered)
+            return;
+        this._secretEntered = entered;
+        this.emit('secret-entered', entered);
     }
 
     // the sensor's state on the right edge, at the power key (finger.js says what each one means)
