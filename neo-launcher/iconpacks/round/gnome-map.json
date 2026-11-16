@@ -12,6 +12,7 @@
  "de.yesman.Files.desktop": "files",
  "de.yesman.Messaging.desktop": "messaging",
  "de.yesman.NeoBrowser.desktop": "browser",
+ "de.yesman.NeoPrompt.desktop": "prompt",
  "de.yesman.NeoSettings.desktop": "settings",
  "de.yesman.NeoWeather.desktop": "weather",
  "de.yesman.app.desktop": "yesman",
@@ -41,5 +42,6 @@
  "org.gnome.Totem.desktop": "video",
  "org.gnome.Weather.desktop": "weather",
  "org.gnome.clocks.desktop": "clock",
+ "org.minerva.Kiosk.desktop": "yesman",
  "sm.puri.Chatty.desktop": "messaging"
 }
