@@ -25,7 +25,7 @@ import {fingerState, FingerStrings} from './finger.js';
 import {FingerHint, FingerSensor, PinButton} from './fingerhint.js';
 import {vibrate} from './haptics.js';
 import {Canvas, paintIcon} from './icons.js';
-import {fingerAllowed, mayOcclude, secretRequired as secretIsRequired} from './lockover.js';
+import {fingerAllowed, mayOcclude, secretRequired as secretIsRequired, voiceUnlockAllowed} from './lockover.js';
 import {animate, clamp, EMPHASIZED_ACCELERATE, FAST_OUT_SLOW_IN, lerp, LINEAR, MIN_FLING_VELOCITY,
     TOUCH_RESPONSE, VelocityTracker} from './motion.js';
 import {Color, onRestyle, offRestyle, rgba, SHADE_PANEL} from './palette.js';
