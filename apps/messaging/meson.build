@@ -20,7 +20,7 @@ phone = static_library('phone', '../dialer/src/phone-number.c', '../dialer/src/c
                        c_args: ['-DNOTIFIER_APP_ID="de.yesman.Messaging"', '-DNOTIFIER_APP_NAME="Messaging"'])
 
 # the service: the messages with the app closed, taking them off the modem, sending, the notifications
-executable('neo-messaging-sms', 'src/sms-service.c', 'src/sms-modem.c', link_with: [store, phone],
+executable('neo-messaging-sms', 'src/sms-service.c', 'src/sms-modem.c', 'src/sms-provider.c', link_with: [store, phone],
            include_directories: dialer, dependencies: [gio, ebook], install: true)
 
 # the app: the conversation list, a conversation, the contact picker
@@ -31,7 +31,7 @@ executable('neo-messaging', 'src/messaging-main.c', 'src/messaging-window.c', 's
            'src/blocked-contacts.c', 'src/people-options.c', 'src/msg-settings.c', 'src/msg-sound.c',
            'src/conversation-list.c', 'src/conversation-view.c', 'src/contact-picker.c', 'src/msg-action-bar.c',
            'src/msg-add-contact.c', 'src/msg-avatar.c', 'src/msg-bubble.c', 'src/msg-dates.c', 'src/msg-image.c',
-           'src/msg-people.c', 'src/msg-swipe.c', 'src/sms-client.c', 'src/sms-segments.c',
+           'src/msg-people.c', 'src/sms-provider.c', 'src/msg-swipe.c', 'src/sms-client.c', 'src/sms-segments.c',
            '../dialer/src/popup-menu.c', '../dialer/src/contacts-app.c', '../dialer/src/app-action.c', resources,
            link_with: [store, phone],
            include_directories: dialer, install: true,

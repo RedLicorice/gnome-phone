@@ -93,6 +93,10 @@ void ns_page_events (GtkWidget *row, gpointer data);
  * deleted). Reached from the Minerva index like the other pages. */
 void ns_page_minerva_places (GtkWidget *row, gpointer data);
 
+/* ns-provider.c: Minerva > Messaggi (the messaging providers of Messages) and Accounts' Telegram bot token */
+void     ns_page_messaging (GtkWidget *row, gpointer data);
+void     ns_page_provider (GtkWidget *row, gpointer data);
+void     ns_messaging_token_add (GtkWidget *content, AdwNavigationPage *page);
 /* ns-people.c: Minerva > Persone (notebook, face samples, voiceprint, contact of each person); `--page people` is
  * the index, then Persone once `people ui` answers; the index's own row opens it directly */
 void     ns_page_people_open (GtkWidget *row, gpointer data);

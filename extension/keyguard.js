@@ -40,7 +40,8 @@ Gio._promisify(Gio.Subprocess.prototype, 'wait_async');
 Gio._promisify(Gio.File.prototype, 'load_contents_async');
 Gio._promisify(Gio.File.prototype, 'replace_contents_async');
 
-const GP_AUTH = ['/usr/local/libexec/gp-auth', '/usr/libexec/gp-auth'];
+// the lock screen's checker, and the voice service's (pinask.js): the first one that is there
+export const GP_AUTH = ['/usr/local/libexec/gp-auth', '/usr/libexec/gp-auth'];
 
 // Voice unlock: the switch Settings owns (de.yesman.neo voice-unlock, off by default, with the warning that a recording
 // can fool it), the Minerva voice service that answers the live check, and the words the lock screen adds around it.

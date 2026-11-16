@@ -76,6 +76,9 @@ static const Entry entries[] = {
   { "preferences-system-notifications-symbolic", "orange", "Eventi", "App • Canali • Livelli • Sveglie",
     "eventi events app canali canale livelli livello notifiche sveglie sveglia wake", ns_page_events, NULL, NULL,
     ns_minerva_available, TRUE },
+  { "chat-message-new-symbolic", "green", "Messaggi", "WhatsApp • Telegram",
+    "messaggi messaging whatsapp telegram chat provider lettura scrittura whitelist token", ns_page_messaging, NULL, NULL,
+    ns_minerva_available, TRUE },
   { "x-office-spreadsheet-symbolic", "orange", "Budget", "Tetti di spesa • Eventi • Avvisi",
     "budget budgets spesa costo costi quota tetti limiti eventi events bypass", ns_page_minerva_budget, NULL, NULL,
     ns_minerva_available, TRUE },
@@ -358,6 +361,8 @@ static const struct {
   { "budget", ns_page_minerva_budget }, { "budgets", ns_page_minerva_budget }, { "spesa", ns_page_minerva_budget },
   { "events", ns_page_events }, { "eventi", ns_page_events },
   { "places", ns_page_minerva_places }, { "luoghi", ns_page_minerva_places }, { "minerva-places", ns_page_minerva_places },
+  { "messaging", ns_page_messaging }, { "messaggi", ns_page_messaging },
+  { "chat", ns_page_messaging }, { "chats", ns_page_messaging },
   { "permissions", ns_page_permissions }, { "agent-permissions", ns_page_permissions },
 };
 

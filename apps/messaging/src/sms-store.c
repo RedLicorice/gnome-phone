@@ -434,6 +434,21 @@ sms_store_set_status (SmsStore *self, gint64 message_id, MessageStatus status, i
   run (self, update);
 }
 
+gint64
+sms_store_find_by_uri (SmsStore *self, const char *sms_uri)
+{
+  sqlite3_stmt *find = sms_uri && *sms_uri ? prepare (self, "SELECT _id FROM messages WHERE sms_message_uri = ?") : NULL;
+  gint64 id = 0;
+
+  if (!find)
+    return 0;
+  sqlite3_bind_text (find, 1, sms_uri, -1, SQLITE_TRANSIENT);
+  if (sqlite3_step (find) == SQLITE_ROW)
+    id = sqlite3_column_int64 (find, 0);
+  sqlite3_reset (find);
+  return id;
+}
+
 void
 sms_store_set_sms_uri (SmsStore *self, gint64 message_id, const char *sms_uri)
 {

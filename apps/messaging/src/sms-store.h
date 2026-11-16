@@ -75,6 +75,8 @@ gint64    sms_store_get_conversation (SmsStore *store, const char * const *desti
 /* a message that came from @sender: into its conversation (made if new), unread and not seen. Its id, or 0 */
 gint64    sms_store_add_incoming (SmsStore *store, const char *sender, const char *text, gint64 sent,
                                   gint64 received, const char *sms_uri);
+/* the message whose provider/modem id is @sms_uri (a provider's message id is kept there): its id, or 0 */
+gint64    sms_store_find_by_uri (SmsStore *store, const char *sms_uri);
 /* a message to send, as written now: OUTGOING_YET_TO_SEND, read; the conversation's draft goes. Its id, or 0 */
 gint64    sms_store_add_outgoing (SmsStore *store, gint64 conversation_id, const char *text, gint64 now);
 void      sms_store_set_status (SmsStore *store, gint64 message_id, MessageStatus status, int raw_status,

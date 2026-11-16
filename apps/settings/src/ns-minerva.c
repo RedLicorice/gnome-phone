@@ -972,6 +972,7 @@ static const struct {
   { "people", ns_page_people_index },
   { "places", ns_page_minerva_places },
   { "events", ns_page_events },
+  { "messaging", ns_page_messaging },
   { "budget", ns_page_minerva_budget },
   { "self_notebook", open_self_notebook },
 };

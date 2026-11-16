@@ -9,7 +9,10 @@
  * networks (adding one needs NetworkManager and a confirmation; shown as Text), Android's TextClassifier.
  *
  * Not from Aperture: a "minerva-key:v1?p=<provider>&k=<key>" (or &e=<encrypted key>) code, made by Minerva on the
- * computer, shows as "Minerva API key" with the provider and an Import button (cam-key-import.h). */
+ * computer, shows as "Minerva API key" with the provider and an Import button (cam-key-import.h); a
+ * "minerva-key:v1?p=<provider>&c=<chat>&t=<token>" one, made by Minerva on the computer, pairs the phone with that
+ * provider (Messaging): it shows as "Minerva pairing" with "<provider> • pairing" and the same Import button, which
+ * hands the whole code to `minerva-config messaging pair` (cam-pair-run, cam-key-import.h). */
 #pragma once
 
 #include <gtk/gtk.h>
@@ -37,6 +40,7 @@ typedef enum {
   CAM_QR_VIN,
   CAM_QR_WIFI,
   CAM_QR_KEY,
+  CAM_QR_PAIR,            /* a provider's pairing code: the same "minerva-key:" scheme, &c=<chat>&t=<token> */
 } CamQrKind;
 
 typedef struct {
@@ -45,16 +49,17 @@ typedef struct {
   char     *uri;            /* what is opened (a URL, tel:…), or NULL */
   char     *content;        /* a vCard or iCalendar to hand over as a file, or NULL */
   const char *mime;         /* its type */
-  /* CAM_QR_KEY only (the key and the encrypted blob are never copied out of the scanned text): the provider's id
-   * as the code names it, cleaned for display; whether a passphrase unlocks the key; whether the code is a key
-   * code this app can hand to `minerva-config` at all (an unknown version or a missing part is not) */
+  /* CAM_QR_KEY and CAM_QR_PAIR only (the key, the encrypted blob and the pairing token are never copied out of the
+   * scanned text): the provider's id as the code names it, cleaned for display; whether a passphrase unlocks the
+   * key (`encrypted`, never for a pairing code); whether the code is one this app can hand to `minerva-config` at all
+   * (an unknown version or a missing part is not; so is a pairing code whose provider does not pair) */
   char     *provider;
   gboolean  encrypted;
   gboolean  importable;
 } CamQrResult;
 
-/* whether a scanned text is a Minerva key code ("minerva-key:", any case): such a text is never logged, shown whole
- * or copied */
+/* whether a scanned text is a Minerva code ("minerva-key:", any case; a key's or a provider's pairing): such a text
+ * is never logged, shown whole or copied */
 gboolean cam_qr_is_key (const char *text);
 
 /* a secret string of ours: wiped, then freed */

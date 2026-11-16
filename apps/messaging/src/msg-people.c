@@ -2,14 +2,19 @@
 #include "msg-people.h"
 #include "phone-number.h"
 #include "sms-agent.h"
+#include "sms-provider.h"
 
 MsgPerson *
 msg_person_new (Contacts *contacts, const char *destination, const char *country)
 {
   MsgPerson *person = g_new0 (MsgPerson, 1);
   /* an agent is named by its name, and is no contact */
+  /* a provider's chat is looked up by the part after its address: whatsapp:+39... is the contact with that number */
+  g_autofree char *owner = sms_provider_owner (destination);
+  g_autofree char *chat = owner ? sms_provider_chat (destination) : NULL;
+  g_autofree char *label = owner ? sms_provider_label (owner) : NULL;
   const Contact *contact = contacts && !sms_agent_name (destination)
-                           ? contacts_lookup (contacts, destination, country) : NULL;
+                           ? contacts_lookup (contacts, chat ? chat : destination, country) : NULL;
 
   person->destination = g_strdup (destination);
   if (sms_agent_name (destination))
@@ -18,13 +23,27 @@ msg_person_new (Contacts *contacts, const char *destination, const char *country
     {
       person->is_contact = TRUE;
       person->name = g_strdup (contact->name_primary ? contact->name_primary : contact->name);
+      if (label && sms_provider_flag (owner, "show-label"))
+        {
+          char *shown = g_strdup_printf ("%s \xc2\xb7 %s", person->name, label);
+
+          g_free (person->name);
+          person->name = shown;
+        }
       person->identifier = g_strdup (contact->uid);
       person->photo = contact->photo ? g_bytes_ref (contact->photo) : NULL;
     }
   if (!person->name || !*person->name)
     {
       g_free (person->name);
-      person->name = phone_number_format (destination, country);
+      person->name = phone_number_format (chat ? chat : destination, country);
+      if (chat && label && sms_provider_flag (owner, "show-label"))
+        {
+          char *shown = g_strdup_printf ("%s \xc2\xb7 %s", person->name, label);
+
+          g_free (person->name);
+          person->name = shown;
+        }
     }
   if (!person->identifier)
     person->identifier = g_strdup (person->name);

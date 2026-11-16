@@ -26,6 +26,21 @@ UNKNOWN_ERROR = 'org.freedesktop.ModemManager1.Error.MessageError.Unknown'
 NO_NETWORK = 'org.freedesktop.ModemManager1.Error.MobileEquipment.NoNetwork'
 ANNA, BOB = '+491701234567', '+491709999999'
 AGENT = 'agent:Minerva'
+WHATSAPP = 'whatsapp:+491701111111'
+UNKNOWN = 'carrierpigeon:+491701111111'
+
+CONF = """[agent]
+address = agent:
+label = Agente
+[whatsapp]
+address = whatsapp:   ; the providers' file keeps its comments after a value
+label = WhatsApp
+show-label = true
+; a whole-line comment
+[telegram]
+address = telegram:
+label = Telegram
+"""
 
 failures = []
 
@@ -445,7 +460,7 @@ def run_agents(t):
 
     # sending, with no modem
     message = t.service('Send', (minerva, 'Come stai?'), '(xs)')[0]
-    t.wait('Send with no modem: Outgoing, with its ids', lambda: (message, minerva, AGENT, 'Come stai?') in t.outgoing)
+    t.wait('Send with no modem: Outgoing, with its ids', lambda: (message, minerva, AGENT, 'Come stai?', 'owner') in t.outgoing)
     check('kept as sending', t.status(message) == SENDING, t.status(message))
     check('and not given to the modem', not t.logged('Create'), t.report()['log'])
     t.service('Delivered', (message, True), '(xb)')
@@ -471,6 +486,51 @@ def run_agents(t):
     t.wait('the modem back, available', lambda: t.prop('Available'))
 
 
+def run_providers(t):
+    # a provider's conversation (sms-provider.c, messaging.conf): kept as one that came, at the network's time and once
+    # per network id; its messages go out through Outgoing with who wrote them, never through the modem
+    invalid = 'org.freedesktop.DBus.Error.InvalidArgs'
+    t.modem('Clear')
+    t.modem('SetMessaging', (False,), '(b)')
+    t.wait('providers: without a modem, not available', lambda: not t.prop('Available'))
+    for (conversation,) in t.query('SELECT _id FROM conversations'):
+        t.service('MarkRead', (conversation,), '(x)')
+    when = 1700000000000
+    message = t.service('Receive', (WHATSAPP, 'Ciao da Andrea', when, 'WA-1', ''), '(ssxss)')[0]
+    chat = t.wait('a message from a provider is kept', lambda: t.conversation_of(WHATSAPP))
+    rows = t.messages(chat)
+    check('as one that came, unread, with the id Receive gave', rows and rows[-1][0] == message
+          and rows[-1][1:3] == (INCOMING, 0), rows)
+    check('at the network\'s time', t.query('SELECT sent_timestamp FROM messages WHERE _id = ?', message)
+          == [(when,)])
+    check('GetConversation keeps the address as it is', t.service('GetConversation', ([WHATSAPP],), '(as)')[0] == chat)
+    again = t.service('Receive', (WHATSAPP, 'Ciao da Andrea', when, 'WA-1', ''), '(ssxss)')[0]
+    check('the same network id twice is kept once', again == message
+          and len(t.messages(chat)) == 1, t.messages(chat))
+    check('Receive for an address no provider has: InvalidArgs',
+          t.error('Receive', (UNKNOWN, 'Hello', when, 'X-1', ''), '(ssxss)') == invalid)
+    check('Receive with no text: InvalidArgs', t.error('Receive', (WHATSAPP, '', when, 'X-2', ''), '(ssxss)') == invalid)
+    check('Inject stays the agents\' alone', t.error('Inject', (WHATSAPP, 'Hello'), '(ss)') == invalid)
+    n = t.wait('notified, with the provider named', lambda: t.notification('+49 170 1111111 \u00b7 WhatsApp')
+               or t.notification('WhatsApp'))
+    check('a notification came', n is not None, t.report()['notifications'])
+    t.outgoing.clear()
+    sent = t.service('Send', (chat, 'Ciao Andrea'), '(xs)')[0]
+    t.wait('Send: Outgoing, from the owner', lambda: (sent, chat, WHATSAPP, 'Ciao Andrea', 'owner') in t.outgoing)
+    check('and not given to the modem', not t.logged('Create'), t.report()['log'])
+    t.service('Delivered', (sent, True), '(xb)')
+    t.wait('Delivered ok: sent', lambda: t.status(sent) == COMPLETE)
+    sent = t.service('SendAs', (chat, 'Posso scriverti?', 'minerva'), '(xss)')[0]
+    t.wait('SendAs: Outgoing, from minerva', lambda: (sent, chat, WHATSAPP, 'Posso scriverti?', 'minerva') in t.outgoing)
+    t.service('Delivered', (sent, False), '(xb)')
+    t.wait('Delivered not ok: failed', lambda: t.status(sent) == FAILED)
+    t.service('Resend', (sent,), '(x)')
+    t.wait('Resend is the owner\'s tap', lambda: (sent, chat, WHATSAPP, 'Posso scriverti?', 'owner') in t.outgoing)
+    t.wait('no Delivered in time: failed', lambda: t.status(sent) == FAILED, timeout=5)
+    t.modem('SetMessaging', (True,), '(b)')
+    t.wait('the modem back, available', lambda: t.prop('Available'))
+
+
 def main():
     build, source = sys.argv[1], sys.argv[2]
     tmp = tempfile.mkdtemp(prefix='test-sms-')
@@ -483,6 +543,9 @@ def main():
         subprocess.run(['glib-compile-schemas', '--targetdir', tmp, os.path.join(source, 'data')], check=True)
         config_home = os.path.join(tmp, 'config')
         write_settings(config_home, delivery_reports=False)
+        os.makedirs(os.path.join(config_home, 'minerva'))
+        with open(os.path.join(config_home, 'minerva', 'messaging.conf'), 'w') as f:
+            f.write(CONF)
         env = dict(os.environ, DBUS_SESSION_BUS_ADDRESS=session_address, NEO_MESSAGING_SYSTEM_BUS=system_address,
                    XDG_DATA_HOME=os.path.join(tmp, 'data'), XDG_CONFIG_HOME=config_home,
                    GSETTINGS_BACKEND='keyfile', GSETTINGS_SCHEMA_DIR=tmp, LANG='C.UTF-8', LC_ALL='C.UTF-8',
@@ -497,6 +560,7 @@ def main():
         t = Test(session_address, os.path.join(tmp, 'data', 'neo-messaging', 'bugle_db'), config_home)
         run(t)
         run_agents(t)
+        run_providers(t)
     finally:
         for p in reversed(procs):
             p.terminate()

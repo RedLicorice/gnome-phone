@@ -187,10 +187,27 @@ test_read_only (void)
   sms_store_free (store);
 }
 
+/* a provider's message id is kept in the message's uri: the same id is found again, another is not */
+static void
+test_find_by_uri (void)
+{
+  g_autofree char *path = NULL;
+  SmsStore *store = open_store (&path);
+  gint64 id = sms_store_add_incoming (store, "whatsapp:+491701111111", "Ciao", 1000, 2000, "WA-1");
+
+  g_assert_cmpint (id, >, 0);
+  g_assert_cmpint (sms_store_find_by_uri (store, "WA-1"), ==, id);
+  g_assert_cmpint (sms_store_find_by_uri (store, "WA-2"), ==, 0);
+  g_assert_cmpint (sms_store_find_by_uri (store, ""), ==, 0);
+  g_assert_cmpint (sms_store_find_by_uri (store, NULL), ==, 0);
+  sms_store_free (store);
+}
+
 int
 main (int argc, char **argv)
 {
   g_test_init (&argc, &argv, NULL);
+  g_test_add_func ("/sms-store/find-by-uri", test_find_by_uri);
   g_test_add_func ("/sms-store/incoming", test_incoming);
   g_test_add_func ("/sms-store/outgoing", test_outgoing);
   g_test_add_func ("/sms-store/archive-and-delete", test_archive_and_delete);

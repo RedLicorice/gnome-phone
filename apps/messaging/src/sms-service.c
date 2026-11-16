@@ -11,6 +11,7 @@
 #include "messaging-types.h"
 #include "sms-agent.h"
 #include "sms-modem.h"
+#include "sms-provider.h"
 #include "sms-store.h"
 #include "blocked-numbers.h"
 #include "contacts.h"
@@ -71,9 +72,21 @@ static const char introspection[] =
   /* a message written into an agent's conversation (Send, Resend), for the bridge to take; kept as sending until
    * Delivered says it took it (ok) or could not */
   "    <signal name='Outgoing'><arg name='message' type='x'/><arg name='conversation' type='x'/>"
-  "      <arg name='destination' type='s'/><arg name='text' type='s'/></signal>"
+  "      <arg name='destination' type='s'/><arg name='text' type='s'/><arg name='origin' type='s'/></signal>"
   "    <method name='Delivered'><arg name='message' type='x' direction='in'/>"
   "      <arg name='ok' type='b' direction='in'/></method>"
+  /* Send, naming who wrote it: 'owner' (Giuseppe, in Messages) or 'minerva' (the agent, through a tool). Only a
+   * provider's daemon reads it, to apply its write scope to Minerva alone */
+  "    <method name='SendAs'><arg name='conversation' type='x' direction='in'/>"
+  "      <arg name='text' type='s' direction='in'/><arg name='origin' type='s' direction='in'/>"
+  "      <arg name='message' type='x' direction='out'/></method>"
+  /* a message from a provider ('whatsapp:<number>', ...): kept as one that came into its conversation (made if new).
+   * @sent the network's time in Unix ms (0: now), @ext the provider's message id (a repeat is kept once), @name its
+   * name for the chat (not stored) */
+  "    <method name='Receive'><arg name='destination' type='s' direction='in'/>"
+  "      <arg name='text' type='s' direction='in'/><arg name='sent' type='x' direction='in'/>"
+  "      <arg name='ext' type='s' direction='in'/><arg name='name' type='s' direction='in'/>"
+  "      <arg name='message' type='x' direction='out'/></method>"
   /* a message from an agent ('agent:<name>'), kept as one that came into its conversation (made if new) */
   "    <method name='Inject'><arg name='destination' type='s' direction='in'/>"
   "      <arg name='text' type='s' direction='in'/><arg name='message' type='x' direction='out'/></method>"
@@ -157,16 +170,31 @@ emit_properties (Service *self)
 
 /* --- names */
 
-/* a participant as the notifications name them: the contact's name, else the number formatted */
+/* a participant as the notifications name them: the contact's name, else the number formatted; a provider's
+ * chat is looked up by the part after its address, and says which provider it is when the file asks for it */
 static char *
 participant_name (Service *self, const char *destination)
 {
   const Contact *contact;
+  g_autofree char *owner = sms_provider_owner (destination);
+  g_autofree char *chat = owner ? sms_provider_chat (destination) : NULL;
+  g_autofree char *label = owner ? sms_provider_label (owner) : NULL;
+  const char *shown = chat ? chat : destination;
 
   if (sms_agent_name (destination))
     return g_strdup (sms_agent_name (destination));
-  contact = contacts_lookup (self->contacts, destination, country (self));
-  return contact && contact->name ? g_strdup (contact->name) : phone_number_format (destination, country (self));
+  contact = contacts_lookup (self->contacts, shown, country (self));
+  if (contact && contact->name)
+    return label && sms_provider_flag (owner, "show-label") ? g_strdup_printf ("%s \xc2\xb7 %s", contact->name, label)
+                                                           : g_strdup (contact->name);
+  if (chat)
+    {
+      g_autofree char *formatted = phone_number_format (chat, country (self));
+
+      return label && sms_provider_flag (owner, "show-label") ? g_strdup_printf ("%s \xc2\xb7 %s", formatted, label)
+                                                             : g_steal_pointer (&formatted);
+    }
+  return phone_number_format (destination, country (self));
 }
 
 /* a conversation's: its people's names, joined (a group has no name of its own here) */
@@ -885,6 +913,22 @@ is_agent_conversation (Service *self, gint64 id)
   return conversation && sms_agent_is_conversation ((const char * const *) conversation->destinations);
 }
 
+/* one destination, and it belongs to a provider (an agent's included): it never reaches the modem */
+static gboolean
+is_provider_conversation (Service *self, gint64 id)
+{
+  g_autoptr(SmsConversation) conversation = sms_store_get (self->store, id);
+
+  return conversation && conversation->destinations && conversation->destinations[0]
+         && !conversation->destinations[1] && sms_provider_is (conversation->destinations[0]);
+}
+
+static gboolean
+is_delivery_conversation (Service *self, gint64 id)
+{
+  return is_provider_conversation (self, id) || is_agent_conversation (self, id);
+}
+
 /* the bridge took it (sent) or could not (failed, notified as an SMS that could not go) */
 static void
 agent_delivered (Service *self, const SmsMessage *message, gboolean ok)
@@ -927,7 +971,7 @@ on_agent_timeout (gpointer data)
 
 /* the message is the bridge's: Outgoing, whether a bridge runs or not, and it fails unless Delivered comes in time */
 static void
-agent_send (Service *self, gint64 id)
+agent_send (Service *self, gint64 id, const char *origin)
 {
   g_autoptr(SmsMessage) message = sms_store_get_message (self->store, id);
   g_autoptr(SmsConversation) conversation = message ? sms_store_get (self->store, message->conversation_id) : NULL;
@@ -943,24 +987,37 @@ agent_send (Service *self, gint64 id)
   source = g_timeout_add_full (G_PRIORITY_DEFAULT, self->agent_timeout, on_agent_timeout, wait, g_free);
   g_hash_table_replace (self->agent_waits, int64_dup (id), GUINT_TO_POINTER (source));
   g_dbus_connection_emit_signal (self->session, NULL, SMS_PATH, SMS_INTERFACE, "Outgoing",
-                                 g_variant_new ("(xxss)", id, message->conversation_id, conversation->destinations[0],
-                                                message->text ? message->text : ""), NULL);
+                                 g_variant_new ("(xxsss)", id, message->conversation_id,
+                                                conversation->destinations[0], message->text ? message->text : "",
+                                                origin && *origin ? origin : "owner"), NULL);
 }
 
-/* a message from the agent at @destination: as one that came by SMS (on_received), without a modem. Its id, or 0 */
+/* a message from a provider at @destination: as one that came by SMS (on_received), without a modem. @sent is the
+ * network's time (0: now), @ext its id (the same id twice is kept once). @name, the provider's own name for the
+ * chat, is not stored: the chat is named from the contacts by its number (msg-people.c). Its id, or 0 */
 static gint64
-agent_inject (Service *self, const char *destination, const char *text)
+provider_receive (Service *self, const char *destination, const char *text, gint64 sent, const char *ext)
 {
   gint64 now = g_get_real_time () / 1000;
   g_autoptr(SmsMessage) message = NULL;
-  gint64 id = sms_store_add_incoming (self->store, destination, text, now, now, NULL);
+  gint64 id;
 
+  if (ext && *ext && (id = sms_store_find_by_uri (self->store, ext)))
+    return id;  /* the provider sent it again: it is already in the thread */
+  id = sms_store_add_incoming (self->store, destination, text, sent > 0 ? sent : now, now, ext);
   if (!id || !(message = sms_store_get_message (self->store, id)))
     return 0;
   came_where_shown (self, message->conversation_id);
   emit_changed (self, message->conversation_id);
   update_notification (self, TRUE);
   return id;
+}
+
+/* a message from the agent at @destination: as one that came by SMS (on_received), without a modem. Its id, or 0 */
+static gint64
+agent_inject (Service *self, const char *destination, const char *text)
+{
+  return provider_receive (self, destination, text, 0, NULL);
 }
 
 /* --- what the app shows */
@@ -1038,7 +1095,9 @@ on_method_call (GDBusConnection *bus, const char *sender, const char *path, cons
       g_variant_get (parameters, "(^a&s)", &numbers);
       for (guint i = 0; numbers[i]; i++)
         {
-          char *destination = phone_number_canonical (numbers[i], country (self));
+          /* a provider's address is not a number: it is kept verbatim */
+          char *destination = sms_provider_is (numbers[i]) ? g_strdup (numbers[i])
+                                                          : phone_number_canonical (numbers[i], country (self));
 
           /* the same person twice is once */
           if (*destination && !g_ptr_array_find_with_equal_func (destinations, destination, g_str_equal, NULL))
@@ -1056,11 +1115,15 @@ on_method_call (GDBusConnection *bus, const char *sender, const char *path, cons
         g_dbus_method_invocation_return_value (invocation, g_variant_new ("(x)", id));
       return;
     }
-  if (g_str_equal (method, "Send"))
+  if (g_str_equal (method, "Send") || g_str_equal (method, "SendAs"))
     {
+      const char *origin = "owner";
       gint64 message;
 
-      g_variant_get (parameters, "(x&s)", &id, &text);
+      if (g_str_equal (method, "SendAs"))
+        g_variant_get (parameters, "(x&s&s)", &id, &text, &origin);
+      else
+        g_variant_get (parameters, "(x&s)", &id, &text);
       if (!check_conversation (self, id, &error))
         {
           g_dbus_method_invocation_return_gerror (invocation, error);
@@ -1076,8 +1139,8 @@ on_method_call (GDBusConnection *bus, const char *sender, const char *path, cons
       sms_store_set_archived (self->store, id, FALSE);
       emit_changed (self, id);
       g_dbus_method_invocation_return_value (invocation, g_variant_new ("(x)", message));
-      if (is_agent_conversation (self, id))
-        agent_send (self, message);
+      if (is_delivery_conversation (self, id))
+        agent_send (self, message, origin);
       else
         {
           queue_message (self, message);
@@ -1100,6 +1163,21 @@ on_method_call (GDBusConnection *bus, const char *sender, const char *path, cons
         g_dbus_method_invocation_return_value (invocation, g_variant_new ("(x)", message));
       return;
     }
+  if (g_str_equal (method, "Receive"))
+    {
+      const char *destination, *ext, *name;
+      gint64 sent, message;
+
+      g_variant_get (parameters, "(&s&sx&s&s)", &destination, &text, &sent, &ext, &name);
+      if (!sms_provider_is (destination) || !*text)
+        g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                                               "Not a provider\'s destination, or no text");
+      else if (!(message = provider_receive (self, destination, text, sent, ext)))
+        g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR, G_DBUS_ERROR_FAILED, "Not kept");
+      else
+        g_dbus_method_invocation_return_value (invocation, g_variant_new ("(x)", message));
+      return;
+    }
 
   if (g_str_equal (method, "Resend"))
     {
@@ -1116,8 +1194,8 @@ on_method_call (GDBusConnection *bus, const char *sender, const char *path, cons
       g_hash_table_remove (self->failed, &id);
       update_failures (self, FALSE);
       g_hash_table_remove (self->retries, &id);
-      if (is_agent_conversation (self, message->conversation_id))
-        agent_send (self, id);
+      if (is_delivery_conversation (self, message->conversation_id))
+        agent_send (self, id, "owner");
       else
         {
           set_status (self, message, MESSAGE_STATUS_OUTGOING_RESENDING, 0, 0);
@@ -1132,7 +1210,7 @@ on_method_call (GDBusConnection *bus, const char *sender, const char *path, cons
       g_variant_get (parameters, "(xb)", &id, &flag);
       message = sms_store_get_message (self->store, id);
       if (!message || MESSAGE_STATUS_IS_INCOMING (message->status)
-          || !is_agent_conversation (self, message->conversation_id))
+          || !is_delivery_conversation (self, message->conversation_id))
         g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS, "No message to an agent %" G_GINT64_FORMAT,
                      id);
       else
@@ -1314,7 +1392,7 @@ main (int argc, char **argv)
       SmsMessage *message = unsent->pdata[i];
 
       /* but one to an agent, which the bridge may have taken already, fails: given twice only when tapped again */
-      if (is_agent_conversation (&service, message->conversation_id))
+      if (is_delivery_conversation (&service, message->conversation_id))
         sms_store_set_status (service.store, message->id, MESSAGE_STATUS_OUTGOING_FAILED, 0, 0);
       else
         queue_message (&service, message->id);

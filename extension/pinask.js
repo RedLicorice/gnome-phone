@@ -1,14 +1,19 @@
-// The owner's PIN asked for by the Minerva voice service: the bouncer's PIN pad (bouncer.js PinView) on a sheet of its
-// own over everything, checked by the same gp-auth as the lock screen's (keyguard.js checkPin), and the answer, right or
-// not, given back over D-Bus (org.minerva.Pin1). The lock screen's own state is never touched: its throttle, its
-// bouncer and its auto-confirm stay as they are, and the sheet is only read from it.
-//
-// The sheet is never shown over the lock screen, nor while its bouncer is up: with the phone locked the voice service
-// gets no for an answer, and a phone that locks with the sheet up closes it at once (no) before the lock screen shows.
-// What it says comes from the caller, already in the user's language.
+// The three things the Minerva voice service asks the owner, each on a sheet of its own over everything, the answer
+// given back over D-Bus (org.minerva.Pin1):
+//   - AskPin: the owner's PIN, on the bouncer's PIN pad (bouncer.js PinView), checked by the same gp-auth as the lock
+//     screen's (keyguard.js checkPin): an unlock, or a confirmation the caller wants the PIN for.
+//   - AskFinger: a finger on the side sensor, checked by gp-auth --fingerprint exactly as the lock screen does: the
+//     confirmation a PIN is too slow for.
+//   - AskYes: a question the caller words itself ("Posso … ?"), answered Sì or No. It carries no secret and checks
+//     none: the answer is the caller's whole result.
+// The lock screen's own state is never touched: its throttle, its bouncer and its auto-confirm stay as they are, and
+// the sheets are only read from it. A sheet is never shown over the lock screen, nor while its bouncer is up: with the
+// phone locked the voice service gets no for an answer, and a phone that locks with a sheet up closes it at once (no)
+// before the lock screen shows. What a sheet says comes from the caller, already in the user's language.
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import GObject from 'gi://GObject';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
@@ -16,7 +21,8 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {PinView} from './bouncer.js';
 import {raiseToTop} from './endmark.js';
-import {checkPin} from './keyguard.js';
+import {GP_AUTH, checkPin} from './keyguard.js';
+import {px} from './units.js';
 
 const PIN_IFACE = `<node>
   <interface name="org.minerva.Pin1">
@@ -25,6 +31,18 @@ const PIN_IFACE = `<node>
       <arg name="wrong_text" direction="in" type="s"/>
       <arg name="seconds" direction="in" type="i"/>
       <arg name="tries" direction="in" type="i"/>
+      <arg name="ok" direction="out" type="b"/>
+      <arg name="why" direction="out" type="s"/>
+    </method>
+    <method name="AskFinger">
+      <arg name="reason" direction="in" type="s"/>
+      <arg name="seconds" direction="in" type="i"/>
+      <arg name="ok" direction="out" type="b"/>
+      <arg name="why" direction="out" type="s"/>
+    </method>
+    <method name="AskYes">
+      <arg name="sentence" direction="in" type="s"/>
+      <arg name="seconds" direction="in" type="i"/>
       <arg name="ok" direction="out" type="b"/>
       <arg name="why" direction="out" type="s"/>
     </method>
@@ -40,6 +58,45 @@ const MAX_SECONDS = 600;
 const DEFAULT_TRIES = 5;
 // the backdrop's fade, as the view's own disappear (200 ms)
 const FADE_MS = 200;
+
+// The sheet of the two verbs that take no PIN: the caller's words, centred, and Sì / No when it is a question. (The
+// PIN's sheet is bouncer.js PinView, which brings its own pad.) It answers ownsPoint() for a tap off the sheet.
+const AskView = GObject.registerClass(
+class AskView extends St.BoxLayout {
+    constructor(text, buttons = null, onAnswer = null) {
+        super({vertical: true, x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.CENTER,
+            style: `spacing: ${px(32)}px;`});
+        this.add_child(new St.Label({text, x_align: Clutter.ActorAlign.CENTER,
+            style: `font-size: ${px(20)}px; font-weight: 600;`}));
+        if (!buttons)
+            return;
+        const row = new St.BoxLayout({x_align: Clutter.ActorAlign.CENTER, style: `spacing: ${px(24)}px;`});
+        for (const button of buttons) {
+            const b = new St.Button({label: button.label,
+                style: `padding: ${px(12)}px ${px(40)}px; border-radius: ${px(20)}px;` +
+                    ' background-color: rgba(255, 255, 255, 0.12);'});
+            b.connect('clicked', () => onAnswer(button.ok));
+            row.add_child(b);
+        }
+        this.add_child(row);
+    }
+
+    ownsPoint(x, y) {
+        return x >= 0 && y >= 0 && x < this.width && y < this.height;
+    }
+
+    appear() {
+        this.opacity = 255;
+    }
+
+    disappear(onDone) {
+        this.ease({opacity: 0, duration: FADE_MS, mode: Clutter.AnimationMode.EASE_IN_QUAD, onComplete: onDone});
+    }
+
+    setEnabled(on) {
+        this.reactive = on;
+    }
+});
 
 export class PinAsk {
     // @keyguard: .showing, .bouncerShowing and the 'changed' they come with, read to stay off the lock screen
@@ -87,6 +144,32 @@ export class PinAsk {
             this._finish(this._sheet, false, 'cancelled');
     }
 
+    // @reason: the message over the sheet; @seconds: the deadline. Resolves true for the owner's finger, false for a
+    // miss, no finger to read, a helper that could not check, the deadline, a cancel, a tap off the sheet, the phone
+    // locking, or a sheet already open. resolves [ok, why]: why is '' for the finger, else 'busy'|'locked'|
+    // 'no-pin-lock'|'locked-out'|'no-keyguard'|'timeout'|'cancelled'|'wrong'|'no-finger'|'check-failed'
+    askFinger(reason, seconds) {
+        if (this._sheet)
+            return Promise.resolve([false, 'busy']);
+        const why = this._refused();
+        if (why)
+            return Promise.resolve([false, why]);
+        return new Promise(resolve => this._openFinger(resolve, reason, seconds));
+    }
+
+    // @sentence: the caller's question, a "Posso … ?" one; @seconds: the deadline. Resolves true for Sì, false for No,
+    // the deadline, a cancel, a tap off the sheet, the phone locking, or a sheet already open: why is '' for Sì, else
+    // 'no'|'busy'|'locked'|'no-pin-lock'|'locked-out'|'no-keyguard'|'timeout'|'cancelled'. No secret is asked or
+    // checked: the answer is all there is.
+    askYes(sentence, seconds) {
+        if (this._sheet)
+            return Promise.resolve([false, 'busy']);
+        const why = this._refused();
+        if (why)
+            return Promise.resolve([false, why]);
+        return new Promise(resolve => this._openYes(resolve, sentence, seconds));
+    }
+
     _open(resolve, reason, wrongText, seconds, tries) {
         const monitor = Main.layoutManager.primaryMonitor;
         const sheet = {
@@ -99,8 +182,78 @@ export class PinAsk {
             pressedOff: false,
             timeoutId: 0,
             grab: null,
+            proc: null,                 // the finger's helper, while it listens
         };
-        // black over everything but the end mark, taking every touch: the pad is all there is while it is up
+        sheet.view = new PinView();
+        sheet.view.set_position(Math.round((monitor.width - sheet.view.width) / 2),
+            Math.round((monitor.height - sheet.view.height) / 2));
+        sheet.view.setMessage(sheet.reason, '');
+        // the lock screen's auto-confirm length (set only for a PIN of 6 or more that unlocked), read, not changed
+        sheet.view.autoConfirm = this._keyguard._pinLength ?? 0;
+        sheet.view.connect('submit', (view, secret) => this._submit(sheet, secret, view.autoConfirmed));
+        this._show(sheet, seconds);
+    }
+
+    _openFinger(resolve, reason, seconds) {
+        const sheet = {resolve, reason: reason || '', timeoutId: 0, grab: null, proc: null};
+
+        sheet.view = new AskView(sheet.reason);
+        this._show(sheet, seconds);
+        this._runFinger(sheet);
+    }
+
+    _openYes(resolve, sentence, seconds) {
+        const sheet = {resolve, reason: sentence || '', timeoutId: 0, grab: null, proc: null};
+        const answer = ok => this._finish(sheet, ok, ok ? '' : 'no');
+
+        sheet.view = new AskView(sheet.reason, [{label: 'Sì', ok: true}, {label: 'No', ok: false}], answer);
+        this._show(sheet, seconds);
+    }
+
+    // gp-auth --fingerprint as keyguard.js runs it (one try per run, pam_fprintd): the exit status is the answer
+    async _runFinger(sheet) {
+        const helper = GP_AUTH.find(p => GLib.file_test(p, GLib.FileTest.IS_EXECUTABLE));
+        if (!helper) {
+            log('gnome-phone: no gp-auth to read a finger with');
+            this._finish(sheet, false, 'check-failed');
+            return;
+        }
+        let proc;
+        try {
+            proc = Gio.Subprocess.new([helper, '--fingerprint'],
+                Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE);
+        } catch (e) {
+            logError(e, 'gnome-phone: gp-auth --fingerprint');
+            this._finish(sheet, false, 'check-failed');
+            return;
+        }
+        sheet.proc = proc;
+        try {
+            await proc.wait_async(null);
+        } catch (e) {
+        }
+        // closed meanwhile (the deadline, a cancel, the lock): its answer was given, and _finish stopped the helper
+        if (this._sheet !== sheet)
+            return;
+        sheet.proc = null;
+        // 0 a match, 1 a miss, 3 no finger (timeout) or nothing to match, 2 PAM failed
+        const status = proc.get_if_exited() ? proc.get_exit_status() : 2;
+
+        if (status === 0) {
+            this._finish(sheet, true, '');
+        } else if (status === 1) {
+            this._finish(sheet, false, 'wrong');
+        } else if (status === 3) {
+            this._finish(sheet, false, 'no-finger');
+        } else {
+            this._finish(sheet, false, 'check-failed');
+        }
+    }
+
+    // the backdrop, the modal grab and the deadline, the same for every sheet; @sheet.view is in place already
+    _show(sheet, seconds) {
+        const monitor = Main.layoutManager.primaryMonitor;
+        // black over everything but the end mark, taking every touch: the view is all there is while it is up
         sheet.backdrop = new St.Widget({
             name: 'gnomePhonePinAsk',
             style: 'background-color: rgba(0, 0, 0, 0.6);',
@@ -111,15 +264,8 @@ export class PinAsk {
             width: monitor.width,
             height: monitor.height,
         });
-        sheet.view = new PinView();
-        sheet.view.set_position(Math.round((monitor.width - sheet.view.width) / 2),
-            Math.round((monitor.height - sheet.view.height) / 2));
         sheet.backdrop.add_child(sheet.view);
-        sheet.view.setMessage(sheet.reason, '');
-        // the lock screen's auto-confirm length (set only for a PIN of 6 or more that unlocked), read, not changed
-        sheet.view.autoConfirm = this._keyguard._pinLength ?? 0;
-        sheet.view.connect('submit', (view, secret) => this._submit(sheet, secret, view.autoConfirmed));
-        // a tap off the pad, pressed and released there, is a no; so is Escape
+        // a tap off the view, pressed and released there, is a no; so is Escape
         sheet.backdrop.connect('captured-event', (actor, event) => this._offPad(sheet, event));
         sheet.backdrop.connect('key-press-event', (actor, event) => {
             if (event.get_key_symbol() !== Clutter.KEY_Escape)
@@ -224,6 +370,11 @@ export class PinAsk {
             Main.popModal(sheet.grab);
         sheet.grab = null;
         sheet.view.setEnabled(false);
+        // the finger's helper still listening: pam_fprintd stops the verify and lets the sensor go (SIGINT)
+        if (sheet.proc) {
+            sheet.proc.send_signal(2);
+            sheet.proc = null;
+        }
         sheet.resolve([ok, why]);
         sheet.resolve = null;
 
@@ -261,6 +412,20 @@ export class PinAsk {
     AskPinAsync([reason, wrongText, seconds, tries], invocation) {
         this.ask(reason, wrongText, seconds, tries).catch(e => {
             logError(e, 'gnome-phone: AskPin');
+            return [false, 'error'];
+        }).then(([ok, why]) => invocation.return_value(new GLib.Variant('(bs)', [ok, why])));
+    }
+
+    AskFingerAsync([reason, seconds], invocation) {
+        this.askFinger(reason, seconds).catch(e => {
+            logError(e, 'gnome-phone: AskFinger');
+            return [false, 'error'];
+        }).then(([ok, why]) => invocation.return_value(new GLib.Variant('(bs)', [ok, why])));
+    }
+
+    AskYesAsync([sentence, seconds], invocation) {
+        this.askYes(sentence, seconds).catch(e => {
+            logError(e, 'gnome-phone: AskYes');
             return [false, 'error'];
         }).then(([ok, why]) => invocation.return_value(new GLib.Variant('(bs)', [ok, why])));
     }

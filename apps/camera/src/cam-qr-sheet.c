@@ -232,15 +232,16 @@ key_provider (const char *decoded)
   return g_string_free (clean, FALSE);
 }
 
-/* "minerva-key:v1?p=<provider>&k=<key>" or "&e=<encrypted>". Only the provider is ever copied out; the key part is
- * looked at in place and not kept. */
+/* "minerva-key:v1?p=<provider>&k=<key>" or "&e=<encrypted>", or a pairing code
+ * "minerva-key:v1?p=<provider>&c=<chat>&t=<token>". Only the provider is ever copied out; the key part and the
+ * pairing token are looked at in place and not kept. */
 static void
 classify_key (CamQrResult *result, const char *text)
 {
   const char *rest = text + strlen (KEY_SCHEME);
   const char *query = strchr (rest, '?');
   g_auto(GStrv) params = NULL;
-  gboolean has_k = FALSE, has_e = FALSE;
+  gboolean has_k = FALSE, has_e = FALSE, has_c = FALSE, has_t = FALSE;
 
   result->kind = CAM_QR_KEY;
   if (!query || (query - rest != 2) || g_ascii_strncasecmp (rest, "v1", 2))
@@ -267,6 +268,24 @@ classify_key (CamQrResult *result, const char *text)
         has_k = TRUE;
       else if (name_len == 1 && params[i][0] == 'e')
         has_e = TRUE;
+      else if (name_len == 1 && params[i][0] == 'c')
+        has_c = TRUE;
+      else if (name_len == 1 && params[i][0] == 't')
+        has_t = TRUE;
+    }
+  /* the pairing code: the same scheme, a chat and a token in place of the key. Whether its provider pairs at all is
+   * asked of minerva-config when the sheet opens (cam-qr-sheet_show), not here: this stays a pure reading of the text */
+  if (has_c && has_t && !has_k && !has_e)
+    {
+      if (!result->provider)
+        {
+          result->data = g_strdup (_("Not a code this app can import"));
+          return;
+        }
+      result->kind = CAM_QR_PAIR;
+      result->importable = TRUE;
+      result->data = g_strdup_printf (_("%s • pairing"), result->provider);
+      return;
     }
   result->encrypted = has_e && !has_k;
   result->importable = result->provider && (has_k != has_e);
@@ -463,6 +482,7 @@ handler (CamQrResult *result)
     case CAM_QR_TEXT:
     case CAM_QR_WIFI:
     case CAM_QR_KEY:            /* imported by this app itself (cam-key-import) */
+    case CAM_QR_PAIR:           /* paired by this app itself (cam-key-import) */
       return NULL;
     default:
       scheme = result->uri ? g_uri_parse_scheme (result->uri) : NULL;
@@ -486,6 +506,7 @@ action_title (CamQrKind kind)
     case CAM_QR_PRODUCT: return _("Lookup product");
     case CAM_QR_VIN: return _("Lookup VIN");
     case CAM_QR_KEY: return _("Minerva API key");
+    case CAM_QR_PAIR: return _("Minerva pairing");
     default: return _("Text");
     }
 }
@@ -506,6 +527,7 @@ action_icon (CamQrKind kind)
     case CAM_QR_PRODUCT: return "cam-shopping-cart-symbolic";
     case CAM_QR_VIN: return "cam-directions-car-symbolic";
     case CAM_QR_KEY: return "cam-lock-symbolic";
+    case CAM_QR_PAIR: return "cam-contact-phone-symbolic";
     default: return NULL;
     }
 }
@@ -722,6 +744,41 @@ run_import (CamQrSheet *self, const char *passphrase)
 }
 
 static void
+on_pair_done (CamKeyResult *key, gpointer data)
+{
+  CamQrSheet *self = data;
+  g_autofree char *text = NULL;
+
+  self->busy = FALSE;
+  if (key->ok)
+    {
+      text = g_strdup (key->message && *key->message ? key->message : _("Paired"));
+      gtk_label_set_text (GTK_LABEL (self->title), _("Paired"));
+      show_line (self, text, FALSE);
+      gtk_widget_set_visible (self->import, FALSE);
+      cam_scrub (g_steal_pointer (&self->secret));
+      toast (self, text);
+    }
+  else
+    {
+      text = g_strdup (key->error && *key->error ? key->error : _("The code could not be used"));
+      show_line (self, text, TRUE);
+      gtk_widget_set_sensitive (self->import, TRUE);
+      toast (self, text);
+    }
+  g_object_unref (self);
+}
+
+static void
+run_pair (CamQrSheet *self)
+{
+  self->busy = TRUE;
+  gtk_widget_set_sensitive (self->import, FALSE);
+  show_line (self, _("Pairing…"), FALSE);
+  cam_pair_run (self->result->provider, self->secret, on_pair_done, g_object_ref (self));
+}
+
+static void
 on_passphrase (char *passphrase, gpointer data)
 {
   CamQrSheet *self = data;
@@ -751,7 +808,9 @@ start_import (CamQrSheet *self)
 {
   if (self->busy || !self->secret || !self->result->importable)
     return;
-  if (self->result->encrypted)
+  if (self->result->kind == CAM_QR_PAIR)
+    run_pair (self);
+  else if (self->result->encrypted)
     ask_passphrase (self, NULL);
   else
     run_import (self, NULL);
@@ -770,7 +829,7 @@ on_card (NeoPressable *card, CamQrSheet *self)
   g_autoptr(GError) error = NULL;
   gboolean ok = FALSE;
 
-  if (self->result->kind == CAM_QR_KEY)
+  if (self->result->kind == CAM_QR_KEY || self->result->kind == CAM_QR_PAIR)
     {
       start_import (self);
       return;
@@ -854,7 +913,7 @@ build_sheet (CamQrSheet *self)
   GtkWidget *handle = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
   GtkWidget *row = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
   GtkWidget *texts = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-  gboolean is_key = self->result->kind == CAM_QR_KEY;
+  gboolean is_key = self->result->kind == CAM_QR_KEY || self->result->kind == CAM_QR_PAIR;
   GtkWidget *title = gtk_label_new (self->app || is_key ? action_title (self->result->kind) : _("Text"));
   GtkWidget *data = gtk_label_new (self->result->data);
   GtkWidget *copy = neo_icon_button_new ("cam-content-copy-symbolic");
@@ -898,7 +957,7 @@ build_sheet (CamQrSheet *self)
   gtk_box_append (GTK_BOX (row), texts);
   if (is_key)
     {
-      /* a key is never copied: its code holds the secret. Import takes the copy button's place */
+      /* a key and a pairing code are never copied: they hold the secret. Import takes the copy button's place */
       if (self->result->importable)
         {
           self->import = neo_text_button_new (_("Import"));
@@ -953,10 +1012,19 @@ cam_qr_sheet_show (GtkWidget *parent, const char *text, CamQrDismissed dismissed
   g_return_if_fail (overlay != NULL);
   self = g_object_new (CAM_TYPE_QR_SHEET, NULL);
   self->result = cam_qr_classify (text);
+  /* a pairing code for a provider that does not pair is no code here; the list is asked of minerva-config, whose own
+   * answer decides (and a call that fails leaves it to the pair command to refuse) */
+  if (self->result->kind == CAM_QR_PAIR && !cam_pair_allowed (self->result->provider))
+    {
+      g_clear_pointer (&self->result->provider, g_free);
+      g_free (self->result->data);
+      self->result->data = g_strdup (_("Not a code this app can import"));
+      self->result->importable = FALSE;
+    }
   self->app = handler (self->result);
   self->dismissed = dismissed;
   self->data = data;
-  if (self->result->kind == CAM_QR_KEY)
+  if (self->result->kind == CAM_QR_KEY || self->result->kind == CAM_QR_PAIR)
     self->secret = g_strdup (text);     /* held for the import, wiped with the sheet; not offered to Copy */
   else
     g_object_set_data_full (G_OBJECT (self), "cam-qr-text", g_strdup (text), g_free);

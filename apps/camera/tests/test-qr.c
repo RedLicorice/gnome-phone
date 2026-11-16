@@ -118,6 +118,54 @@ check_keys (void)
   return failed;
 }
 
+/* Minerva pairing codes: "minerva-key:v1?p=<provider>&c=<chat>&t=<token>", shown as "<provider> • pairing". The token
+ * appears in no field; which providers pair is asked of minerva-config when the sheet opens, so the classifier alone
+ * takes any provider the code names. */
+typedef struct {
+  const char *text;
+  const char *provider;     /* NULL: not importable */
+  const char *data;
+} PairCase;
+
+static const PairCase pair_cases[] = {
+  { "minerva-key:v1?p=telegram&c=@me&t=TOKEN1", "telegram", "telegram • pairing" },
+  { "MINERVA-KEY:V1?p=whatsapp&c=3933123&t=TOKEN1", "whatsapp", "whatsapp • pairing" },
+  { "  minerva-key:v1?t=TOKEN1&c=@me&p=my%20local\n", "my local", "my local • pairing" },
+  /* a code missing its provider, its chat or its token is neither a pairing code nor a key */
+  { "minerva-key:v1?c=@me&t=TOKEN1", NULL, "Not a code this app can import" },
+  { "minerva-key:v1?p=telegram&t=TOKEN1", NULL, "Not a code this app can import" },
+  { "minerva-key:v1?p=telegram&c=@me", NULL, "Not a code this app can import" },
+  { "minerva-key:v1?p=telegram&c=@me&t=", NULL, "Not a code this app can import" },
+  { "minerva-key:v2?p=telegram&c=@me&t=TOKEN1", NULL, "Not a code this app can import" },
+};
+
+static int
+check_pairs (void)
+{
+  int failed = 0;
+
+  for (guint i = 0; i < G_N_ELEMENTS (pair_cases); i++)
+    {
+      const PairCase *c = &pair_cases[i];
+      CamQrResult *result = cam_qr_classify (c->text);
+      CamQrKind kind = c->provider ? CAM_QR_PAIR : CAM_QR_KEY;
+
+      if (result->kind != kind || g_strcmp0 (result->provider, c->provider)
+          || result->importable != (c->provider != NULL) || result->encrypted
+          || g_strcmp0 (result->data, c->data) || result->uri || result->content
+          || !cam_qr_is_key (c->text) || (result->data && strstr (result->data, "TOKEN")))
+        {
+          g_printerr ("FAIL pair %s: kind %d provider \"%s\" importable %d data \"%s\"\n", c->text, result->kind,
+                      result->provider ? result->provider : "(null)", result->importable, result->data);
+          failed++;
+        }
+      cam_qr_result_free (result);
+    }
+  g_print ("%d of %d pair cases right\n", (int) G_N_ELEMENTS (pair_cases) - failed,
+           (int) G_N_ELEMENTS (pair_cases));
+  return failed;
+}
+
 int
 main (void)
 {
@@ -138,5 +186,6 @@ main (void)
     }
   g_print ("%d of %d cases right\n", (int) G_N_ELEMENTS (cases) - failed, (int) G_N_ELEMENTS (cases));
   failed += check_keys ();
+  failed += check_pairs ();
   return failed ? 1 : 0;
 }
