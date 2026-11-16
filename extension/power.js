@@ -119,10 +119,19 @@ export class Power extends Signals.EventEmitter {
         this._idleWatch = 0;
         this._inhibited = false;
         this._watchInhibitors();
-        keyguard.connectObject('changed', () => this._syncTimeout(), this);
+        keyguard.connectObject('changed', () => this._onKeyguardChanged(), this);
 
         this._exportScreenSaver();
         this._watchOutputs();
+        this._syncTimeout();
+    }
+
+    // An unlock lights the screen. A finger on the sensor, a PIN typed on another surface (the voice sheet), a tool:
+    // any unlock while the displays are off left the phone dark with nothing on it, and the face behind it never got
+    // its wake pose (it learns of the screen from org.gnome.ScreenSaver, which only says what this side knows).
+    _onKeyguardChanged() {
+        if (!this._keyguard.showing)
+            this.wakeUp('unlock');
         this._syncTimeout();
     }
 
