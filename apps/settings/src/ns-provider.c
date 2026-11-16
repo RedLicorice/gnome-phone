@@ -40,10 +40,23 @@ bad_of (JsonObject *root, const char *err, JsonObject *ui)
   return NULL;
 }
 
+/* the data's words for a provider of that pairing kind in that state: messaging_ui.json "pairing_kinds" > kind >
+ * "state:label" (the daemon's own label, "offline:token mancante"), else "state". Members: status (the state's
+ * name), hint (what the owner does now), action (qr | scan | token), button (the action's row), wait (before the
+ * code is there) */
+static JsonObject *
+entry_of (JsonObject *ui, const char *kind, const char *state, const char *label)
+{
+  JsonObject *k = obj_of (obj_of (ui, "pairing_kinds"), kind ? kind : "");
+  g_autofree char *key = g_strdup_printf ("%s:%s", state ? state : "", label ? label : "");
+  JsonObject *e = obj_of (k, key);
+  return e ? e : obj_of (k, state ? state : "");
+}
+
 /* what a status answer says, in the data's words: the state ("Collegato"), and the daemon's own label after it
  * ("token mancante"). A service that does not answer is "not running", whatever the program said */
 static char *
-status_text (JsonObject *root, const char *err, JsonObject *ui)
+status_text (JsonObject *root, const char *err, JsonObject *ui, const char *kind)
 {
   JsonObject *labels = obj_of (ui, "labels");
   if (err || !root || !ok_of (root))
@@ -51,10 +64,12 @@ status_text (JsonObject *root, const char *err, JsonObject *ui)
   const char *state = str_of (root, "state");
   if (!*state)
     state = str_of (root, "status");
-  const char *word = *state ? str_of (obj_of (ui, "states"), state) : "";
+  const char *label = str_of (root, "label");
+  const char *word = str_of (entry_of (ui, kind, state, label), "status");
+  if (!*word)
+    word = *state ? str_of (obj_of (ui, "states"), state) : "";
   if (!*word)
     word = *state ? state : str_of (labels, "status_unknown");
-  const char *label = str_of (root, "label");
   const char *said = str_of (obj_of (ui, "words"), label);
   if (*said)
     label = said;
@@ -64,7 +79,7 @@ status_text (JsonObject *root, const char *err, JsonObject *ui)
 /* ---- the index: one row per provider ---- */
 
 typedef struct {
-  char      *id;
+  char      *id, *kind;
   GtkWidget *row;
 } ProviderRow;
 
@@ -80,6 +95,7 @@ static void
 provider_row_free (ProviderRow *r)
 {
   g_free (r->id);
+  g_free (r->kind);
   g_free (r);
 }
 
@@ -104,7 +120,7 @@ index_status_done (JsonObject *root, const char *err, gpointer data)
 {
   ProviderRow *r = data;
   Index *ix = g_object_get_data (G_OBJECT (r->row), "mp-index");
-  g_autofree char *text = status_text (root, err, ix->ui);
+  g_autofree char *text = status_text (root, err, ix->ui, r->kind);
   ns_row_set_subtitle (r->row, text);
 }
 
@@ -125,6 +141,7 @@ index_loaded (JsonObject *root, const char *err, gpointer data)
       continue;
     ProviderRow *r = g_new0 (ProviderRow, 1);
     r->id = g_strdup (id);
+    r->kind = g_strdup (str_of (o, "pairing"));
     r->row = ns_row (ix->group, "chat-message-new-symbolic", "green", str_of (o, "label"), "");
     g_object_set_data (G_OBJECT (r->row), "mp-index", ix);
     g_object_set_data_full (G_OBJECT (r->row), "mp-id", g_strdup (id), g_free);
@@ -180,14 +197,16 @@ typedef struct {
   GtkWidget         *content, *msg;
   char              *id, *label;
   JsonObject        *ui;
-  GtkWidget         *status_g, *status_row, *pair_g, *qr_row, *picture;
+  GtkWidget         *status_g, *status_row, *pair_g, *qr_row, *picture, *hint, *wait_row, *scan_row, *token_row;
   GtkWidget         *read_row, *write_row, *unread_row, *ask_row, *whitelist_row;
   GBytes            *qr_bytes;    /* what it held: a new one only when the bytes change */
   GStrv              order;       /* the scopes, in the order the pickers show them */
   GStrv              scope_names; /* their labels, in that order */
   GStrv              whitelist;
   guint              poll_id, poll_s;
-  gboolean           pairing;
+  char              *kind;        /* the pairing kind of messaging.conf ("" when the provider does not pair) */
+  char              *state, *word; /* the last status: its state and the daemon's own label */
+  gboolean           scanning;
 } Prov;
 
 static void prov_refresh_status (Prov *p);
@@ -204,6 +223,9 @@ prov_free (Prov *p)
     json_object_unref (p->ui);
   g_free (p->id);
   g_free (p->label);
+  g_free (p->kind);
+  g_free (p->state);
+  g_free (p->word);
   g_strfreev (p->order);
   g_strfreev (p->scope_names);
   g_strfreev (p->whitelist);
@@ -226,15 +248,21 @@ prov_saved (JsonObject *root, const char *err, gpointer data)
     prov_refresh_status (p);
 }
 
-/* ---- the pairing code ---- */
+/* ---- the pairing section ----
+ * What it shows is data: the entry of messaging_ui.json for this kind of provider in the state it is in (entry_of).
+ * action "qr": the provider draws a code and the page shows it; "scan": the owner shows the phone's own camera a
+ * code the bot sent; "token": the bot has no token yet. */
 
-static void
-qr_stop (Prov *p)
+static JsonObject *
+prov_entry (Prov *p)
 {
-  if (p->poll_id) {
-    g_source_remove (p->poll_id);
-    p->poll_id = 0;
-  }
+  return entry_of (p->ui, p->kind, p->state, p->word);
+}
+
+static gboolean
+prov_pairs (Prov *p)
+{
+  return p->kind && *p->kind && g_strcmp0 (p->kind, "none");
 }
 
 /* the code as a picture, decoded from memory: the string it stands for is a pairing secret and is never written to a file */
@@ -253,13 +281,23 @@ qr_texture (GBytes *bytes)
 }
 
 static void
+qr_forget (Prov *p)
+{
+  if (p->qr_bytes)
+    g_bytes_unref (p->qr_bytes);
+  p->qr_bytes = NULL;
+}
+
+static void
 qr_draw (Prov *p, const char *png_b64, const char *svg)
 {
   gsize len = 0;
   g_autofree guchar *raw = *png_b64 ? g_base64_decode (png_b64, &len) : NULL;
   g_autoptr (GBytes) fresh = raw ? g_bytes_new (raw, len) : (*svg ? g_bytes_new (svg, strlen (svg)) : NULL);
-  if (!fresh)
+  if (!fresh) {
+    qr_forget (p);   /* an expired or missing code is never left on the screen: it would be scanned in vain */
     return;
+  }
   if (p->qr_bytes && g_bytes_equal (p->qr_bytes, fresh))
     return;
   g_autoptr (GdkTexture) texture = qr_texture (fresh);
@@ -276,10 +314,87 @@ qr_draw (Prov *p, const char *png_b64, const char *svg)
     gtk_box_remove (GTK_BOX (box), old);
     gtk_box_append (GTK_BOX (box), p->picture);
   }
-  ns_group_set_visible (p->pair_g, TRUE);
-  if (p->qr_bytes)
-    g_bytes_unref (p->qr_bytes);
+  qr_forget (p);
   p->qr_bytes = g_bytes_ref (fresh);
+}
+
+static void prov_refresh_status (Prov *p);
+
+static void
+token_open (GtkWidget *row, gpointer data)
+{
+  Prov *p = data;
+  GtkWidget *c;
+  AdwNavigationPage *page = ns_page_new (prov_text (p, "labels", "token_title"), &c);
+  ns_messaging_token_add (c, page);
+  ns_push (page);
+}
+
+/* the camera's process ended: the pairing may be done (a camera that was running already hands the scan over and
+ * exits at once; the poll catches that up) */
+static void
+camera_exited (GObject *src, GAsyncResult *res, gpointer data)
+{
+  AdwNavigationPage *page = data;
+  Prov *p = g_object_get_data (G_OBJECT (page), "mp-prov");
+  g_autoptr (GError) e = NULL;
+  g_subprocess_wait_finish (G_SUBPROCESS (src), res, &e);
+  if (p) {
+    p->scanning = FALSE;
+    prov_refresh_status (p);
+  }
+  g_object_unref (page);
+}
+
+static void
+scan_open (GtkWidget *row, gpointer data)
+{
+  Prov *p = data;
+  g_autoptr (GError) err = NULL;
+  if (p->scanning)
+    return;
+  GSubprocess *proc = g_subprocess_new (G_SUBPROCESS_FLAGS_NONE, &err, "neo-camera", "--scan", NULL);
+  if (!proc) {
+    say (p->msg, err->message, TRUE);
+    return;
+  }
+  say (p->msg, "", FALSE);
+  p->scanning = TRUE;
+  g_subprocess_wait_async (proc, NULL, camera_exited, g_object_ref (p->page));
+  g_object_unref (proc);
+}
+
+static void
+row_show (GtkWidget *row, gboolean on)
+{
+  if (row)
+    gtk_widget_set_visible (row, on);
+}
+
+/* the section as the data says it is for the state the provider is in */
+static void
+prov_apply (Prov *p)
+{
+  if (!prov_pairs (p) || !p->pair_g)
+    return;
+  JsonObject *e = prov_entry (p);
+  const char *hint = str_of (e, "hint"), *action = str_of (e, "action"), *button = str_of (e, "button");
+  gboolean qr = !g_strcmp0 (action, "qr");
+  gboolean scan = !g_strcmp0 (action, "scan"), token = !g_strcmp0 (action, "token");
+
+  gtk_label_set_text (GTK_LABEL (p->hint), hint);
+  gtk_widget_set_visible (p->hint, *hint);
+  if (qr && !p->wait_row)
+    p->wait_row = ns_row_info (p->pair_g, str_of (e, "wait"), "");
+  if (scan && !p->scan_row)
+    p->scan_row = ns_row_button (p->pair_g, button, FALSE, scan_open, p);
+  if (token && !p->token_row)
+    p->token_row = ns_row_button (p->pair_g, button, FALSE, token_open, p);
+  row_show (p->qr_row, qr && p->qr_bytes);
+  row_show (p->wait_row, qr && !p->qr_bytes);
+  row_show (p->scan_row, scan);
+  row_show (p->token_row, token);
+  ns_group_set_visible (p->pair_g, qr || scan || token);
 }
 
 static void
@@ -289,6 +404,10 @@ qr_done (JsonObject *root, const char *err, gpointer data)
   if (err || !ok_of (root))
     return;
   qr_draw (p, str_of (root, "png_base64"), str_of (root, "svg"));
+  /* the code answer carries the state: a change (paired, dropped) asks for the full status (the account's number) */
+  if (g_strcmp0 (str_of (root, "state"), p->state))
+    prov_refresh_status (p);
+  prov_apply (p);
 }
 
 static void
@@ -298,27 +417,28 @@ qr_run (Prov *p)
   ns_mc_run (p->owner, args, NULL, qr_done, p);
 }
 
+/* while the page is open: the code when the provider draws one (its answer has the state too), the status otherwise */
 static gboolean
-qr_tick (gpointer data)
+poll_tick (gpointer data)
 {
   Prov *p = data;
-  if (!p->pairing || !gtk_widget_get_root (p->content)) {
+  if (!gtk_widget_get_root (p->content)) {
     p->poll_id = 0;
     return G_SOURCE_REMOVE;
   }
-  qr_run (p);
+  if (!g_strcmp0 (str_of (prov_entry (p), "action"), "qr"))
+    qr_run (p);
+  else
+    prov_refresh_status (p);
   return G_SOURCE_CONTINUE;
 }
 
 static void
-qr_start (Prov *p)
+poll_start (Prov *p)
 {
-  if (!p->pairing || p->poll_id)
+  if (!prov_pairs (p) || p->poll_id)
     return;
-  if (!p->poll_s)
-    p->poll_s = 2;
-  qr_run (p);
-  p->poll_id = g_timeout_add_seconds (p->poll_s, qr_tick, p);
+  p->poll_id = g_timeout_add_seconds (p->poll_s ? p->poll_s : 2, poll_tick, p);
 }
 
 /* ---- the status ---- */
@@ -327,18 +447,18 @@ static void
 status_loaded (JsonObject *root, const char *err, gpointer data)
 {
   Prov *p = data;
-  g_autofree char *text = status_text (root, err, p->ui);
+  gboolean ok = !err && ok_of (root);
+  const char *state = ok ? str_of (root, "state") : "";
+  g_free (p->state);
+  g_free (p->word);
+  p->state = g_strdup (state);
+  p->word = g_strdup (ok ? str_of (root, "label") : "");
+  g_autofree char *text = status_text (root, err, p->ui, p->kind);
   ns_row_set_subtitle (p->status_row, text);
-  if (err || !ok_of (root))
-    return;
-  const char *pairing = str_of (root, "pairing");
-  if (*pairing && !g_strcmp0 (pairing, "none")) {
-    p->pairing = FALSE;
-    qr_stop (p);
-    ns_group_set_visible (p->pair_g, FALSE);
-  } else if (p->pairing) {
-    qr_start (p);
-  }
+  if (!g_strcmp0 (state, "pairing") && !g_strcmp0 (str_of (prov_entry (p), "action"), "qr") && !p->qr_bytes)
+    qr_run (p);   /* the page opens on a pairing: the code now, not at the next tick */
+  prov_apply (p);
+  poll_start (p);
 }
 
 static void
@@ -609,12 +729,12 @@ prov_build (Prov *p, JsonObject *root)
   p->status_g = ns_group (p->content, prov_text (p, "sections", "status"));
   p->status_row = ns_row_info (p->status_g, str_of (obj_of (p->ui, "labels"), "connection"), "");
 
+  g_free (p->kind);
+  p->kind = g_strdup (str_of (self, "pairing"));
+  p->hint = ns_note (p->content, "");
+  gtk_widget_set_visible (p->hint, FALSE);
   p->pair_g = ns_group (p->content, prov_text (p, "sections", "pairing"));
   ns_group_set_visible (p->pair_g, FALSE);
-  const char *pairing = str_of (self, "pairing");
-  p->pairing = *pairing && g_strcmp0 (pairing, "none");
-  if (p->pairing)
-    ns_note (p->content, prov_text (p, "labels", "pairing_waiting"));
 
   const char *note = str_of (obj_of (p->ui, "provider_notes"), p->id);
   if (*note)
