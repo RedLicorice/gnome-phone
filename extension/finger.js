@@ -36,6 +36,18 @@ export const VERIFY_STATES = {
     'verify-match': 'ready',
 };
 
+// The lock screen's way to its secret while a window shows over it: a button with the secret's own word on it, so the
+// way to the PIN pad is visible where the swipe up is not. One word per lock type, as the states above have.
+export const SecretWords = {
+    pin: 'PIN',
+    pattern: 'Disegno',
+};
+
+// @kind: the bouncer's kind (the lock type); an unknown one reads as the PIN's
+export function secretWord(kind = 'pin') {
+    return SecretWords[kind] ?? SecretWords.pin;
+}
+
 // @state: one of the states above; @kind: the bouncer's kind ('pin' or 'pattern') for the words that name it.
 // '' means there is nothing to say.
 export function fingerHint(state, kind = 'pin') {

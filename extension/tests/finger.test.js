@@ -2,7 +2,7 @@
 //   gjs -m extension/tests/finger.test.js
 import System from 'system';
 
-import {fingerHint, fingerState, FingerStrings} from '../finger.js';
+import {fingerHint, fingerState, FingerStrings, secretWord} from '../finger.js';
 
 let failed = 0;
 function check(name, ok, detail = '') {
@@ -21,6 +21,8 @@ check('the secret is named per lock type',
 check('restart is named per lock type',
     fingerHint('restart', 'pin') === 'Dopo il riavvio usa il PIN' &&
     fingerHint('restart', 'pattern') === 'Dopo il riavvio usa il disegno');
+check('the way to the secret is named per lock type',
+    secretWord('pin') === 'PIN' && secretWord('pattern') === 'Disegno' && secretWord('nonsense') === 'PIN');
 for (const state of Object.keys(FingerStrings)) {
     check(`every lock type has words for ${state}`,
         !!fingerHint(state, 'pin') && !!fingerHint(state, 'pattern'));

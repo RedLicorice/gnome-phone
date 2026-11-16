@@ -7,6 +7,11 @@
 // shut (navigation.js, shade.js ask keyguard.showing). de.yesman.neo lock-over-window turns the rule off for every app.
 // When the window closes, or goes behind another, or the user is unlocking, the lock screen is back.
 //
+// Only once the secret has been given: a window steps behind the lock screen only while the phone does not want its PIN
+// or pattern (keyguard.secretRequired, lockover.js). After a boot or a shell restart, in Lockdown, during the PIN's
+// retry timeout, past the sensor's misses, the lock screen stays in front of every window, so the PIN pad is where the
+// user will look for it.
+//
 // An app gets on the lock screen this way only by putting its window up while the phone is locked (an alarm that
 // rings, a call coming in), or by having it on top when the phone locks (a call under way), as on Android.
 import Gio from 'gi://Gio';
@@ -76,6 +81,7 @@ export class WhenLocked {
             showing: this._keyguard.showing,
             revealing: this._keyguard.revealing,
             allowed: this._allowed,
+            requiresSecret: this._keyguard.secretRequired,
             overWindow,
         }) ? overWindow : null);
     }

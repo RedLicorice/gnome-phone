@@ -22,10 +22,10 @@ import * as Signals from 'resource:///org/gnome/shell/misc/signals.js';
 
 import {PatternView, PinView, Strings, touchSlot, tryAgainIn} from './bouncer.js';
 import {fingerState, FingerStrings} from './finger.js';
-import {FingerHint, FingerSensor} from './fingerhint.js';
+import {FingerHint, FingerSensor, PinButton} from './fingerhint.js';
 import {vibrate} from './haptics.js';
 import {Canvas, paintIcon} from './icons.js';
-import {fingerAllowed, mayOcclude} from './lockover.js';
+import {fingerAllowed, mayOcclude, secretRequired as secretIsRequired} from './lockover.js';
 import {animate, clamp, EMPHASIZED_ACCELERATE, FAST_OUT_SLOW_IN, lerp, LINEAR, MIN_FLING_VELOCITY,
     TOUCH_RESPONSE, VelocityTracker} from './motion.js';
 import {Color, onRestyle, offRestyle, rgba, SHADE_PANEL} from './palette.js';
@@ -252,6 +252,8 @@ export class Keyguard extends Signals.EventEmitter {
         this._occlusionHidden = new Set();
         this._occlusion = {};           // the connections that last while occluded
         this._loadThrottle();
+        // the last answer of secretRequired, kept to tell whenlocked.js to look again (emits 'changed')
+        this._secretRequired = this.secretRequired;
 
         this._build();
         this._fingerSensor = new FingerSensor(state => {
@@ -270,6 +272,9 @@ export class Keyguard extends Signals.EventEmitter {
         state.connectObject('changed', () => this._syncState(), this);
         // another lock type: the next lock builds its bouncer
         this._neo?.connectObject('changed::lock-type', () => {
+            this._syncFingerHint();
+            this._applyOcclusion();
+            this._syncSecretRequired();
             if (this._bouncerActive)
                 return;
             this._endPrerender();
@@ -301,6 +306,20 @@ export class Keyguard extends Signals.EventEmitter {
 
     get _secure() {
         return this._lockType !== 'swipe';
+    }
+
+    // The phone wants its secret before anything else: the first unlock after a boot or a shell restart, a Lockdown,
+    // the PIN's own timeout, the sensor out of misses (lockover.js). No window shows over the lock screen meanwhile
+    // (whenlocked.js asks this), so the way to the PIN pad stays on the screen.
+    get secretRequired() {
+        return secretIsRequired({
+            secure: this._secure,
+            afterRestart: this._afterRestart,
+            lockedDown: this._lockedDown,
+            lockedOut: this._lockedOut,
+            misses: this._fingerMisses,
+            max: this._fingerMaxMisses,
+        });
     }
 
     // the sensor's policy, from de.yesman.neo: no settings, no sensor (the schema is installed with the extension,
@@ -373,6 +392,11 @@ export class Keyguard extends Signals.EventEmitter {
         });
         this._indication = new AndroidText('', INDICATION_SIZE, INDICATION_WGHT, {colour: Color.onWall, opsz: 16});
         this._content.add_child(this._indication);
+        // The way to the PIN pad while an app's window shows over the lock screen (setOccluded): the swipe up is not
+        // there to be found, this is (fingerhint.js). The lock screen's own child, so it takes the touch its modal
+        // grab holds; hidden while the lock screen is itself, where the lock icon and the swipe up do.
+        this._pinButton = new PinButton(() => this._pinTapped());
+        this.actor.add_child(this._pinButton);
         // the sensor's state, on the right edge at the power key (fingerhint.js). In a layer of its own, over the lock
         // screen and over a window that shows over it (setOccluded): there this view draws nothing, and the state of
         // the sensor is all that stays on the screen.
@@ -393,6 +417,7 @@ export class Keyguard extends Signals.EventEmitter {
             this._pill.style = this._pillStyle();
             this._syncPill();
             this._fingerHint?.restyle();
+            this._pinButton?.restyle();
         });
 
         this._tracker = new VelocityTracker();
@@ -540,7 +565,8 @@ export class Keyguard extends Signals.EventEmitter {
     // meanwhile, chat.show_when_locked). Only this view's drawing steps aside: every other window stays hidden, and
     // the phone stays locked (showing stays true), so home, recents and the shade stay shut.
     setOccluded(win) {
-        win = mayOcclude({showing: this.showing, revealing: this._revealing, overWindow: win}) ? win : null;
+        win = mayOcclude({showing: this.showing, revealing: this._revealing, requiresSecret: this.secretRequired,
+            overWindow: win}) ? win : null;
         if (win === this.occludedBy)
             return;
         this._showHiddenWindows();
@@ -575,6 +601,8 @@ export class Keyguard extends Signals.EventEmitter {
         this._blurLayer.visible = !behind;
         this._scrim.visible = !behind;
         this._content.visible = !behind;
+        // the way to the secret, where the lock screen's own icons are not: only a lock with a secret has one to give
+        this._pinButton.visible = behind && this._secure;
     }
 
     // The lock screen takes the front back from the window over it, for the unlock that follows (the swipe's slop, a
@@ -657,6 +685,17 @@ export class Keyguard extends Signals.EventEmitter {
         else
             this._stopFinger();
         this._syncFingerHint();
+        this._syncSecretRequired();
+    }
+
+    // whenlocked.js looks again when what the lock screen wants changes: the window over it steps aside for the PIN
+    // and comes back once it has been given
+    _syncSecretRequired() {
+        const required = this.secretRequired;
+        if (required === this._secretRequired)
+            return;
+        this._secretRequired = required;
+        this.emit('changed');
     }
 
     // the sensor's state on the right edge, at the power key (finger.js says what each one means)
@@ -669,6 +708,8 @@ export class Keyguard extends Signals.EventEmitter {
             this.hintLayer.visible = false;
             return;
         }
+        const kind = this._lockType === 'pattern' ? 'pattern' : 'pin';
+        this._pinButton?.setKind(kind);
         this._fingerHint.setState(fingerState({
             secure: this._secure,
             bouncer: this._bouncerBox?.visible ?? false,
@@ -679,7 +720,7 @@ export class Keyguard extends Signals.EventEmitter {
             max: this._fingerMaxMisses,
             signal: this._fingerSignal,
             armed: !!this._finger,
-        }), this._lockType === 'pattern' ? 'pattern' : 'pin');
+        }), kind);
         this.hintLayer.visible = this._fingerHint.visible;
     }
 
@@ -954,6 +995,7 @@ export class Keyguard extends Signals.EventEmitter {
     // going off, and then hidden: hidden widgets keep their drawings.
     _prepareBouncer() {
         const kind = this._lockType === 'pattern' ? 'pattern' : 'pin';
+        this._pinButton.setKind(kind);
         if (this._bouncer?.kind === kind || !this._secure)
             return;
         if (this._bouncerActive)
@@ -1034,12 +1076,21 @@ export class Keyguard extends Signals.EventEmitter {
 
     // the lock icon: the bouncer, or with no secret the unlock
     _lockIconTapped() {
-        if (!this.showing || this.bouncerShowing || this._tracking || this._unlockingNow)
-            return;
         if (!this._secure) {
+            if (!this.showing || this.bouncerShowing || this._tracking || this._unlockingNow)
+                return;
             this._goingAway();
             return;
         }
+        this._pinTapped();
+    }
+
+    // The way to the secret: the button over a window that shows over the lock screen, and the lock icon on the lock
+    // screen itself. The lock screen takes the front back for the bouncer, and the window comes back when it goes.
+    _pinTapped() {
+        if (!this.showing || this.bouncerShowing || this._tracking || this._unlockingNow || !this._secure)
+            return;
+        this._revealStart();
         this._ensureBouncer();
         this._settleTo(0, SETTLE_MS * 2, () => this._bouncerShown());
     }
@@ -1121,6 +1172,8 @@ export class Keyguard extends Signals.EventEmitter {
                 this._pinLength = /^[0-9]+$/.test(secret) && secret.length >= MIN_AUTO_CONFIRM ? secret.length : 0;
             this._saveThrottle();
             this._afterRestart = false;
+            // the phone has had its secret: the window over the lock screen may come back (whenlocked.js)
+            this._syncSecretRequired();
             this._bouncer.disappear(() => this._goingAway());
             return;
         }
@@ -1236,6 +1289,8 @@ export class Keyguard extends Signals.EventEmitter {
         this._stopFinger();
         // the hint's layer is not the view's child (it outlives the view while a window is over the lock screen)
         this.hintLayer.hide();
+        // and the way to the secret goes with the lock screen, before the unlock animation
+        this._pinButton.visible = false;
         this._settle?.stop();
         this._settle = null;
         if (this._countdownId)
@@ -1318,6 +1373,7 @@ export class Keyguard extends Signals.EventEmitter {
         this.showing = false;
         setLockedHint(false);
         this._syncFingerHint();
+        this._syncSecretRequired();
         this.emit('changed');
     }
 
