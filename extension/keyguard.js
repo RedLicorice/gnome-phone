@@ -720,6 +720,71 @@ export class Keyguard extends Signals.EventEmitter {
     }
 
     // the sensor's state on the right edge, at the power key (finger.js says what each one means)
+    // voice unlock (docs/voice-unlock.md): the switch is Settings'; a schema compiled before the key existed reads as off
+    _voiceUnlockOn() {
+        try {
+            const settings = neoSettings();
+            return !!settings?.settings_schema.has_key(VOICE_KEY) && settings.get_boolean(VOICE_KEY);
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // a tap on "Sblocca con la voce": gp-auth --voice (PAM gnome-phone-voice: 0 the voice matched, 1 it did not, 3 nothing
+    // to ask, 2 PAM could not run). A match unlocks by the path a finger takes; a miss shares the sensor's budget.
+    async _voiceTapped() {
+        if (this._voice || !this._voiceUnlockOn())
+            return;
+        const helper = GP_AUTH.find(p => GLib.file_test(p, GLib.FileTest.IS_EXECUTABLE));
+        if (!helper)
+            return;
+        let proc;
+        try {
+            proc = Gio.Subprocess.new([helper, '--voice'], Gio.SubprocessFlags.NONE);
+        } catch (e) {
+            logError(e, 'gnome-phone: gp-auth --voice');
+            return;
+        }
+        this._voice = proc;
+        try {
+            await proc.wait_async(null);
+        } catch (e) {
+        }
+        this._voice = null;
+        const status = proc.get_if_exited() ? proc.get_exit_status() : 2;
+        if (status === 0) {
+            this._fingerMisses = 0;
+            this._noteUnlock('voice');
+            if (this.occludedBy)
+                this._unlockOver();
+            else if (this.bouncerShowing && this._bouncer)
+                this._bouncer.disappear(() => this._goingAway());
+            else
+                this._goingAway();
+            return;
+        }
+        if (status === 1)
+            this._fingerMisses++;
+        this._syncFingerHint();
+    }
+
+    // tells the voice service a PIN or a finger just unlocked, so its 4 h window can open. Never blocks, never throws:
+    // a missing service must not keep the phone locked.
+    _noteUnlock(how) {
+        try {
+            Gio.DBus.session.call(VOICE_NAME, VOICE_PATH, VOICE_IFACE, 'NoteUnlock', new GLib.Variant('(s)', [how]),
+                null, Gio.DBusCallFlags.NONE, 2000, null, (bus, res) => {
+                    try {
+                        bus.call_finish(res);
+                    } catch (e) {
+                        // the voice service is not running or does not know the call
+                    }
+                });
+        } catch (e) {
+            // no session bus: nothing to tell
+        }
+    }
+
     _syncFingerHint() {
         if (!this._fingerHint)
             return;
