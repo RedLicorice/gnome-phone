@@ -20,10 +20,10 @@ import {px, SCREEN_H, SCREEN_W} from './units.js';
 // icon far below and of the bouncer. The 1080x2280 reference's pixels, as everything on this screen.
 const HINT = {right: 48, centreY: Math.round(SCREEN_H / 2), glyph: 54, gap: 12, size: 14, wght: 500};
 
-// The button's place: the same edge, under the hint, its word a tint of the theme's surface on the wall, sized to the
-// word with the padding of a touch target around it (48 dp wide, 32 dp high).
+// The button's place: the same edge, under the hint, its word on a capsule of the hint's accent, sized to the word with
+// the padding of a touch target around it (48 dp wide, 32 dp high). Screen px of the 1080x2280 reference, as the hint.
 const BUTTON = {right: 48, top: Math.round(SCREEN_H / 2) + 132, height: 96, pad: 40, inkTop: 28, size: 15,
-    wght: 600, radius: 48, tint: 0.32};
+    wght: 600, radius: 48, tint: 0.24, edge: 2, edgeTint: 0.6, slop: 24};
 
 export const FingerHint = GObject.registerClass(
 class FingerHint extends St.Widget {
@@ -63,21 +63,58 @@ class FingerHint extends St.Widget {
 // screen again, and the button with it.
 export const PinButton = GObject.registerClass(
 class PinButton extends St.Widget {
-    // @onTap: called for a click or a touch that ends on the button (Clutter.ClickAction: a drag off it is no tap)
+    // @onTap: called for a click, or for a touch that begins and ends on the button without dragging off it
     constructor(onTap) {
         super({reactive: true, visible: false});
+        this._onTap = onTap;
         this._text = '';
+        this._down = null;              // where the touch or click began, while it is still the button's
         this._label = new AndroidText('', BUTTON.size, BUTTON.wght, {colour: Color.onWall, opsz: 16});
         this.add_child(this._label);
-        const click = new Clutter.ClickAction();
-        click.connect('clicked', () => onTap());
-        this.add_action(click);
+        // the press is the button's from the first event: the lock screen's swipe up never starts under it
+        this.connect('button-press-event', (actor, event) => {
+            this._down = event.get_coords();
+            return Clutter.EVENT_STOP;
+        });
+        this.connect('button-release-event', () => {
+            if (!this._down)
+                return Clutter.EVENT_PROPAGATE;
+            this._down = null;
+            this._onTap();
+            return Clutter.EVENT_STOP;
+        });
+        // a touch stays the button's until it ends, and stops being one if the finger drags off it
+        this.connect('touch-event', (actor, event) => {
+            const type = event.type();
+            if (type === Clutter.EventType.TOUCH_BEGIN) {
+                this._down = event.get_coords();
+                return Clutter.EVENT_STOP;
+            }
+            if (type === Clutter.EventType.TOUCH_CANCEL) {
+                this._down = null;
+                return Clutter.EVENT_STOP;
+            }
+            if (type !== Clutter.EventType.TOUCH_UPDATE && type !== Clutter.EventType.TOUCH_END)
+                return Clutter.EVENT_PROPAGATE;
+            const [x, y] = event.get_coords();
+            if (this._down && Math.hypot(x - this._down[0], y - this._down[1]) > px(BUTTON.slop))
+                this._down = null;
+            if (type === Clutter.EventType.TOUCH_UPDATE)
+                return Clutter.EVENT_STOP;
+            const tapped = !!this._down;
+            this._down = null;
+            if (tapped)
+                this._onTap();
+            return Clutter.EVENT_STOP;
+        });
         this.restyle();
     }
 
-    // the look is live, as the hint's: a tint of the theme's surface behind the secret's word, on the wallpaper's ink
+    // the look is live, as the hint's: the hint's accent, a capsule of it behind the secret's word
     restyle() {
-        this.style = `background-color: ${rgba(Color.surface, BUTTON.tint)}; border-radius: ${px(BUTTON.radius)}px;`;
+        this.style = `background-color: ${rgba(Color.accent1_100, BUTTON.tint)};` +
+            ` border: ${px(BUTTON.edge)}px solid ${rgba(Color.accent1_100, BUTTON.edgeTint)};` +
+            ` border-radius: ${px(BUTTON.radius)}px;`;
         this._label.setColour(Color.onWall);
     }
 
