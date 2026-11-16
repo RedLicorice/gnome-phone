@@ -73,6 +73,9 @@ static const Entry entries[] = {
   { "system-users-symbolic", "blue", "Persone", "Volti • Voci • Contatti • Taccuino",
     "people persone persona contatti contacts volto volti voce voci", ns_page_people_open, NULL, NULL,
     ns_minerva_available, TRUE },
+  { "preferences-system-notifications-symbolic", "orange", "Eventi", "App • Canali • Livelli • Sveglie",
+    "eventi events app canali canale livelli livello notifiche sveglie sveglia wake", ns_page_events, NULL, NULL,
+    ns_minerva_available, TRUE },
   { "x-office-spreadsheet-symbolic", "orange", "Budget", "Tetti di spesa • Eventi • Avvisi",
     "budget budgets spesa costo costi quota tetti limiti eventi events bypass", ns_page_minerva_budget, NULL, NULL,
     ns_minerva_available, TRUE },
@@ -350,6 +353,7 @@ static const struct {
   { "minerva-prompt", ns_page_prompt }, { "prompt", ns_page_prompt },
   { "people", ns_page_people_open }, { "persone", ns_page_people_open },
   { "budget", ns_page_minerva_budget }, { "budgets", ns_page_minerva_budget }, { "spesa", ns_page_minerva_budget },
+  { "events", ns_page_events }, { "eventi", ns_page_events },
   { "permissions", ns_page_permissions }, { "agent-permissions", ns_page_permissions },
 };
 
