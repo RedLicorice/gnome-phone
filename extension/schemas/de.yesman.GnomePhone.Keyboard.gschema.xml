@@ -135,6 +135,11 @@
       <default>8</default>
       <summary>A sliding finger leaves its key only this many pixels past the edge</summary>
     </key>
+    <key name="close-window-hold-ms" type="i">
+      <range min="100" max="2000"/>
+      <default>400</default>
+      <summary>How long the window under the keys keeps its place after the keyboard closes, at most, while a finger is down, milliseconds</summary>
+    </key>
 
     <!-- gestures -->
     <key name="swipe-up" enum="de.yesman.GnomePhone.Keyboard.SwipeAction">

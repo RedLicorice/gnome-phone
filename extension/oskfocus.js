@@ -10,93 +10,123 @@
 // keyboard, the send button) opens nothing, and the focus leaving the field closes the keyboard as before (the input
 // method's own focus-out).
 //
-// That close waits for the finger, though. The shell closes the keyboard the moment the field loses the focus, and the
-// window it had shrunk grows back at once. GTK moves the focus on a button's PRESS (focus-on-click), so a dialog's
+// The keyboard goes the moment the tap closes it, as on Android. The window under it is another matter: GTK moves the
+// focus on a button's PRESS (focus-on-click), and the window the keyboard had shrunk grows back at once, so a dialog's
 // Cancel or Rename touched while the keyboard was up moved down the screen before the finger lifted: the release
 // missed the button and the dialog stayed, re-centred lower, as if it had opened again (neo-settings' phone name,
-// 2026-11-12). On Android a button takes no focus in touch mode and the keyboard goes once the tap is done. So while a
-// finger is down, Keyboard.close only marks the keyboard to close; the last finger lifting closes it, unless a field
-// took the focus meanwhile (open).
+// 2026-11-12). So the shell's slide down runs at once, and only the window moving back waits for the lift: at most
+// close-window-hold-ms after the press, for a lift that never came.
 import Clutter from 'gi://Clutter';
+import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
 import * as KeyboardUI from 'resource:///org/gnome/shell/ui/keyboard.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+const SCHEMA = 'de.yesman.GnomePhone.Keyboard';
 const FOCUS_WAIT_MS = 800;      // a page's field: the tap goes to WebKit's web process and the focus comes back
 const POLL_MS = 40;
-const CLOSE_AFTER_LIFT_MS = 60; // the app has the lift (and its button its click) before its window grows back
-const CLOSE_HELD_MAX_MS = 2000; // a lift that never came (a grab took the touch) cannot keep the keyboard up
+const WINDOW_HOLD_MS = 400;     // a window's way back, while a finger is down (close-window-hold-ms in the schema)
 
 export class TouchFocusKeyboard {
     constructor() {
         this._hadFocus = true;
         this._pollId = 0;
-        this._touches = 0;
-        this._closeId = 0;
-        this._holdClose();
+        this._down = false;
+        this._held = null;      // a window's way back the shell asked for while a finger was down
+        this._heldId = 0;
+        this._settings = null;
+        try {
+            const schema = Gio.SettingsSchemaSource.get_default()?.lookup(SCHEMA, true);
+            if (schema)
+                this._settings = new Gio.Settings({settings_schema: schema});
+        } catch (e) {
+            logError(e, 'gnome-phone: the keyboard\'s settings, the times below stay');
+        }
+        this._holdWindow();
         global.stage.connectObject('captured-event', (_stage, event) => this._onEvent(event), this);
     }
 
-    // Keyboard.close and open, wrapped while the extension runs (the keyboard is made again whenever the OSK setting
-    // changes, so the class, not the instance)
-    _holdClose() {
+    get _holdMs() {
+        try {
+            return this._settings?.get_int('close-window-hold-ms') ?? WINDOW_HOLD_MS;
+        } catch {
+            return WINDOW_HOLD_MS;  // a schema older than this key: the keyboard still closes
+        }
+    }
+
+    // the shell's move of the window back under the keys, held while a finger is down: the keyboard closes at once,
+    // the window keeps its place under the finger (the class, not the instance: the keyboard is made again whenever
+    // the OSK setting changes)
+    _holdWindow() {
         const proto = KeyboardUI.Keyboard?.prototype;
-        if (!proto?.close || !proto?.open)
+        if (!proto?._animateWindow || !proto?.open)
             return;
-        const close = proto.close;
+        const animateWindow = proto._animateWindow;
         const open = proto.open;
         const self = this;
-        proto.close = function (...args) {
-            if (self._touches > 0) {
-                this.__gnomePhoneCloseHeld = true;
-                self._closeLater(CLOSE_HELD_MAX_MS);
+        proto._animateWindow = function (window, show) {
+            if (!show && self._down) {
+                self._hold(this, window, animateWindow);
                 return undefined;
             }
-            this.__gnomePhoneCloseHeld = false;
-            return close.apply(this, args);
+            return animateWindow.call(this, window, show);
         };
         proto.open = function (...args) {
-            this.__gnomePhoneCloseHeld = false;
+            self._drop();
             return open.apply(this, args);
         };
-        this._unholdClose = () => {
-            proto.close = close;
+        this._unhold = () => {
+            proto._animateWindow = animateWindow;
             proto.open = open;
-        };
-        this._closeHeld = () => {
-            const keyboard = Main.keyboard._keyboard;
-            if (keyboard?.__gnomePhoneCloseHeld) {
-                keyboard.__gnomePhoneCloseHeld = false;
-                close.call(keyboard);
-            }
         };
     }
 
-    _closeLater(ms) {
-        if (!this._closeHeld)
-            return;
-        if (this._closeId)
-            GLib.source_remove(this._closeId);
-        this._closeId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
-            this._closeId = 0;
-            this._touches = 0;
-            this._closeHeld();
+    _hold(keyboard, window, animateWindow) {
+        // a window already waiting goes back first: this one is the finger's now
+        this._release();
+        this._held = {keyboard, window, animateWindow};
+        this._heldId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, this._holdMs, () => {
+            this._heldId = 0;
+            this._down = false;     // the lift was not ours to see: nothing may wait for it again
+            this._release();
             return GLib.SOURCE_REMOVE;
         });
-        GLib.Source.set_name_by_id(this._closeId, '[gnome-phone] keyboard close after the lift');
+        GLib.Source.set_name_by_id(this._heldId, '[gnome-phone] the window back under the keys');
+    }
+
+    // the window back the moment the finger lifts
+    _release() {
+        if (this._heldId)
+            GLib.source_remove(this._heldId);
+        this._heldId = 0;
+        const held = this._held;
+        if (!held)
+            return;
+        this._held = null;
+        try {
+            held.animateWindow.call(held.keyboard, held.window, false);
+        } catch (e) {
+            logError(e, 'gnome-phone: the window back from the keyboard');
+        }
+    }
+
+    // the keyboard opens again: the window goes up with it, not back
+    _drop() {
+        if (this._heldId)
+            GLib.source_remove(this._heldId);
+        this._heldId = 0;
+        this._held = null;
     }
 
     _onEvent(event) {
         const type = event.type();
         if (type === Clutter.EventType.TOUCH_BEGIN) {
-            this._touches++;
-            this._stop();
+            this._down = true;
             this._hadFocus = Main.inputMethod.currentFocus !== null;
         } else if (type === Clutter.EventType.TOUCH_END || type === Clutter.EventType.TOUCH_CANCEL) {
-            this._touches = Math.max(0, this._touches - 1);
-            if (this._touches === 0 && Main.keyboard._keyboard?.__gnomePhoneCloseHeld)
-                this._closeLater(CLOSE_AFTER_LIFT_MS);
+            this._down = false;
+            this._release();
             if (type === Clutter.EventType.TOUCH_END)
                 this._watch();
         }
@@ -139,10 +169,7 @@ export class TouchFocusKeyboard {
     destroy() {
         this._stop();
         global.stage.disconnectObject(this);
-        if (this._closeId)
-            GLib.source_remove(this._closeId);
-        this._closeId = 0;
-        this._closeHeld?.();
-        this._unholdClose?.();
+        this._release();
+        this._unhold?.();
     }
 }
