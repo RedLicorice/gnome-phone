@@ -79,6 +79,9 @@ static const Entry entries[] = {
   { "x-office-spreadsheet-symbolic", "orange", "Budget", "Tetti di spesa • Eventi • Avvisi",
     "budget budgets spesa costo costi quota tetti limiti eventi events bypass", ns_page_minerva_budget, NULL, NULL,
     ns_minerva_available, TRUE },
+  { "mark-location-symbolic", "green", "Luoghi", "Il suo mondo • Note • Gradimento",
+    "luoghi luogo places place mondo world kiosk gradimento nota note preferiti", ns_page_minerva_places, NULL, NULL,
+    ns_minerva_available, TRUE },
   { NULL },
   { "view-grid-symbolic", "blue", "Apps", "Default apps • App settings",
     "permissions storage", ns_page_apps },
@@ -354,6 +357,7 @@ static const struct {
   { "people", ns_page_people_open }, { "persone", ns_page_people_open },
   { "budget", ns_page_minerva_budget }, { "budgets", ns_page_minerva_budget }, { "spesa", ns_page_minerva_budget },
   { "events", ns_page_events }, { "eventi", ns_page_events },
+  { "places", ns_page_minerva_places }, { "luoghi", ns_page_minerva_places }, { "minerva-places", ns_page_minerva_places },
   { "permissions", ns_page_permissions }, { "agent-permissions", ns_page_permissions },
 };
 
