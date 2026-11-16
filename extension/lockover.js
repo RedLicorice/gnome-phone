@@ -1,6 +1,6 @@
-// Three decisions of the lock screen, pure so they are tested under plain gjs (tests/lockover.test.js): whether an app's
+// Four decisions of the lock screen, pure so they are tested under plain gjs (tests/lockover.test.js): whether an app's
 // window shows over the lock screen (whenlocked.js), whether the sensor is armed meanwhile, and whether the phone wants
-// its secret first.
+// its secret first, and whether a recognized voice may wake the screen (voicewake.js).
 
 // Whether the lock screen steps behind @overWindow: the phone locked, the top window declaring it may show over the lock
 // screen and the stacks allowing it, the user's switch on (de.yesman.neo lock-over-window), no unlock under way
@@ -23,4 +23,19 @@ export function secretRequired({secure = true, afterRestart = false, lockedDown 
 // the picture, never the lock, and the sensor stays armed while it is in front.
 export function fingerAllowed({showing, secure, afterRestart, lockedDown, unlocking, lockedOut, misses, max}) {
     return !!showing && !!secure && !afterRestart && !lockedDown && !unlocking && !lockedOut && misses < max;
+}
+
+// Whether a recognized voice may wake the screen: '' when it may, else the first reason it may not: Lockdown and the
+// PIN's own timeout first, then a PIN lock nobody has entered since boot or a shell restart, which keeps the screen
+// dark to a voice too. A wake shows the lock screen with the kiosk face over it, never the unlock (power.js wakeUp).
+// The yes/no is secretRequired's own (the sensor's misses play no part: a voice is no finger, so none are counted
+// against it); the reason is the first that holds.
+export function voiceWakeAllowed({secure, afterRestart, lockedDown, lockedOut}) {
+    if (!secretRequired({secure, afterRestart, lockedDown, lockedOut, misses: 0, max: 1}))
+        return '';
+    if (lockedDown)
+        return 'locked-down';
+    if (lockedOut)
+        return 'locked-out';
+    return 'pin-not-entered';
 }

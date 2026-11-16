@@ -2,7 +2,7 @@
 //   gjs -m extension/tests/lockover.test.js
 import System from 'system';
 
-import {fingerAllowed, mayOcclude, secretRequired} from '../lockover.js';
+import {fingerAllowed, mayOcclude, secretRequired, voiceWakeAllowed} from '../lockover.js';
 
 let failed = 0;
 function check(name, ok, detail = '') {
@@ -50,5 +50,18 @@ check('not during the unlock', !fingerAllowed({...armed, unlocking: true}));
 check('not in the PIN timeout', !fingerAllowed({...armed, lockedOut: true}));
 check('not past the miss limit', !fingerAllowed({...armed, misses: 5}));
 check('armed again one under the limit', fingerAllowed({...armed, misses: 4}));
+
+// --- a recognized voice waking the screen
+const voice = {secure: true, afterRestart: false, lockedDown: false, lockedOut: false};
+check('a voice may wake the screen once the PIN is in', voiceWakeAllowed(voice) === '');
+check('not before the PIN is entered since boot', voiceWakeAllowed({...voice, afterRestart: true}) ===
+    'pin-not-entered');
+check('the swipe lock has no PIN to wait for', voiceWakeAllowed({...voice, secure: false, afterRestart: true}) === '');
+check('not in Lockdown', voiceWakeAllowed({...voice, lockedDown: true}) === 'locked-down');
+check('not in the PIN timeout', voiceWakeAllowed({...voice, lockedOut: true}) === 'locked-out');
+check('Lockdown is the reason over the PIN not entered', voiceWakeAllowed({...voice, afterRestart: true,
+    lockedDown: true}) === 'locked-down');
+check('the PIN timeout is the reason over the PIN not entered', voiceWakeAllowed({...voice, afterRestart: true,
+    lockedOut: true}) === 'locked-out');
 
 System.exit(failed ? 1 : 0);

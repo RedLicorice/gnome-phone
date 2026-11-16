@@ -281,8 +281,10 @@ export class Power extends Signals.EventEmitter {
         this._grab = null;
     }
 
-    // --- the screen timeout: the lock screen's own, else the session's idle delay (0: never) unless an app inhibits
-    // idle; after any input
+    // --- the screen timeout: the lock screen's own, else the session's idle delay (0: never), after any input. While
+    // the voice service holds the session's idle inhibitor (flag 8, while she talks) no timeout is armed at all, not
+    // even the lock screen's short one: the kiosk face is over the lock screen, and the screen slept 10 s into a
+    // conversation. Releasing the inhibitor arms a fresh one from then (_checkInhibited)
 
     _syncTimeout() {
         if (this._idleWatch)
@@ -291,14 +293,16 @@ export class Power extends Signals.EventEmitter {
         if (!this.interactive)
             return;
         let ms;
-        if (this._keyguard.showing)
+        if (this._inhibited)
+            ms = 0;
+        else if (this._keyguard.showing)
             ms = KEYGUARD_TIMEOUT_MS;
-        else if (!this._inhibited)
+        else
             ms = this._session.get_uint('idle-delay') * 1000;
         if (!ms)
             return;
-        // the idle watch counts from the last input: a screen woken without one (a call) long after it gets its whole
-        // timeout from now
+        // the idle watch counts from the last input: a screen woken without one (a call), or one whose timeout was held
+        // off while the voice talked, gets its whole timeout from now
         const idle = this._idleMonitor.get_idletime();
         // an idle watch stays after it fires (mutter removes only user-active ones): one left behind slept the phone
         // 10 s into every idle spell, unlocked, ever after the lock screen had once timed out

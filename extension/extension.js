@@ -35,6 +35,7 @@ import {CameraSheet} from './camera.js';
 import {StatusBar, hideShellPanel} from './statusbar.js';
 import {ThemeSwaps} from './theme.js';
 import {VolumeDialog} from './volume.js';
+import {VoiceWake} from './voicewake.js';
 import {WhenLocked} from './whenlocked.js';
 
 export default class GnomePhoneExtension extends Extension {
@@ -177,6 +178,8 @@ export default class GnomePhoneExtension extends Extension {
         Main.layoutManager.addTopChrome(this._power.layer);
         overWindows(this._power.layer);
         this._service.setPower(this._power);
+        // a recognized voice may wake it (org.minerva.ScreenWake1), only once the PIN is in: the lock screen shows
+        this._voiceWake = new VoiceWake({keyguard: this._keyguard, power: this._power});
         // ... and while it is off, the volume keys do nothing (an app that took them still gets them: a call)
         this._volume.screenOff = () => this._power && !this._power.interactive;
         // the Bixby key: recents, with the screen on (the lock screen's own action mode keeps it out there)
@@ -240,6 +243,8 @@ export default class GnomePhoneExtension extends Extension {
         this._whenLocked = null;
         this._pinAsk?.destroy();
         this._pinAsk = null;
+        this._voiceWake?.destroy();
+        this._voiceWake = null;
         this._keyguard?.destroy();
         this._keyguard = null;
         this._headsUp?.destroy();
