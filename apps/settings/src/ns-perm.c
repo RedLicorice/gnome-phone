@@ -1,7 +1,10 @@
 /* Security and privacy > Permissions: what Minerva's agent may do without asking. A viewer and editor of
  * `minerva-perm` (permissions/ in Minerva's repository, docs/permissions.md): `status --json` for the mode, the hard
  * gates, the base allow and the rules, `history -n 30 --json` for the decisions, and `mode`, `rule add`, `rule rm`,
- * `classifier set` to change them. Every sentence in History comes from the data, verbatim. */
+ * `classifier set` to change them. Every sentence in History comes from the data, verbatim. The first card is her
+ * permission to control the phone's screen (`status.screen_control`, `screen grant|revoke`): its words, its state and
+ * the date it was granted all come from the data, and turning it on asks on the phone's own sheet (Sì, then a finger
+ * or the PIN), not here. */
 #include "ns-pages.h"
 #include "ns-mc.h"
 #include "ns-ui.h"
@@ -20,6 +23,8 @@ struct Perm {
   GtkWidget *gates, *base, *rules, *history, *fallbacks;
   GtkWidget *rules_none, *history_none, *model_row;
   GtkWidget *rem_count, *rem_interval, *rem_final; /* the reminders rows: values of `status.reminders` */
+  GtkWidget *screen_row, *screen_note; /* the screen permission: the row with its switch, the explanation under it */
+  gboolean screen_busy;            /* a grant or a revoke is running: the switch waits for it */
   JsonObject *st;                  /* the last `status --json` */
   gboolean busy;
 };
@@ -135,6 +140,51 @@ mark_suffix (GtkWidget *row)
   gtk_widget_set_opacity (mark, 0);
   ns_row_suffix (row, mark);
   return mark;
+}
+
+/* ---- control of the phone's screen: the row's words are `status.screen_control`, never text of this file ---- */
+
+static void
+screen_fill (Perm *ak)
+{
+  JsonObject *sc = obj_of (ak->st, "screen_control");
+  const char *state = str_of (sc, "state");
+  if (ak->screen_busy)
+    return;
+  g_autofree char *sub = g_strdup_printf ("%s • %s", str_of (sc, "state_label"), str_of (sc, "granted_text"));
+  gtk_label_set_text (GTK_LABEL (g_object_get_data (G_OBJECT (ak->screen_row), "ns-title-label")),
+                      str_of (sc, "label"));
+  ns_row_set_subtitle (ak->screen_row, sub);
+  GtkWidget *sw = ns_row_get_switch (ak->screen_row);
+  ns_switch_quiet (sw, !g_strcmp0 (state, "on"));
+  gtk_widget_set_sensitive (sw, g_strcmp0 (state, "unavailable") != 0);
+  gtk_label_set_text (GTK_LABEL (ak->screen_note), str_of (sc, "explanation"));
+  gtk_widget_set_visible (ak->screen_note, *str_of (sc, "explanation"));
+}
+
+static void
+screen_done (JsonObject *root, const char *err, gpointer data)
+{
+  Perm *ak = data;
+  ak->screen_busy = FALSE;
+  /* a refusal is the plain sentence the tool printed after "error: " */
+  say (ak, err && g_str_has_prefix (err, "error: ") ? err + 7 : err ? err : "", err != NULL);
+  perm_refresh (ak);
+}
+
+static void
+screen_toggled (GtkSwitch *sw, GParamSpec *ps, gpointer data)
+{
+  Perm *ak = data;
+  if (ns_switch_syncing (GTK_WIDGET (sw)) || ak->screen_busy)
+    return;
+  gboolean on = gtk_switch_get_active (sw);
+  static const char *const grant[] = { "screen", "grant", "--json", NULL };
+  static const char *const revoke[] = { "screen", "revoke", "--json", NULL };
+  ak->screen_busy = TRUE;
+  say (ak, "", FALSE);
+  ns_row_set_subtitle (ak->screen_row, str_of (obj_of (ak->st, "screen_control"), on ? "waiting" : "revoking"));
+  ns_mc_run_bin (G_OBJECT (ak->page), "minerva-perm", on ? grant : revoke, NULL, screen_done, ak);
 }
 
 /* ---- the lists that come from status ---- */
@@ -608,6 +658,7 @@ status_fill (Perm *ak)
   gboolean ask = !g_strcmp0 (mode_of (ak), "ask");
   gtk_widget_set_opacity (ak->ask_mark, ask);
   gtk_widget_set_opacity (ak->auto_mark, ask ? 0 : 1);
+  screen_fill (ak);
   gates_fill (ak);
   base_fill (ak);
   rules_fill (ak);
@@ -706,7 +757,13 @@ ns_page_permissions (GtkWidget *row, gpointer data)
     return;
   }
 
-  GtkWidget *g = ns_group (c, "Mode");
+  GtkWidget *g = ns_group (c, NULL);
+  ak->screen_row = ns_row_toggle (g, "input-mouse-symbolic", "orange", "", "");
+  g_signal_connect (ns_row_get_switch (ak->screen_row), "notify::active", G_CALLBACK (screen_toggled), ak);
+  ak->screen_note = ns_note (c, "");
+  gtk_widget_set_visible (ak->screen_note, FALSE);
+
+  g = ns_group (c, "Mode");
   GtkWidget *r = ns_row (g, NULL, NULL, "Ask every time", "Every action asks you before it runs");
   ak->ask_mark = mark_suffix (r);
   ns_row_on_activate (r, ask_clicked, ak);
