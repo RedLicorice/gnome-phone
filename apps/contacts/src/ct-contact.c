@@ -996,6 +996,8 @@ static const struct { const char *property; const char *protocol; } im_propertie
   { "X-GADUGADU", N_("Gadu-Gadu") },
   { "X-GROUPWISE", N_("GroupWise") },
   { "X-MATRIX", N_("Matrix") },
+  { "X-WHATSAPP", N_("WhatsApp") },
+  { "X-TELEGRAM", N_("Telegram") },
 };
 
 #define ANDROID_CUSTOM "X-ANDROID-CUSTOM"
@@ -1414,6 +1416,45 @@ ct_contact_set_items (EContact *contact, CtKind kind, GPtrArray *items)
       if (attr)
         e_vcard_append_attribute (vcard, attr);
     }
+}
+
+/* --- channel identities */
+
+char *
+ct_contact_get_channel (EContact *contact, const char *property)
+{
+  EVCardAttribute *attr = e_vcard_get_attribute (E_VCARD (contact), property);
+
+  return attr ? nth_value (attr, 0) : g_strdup ("");
+}
+
+void
+ct_contact_set_channel (EContact *contact, const char *property, const char *value)
+{
+  EVCard *vcard = E_VCARD (contact);
+  g_autofree char *text = trimmed (value);
+  EVCardAttribute *first = e_vcard_get_attribute (vcard, property);
+
+  if (!*text)
+    {
+      e_vcard_remove_attributes (vcard, NULL, property);
+      return;
+    }
+  if (first)
+    {
+      /* the first property stays as it is, its parameters too; a second one of the same name goes */
+      g_autoptr(GPtrArray) extra = g_ptr_array_new ();
+
+      e_vcard_attribute_remove_values (first);
+      e_vcard_attribute_add_value (first, text);
+      for (GList *l = e_vcard_get_attributes (vcard); l; l = l->next)
+        if (l->data != first && g_ascii_strcasecmp (e_vcard_attribute_get_name (l->data), property) == 0)
+          g_ptr_array_add (extra, l->data);
+      for (guint i = 0; i < extra->len; i++)
+        e_vcard_remove_attribute (vcard, extra->pdata[i]);
+      return;
+    }
+  e_vcard_append_attribute_with_value (vcard, e_vcard_attribute_new (NULL, property), text);
 }
 
 /* --- dates */

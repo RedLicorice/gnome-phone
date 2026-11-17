@@ -1,14 +1,15 @@
-/* QuickContact's Minerva card: the person of Minerva's people (Minerva's repository, people/) linked to the contact.
+/* QuickContact's Minerva section: everything Minerva keeps about the contact, on the contact's own page.
  *
- * Linked: her notebook ("Quaderno") in a box at most max_height_dp tall, Edit (a page with the whole text) and "Apri
- * in Persone" (Neo Settings' Persone page, through its launch-panel action). Not linked: "Collega a una persona",
- * a list of the people and "Nuova persona" (made with the contact's name), then linked.
+ * Her notebook (view, and Modifica in Neo Prompt); the channels, WhatsApp and Telegram, as IM rows of the contact
+ * (add, change, remove) and the Telegram invitation, not built yet, as a row that says so; whether her face and voice are known,
+ * recording and forgetting the voice, learning it with the PIN; the kind, the numbers (samples, sightings,
+ * confidence), merging a stranger's record into her, detaching and forgetting. A contact with no notebook is offered
+ * "Crea il notebook", or the link to a record Minerva already has (a stranger's).
  *
- * Everything goes through `minerva-config people … --json`, run by Neo Settings' own ns-mc.c, the same door
- * Settings > Minerva > Persone uses: the texts, sizes, poll interval and Settings' page are the "contacts" part of
- * `people ui` (config/minerva_config/people_ui.json); the person comes from `people by-contact`, the notebook is
- * read and written only by `people notebook`, the link made by `people create` and `people link`. While the card
- * shows, it asks again every poll_s seconds, so a notebook changed elsewhere shows here. */
+ * The person is the one linked to the contact's UID (`people by-contact`), and her name is the contact's. Everything
+ * goes through ct-mnv.h; the texts, sizes and poll interval are the data's. While the section shows it asks again
+ * every poll_s seconds, so a notebook changed elsewhere, or a voice being recorded, shows here. Slow actions show
+ * ct_busy's line. */
 #pragma once
 
 #include <gtk/gtk.h>

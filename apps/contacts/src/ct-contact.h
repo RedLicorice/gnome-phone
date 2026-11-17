@@ -157,6 +157,16 @@ GPtrArray *ct_contact_get_items (EContact *contact, CtKind kind);
 /* replaces every row of @kind with @items (empty ones are dropped); not for the read-only kinds */
 void       ct_contact_set_items (EContact *contact, CtKind kind, GPtrArray *items);
 
+/* --- channel identities
+ * What Minerva's messaging providers know a contact by (a WhatsApp number, a Telegram id) is an IM row of the
+ * contact in the address book, a vCard property of the @property name (X-WHATSAPP, X-TELEGRAM, …: the same
+ * convention as X-JABBER and X-SKYPE, which the IM rows above already read). Only that property is touched. */
+
+/* its first value, "" when the contact has none */
+char *ct_contact_get_channel (EContact *contact, const char *property);
+/* sets it (the first property keeps its parameters), or removes it when @value is empty */
+void  ct_contact_set_channel (EContact *contact, const char *property, const char *value);
+
 /* --- dates (§4.16, §10.4) */
 
 /* yyyy-MM-dd, --MM-dd, yyyyMMdd, --MMdd, with an optional time part after a T; @year 0 when the date has none */

@@ -380,13 +380,21 @@ on_toast_timeout (gpointer data)
 }
 
 void
-ct_window_toast (GtkWidget *window, const char *text)
+ct_window_toast_hold (GtkWidget *window, const char *text)
 {
   Shell *shell = shell_of (window);
 
   gtk_label_set_label (GTK_LABEL (shell->toast_label), text);
   g_clear_handle_id (&shell->toast_timeout, g_source_remove);
   neo_anim_start (shell->toast_anim, neo_anim_get_value (shell->toast_anim), 1, TOAST_FADE_MS, 0, SPONGY_LINEAR);
+}
+
+void
+ct_window_toast (GtkWidget *window, const char *text)
+{
+  Shell *shell = shell_of (window);
+
+  ct_window_toast_hold (window, text);
   shell->toast_timeout = g_timeout_add (TOAST_FADE_MS + CT_TOAST_SHORT_MS, on_toast_timeout, shell);
 }
 

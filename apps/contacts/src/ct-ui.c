@@ -1,5 +1,6 @@
 /* Shared pieces of the Contacts screens (ct-ui.h). */
 #include "ct-ui.h"
+#include "ct-mnv-core.h"
 
 #include <glib/gi18n.h>
 #include <math.h>
@@ -309,4 +310,106 @@ ct_contacts_count (guint count, const char *account)
   if (account)
     return g_strdup_printf (g_dngettext (NULL, "%u contact · %s", "%u contacts · %s", count), count, account);
   return g_strdup_printf (g_dngettext (NULL, "%u contact", "%u contacts", count), count);
+}
+
+/* ---- the busy line ---- */
+
+typedef struct {
+  GtkWidget *spinner, *label;
+  char *what, *slow;            /* "{s}" in @slow is the seconds so far */
+  guint slow_s, timer;
+  gint64 started;
+} Busy;
+
+static void
+busy_free (gpointer data)
+{
+  Busy *busy = data;
+
+  g_clear_handle_id (&busy->timer, g_source_remove);
+  g_free (busy->what);
+  g_free (busy->slow);
+  g_free (busy);
+}
+
+static void
+busy_draw (Busy *busy)
+{
+  guint seconds = (guint) ((g_get_monotonic_time () - busy->started) / G_USEC_PER_SEC);
+
+  if (busy->slow && *busy->slow && seconds >= busy->slow_s)
+    {
+      g_autofree char *count = g_strdup_printf ("%u", seconds);
+      g_autofree char *slow = NULL;
+      const char *const pairs[] = { "s", count, NULL };
+
+      slow = ct_mnv_format (busy->slow, pairs);
+      gtk_label_set_text (GTK_LABEL (busy->label), slow);
+    }
+  else
+    gtk_label_set_text (GTK_LABEL (busy->label), busy->what);
+}
+
+static gboolean
+busy_tick (gpointer data)
+{
+  busy_draw (data);
+  return G_SOURCE_CONTINUE;
+}
+
+GtkWidget *
+ct_busy_new (void)
+{
+  Busy *busy = g_new0 (Busy, 1);
+  GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 12);
+
+  busy->spinner = gtk_spinner_new ();
+  busy->label = ct_label ("", "ct-busy-text", 14);
+  gtk_label_set_wrap (GTK_LABEL (busy->label), TRUE);
+  gtk_label_set_xalign (GTK_LABEL (busy->label), 0);
+  gtk_widget_set_hexpand (busy->label, TRUE);
+  gtk_box_append (GTK_BOX (box), busy->spinner);
+  gtk_box_append (GTK_BOX (box), busy->label);
+  gtk_widget_add_css_class (box, "ct-busy");
+  gtk_widget_set_visible (box, FALSE);
+  g_object_set_data_full (G_OBJECT (box), "ct-busy", busy, busy_free);
+  return box;
+}
+
+void
+ct_busy_start (GtkWidget *box, const char *what, const char *slow, guint slow_s)
+{
+  Busy *busy = g_object_get_data (G_OBJECT (box), "ct-busy");
+  gboolean same = busy->timer && !g_strcmp0 (busy->what, what);
+
+  g_free (busy->what);
+  g_free (busy->slow);
+  busy->what = g_strdup (what ? what : "");
+  busy->slow = g_strdup (slow);
+  busy->slow_s = slow_s;
+  if (!same)
+    busy->started = g_get_monotonic_time ();      /* asked again with the same line: the clock keeps running */
+  if (!busy->timer)
+    busy->timer = g_timeout_add_seconds (1, busy_tick, busy);
+  gtk_spinner_start (GTK_SPINNER (busy->spinner));
+  gtk_widget_set_visible (box, TRUE);
+  busy_draw (busy);
+}
+
+void
+ct_busy_stop (GtkWidget *box)
+{
+  Busy *busy = g_object_get_data (G_OBJECT (box), "ct-busy");
+
+  g_clear_handle_id (&busy->timer, g_source_remove);
+  gtk_spinner_stop (GTK_SPINNER (busy->spinner));
+  gtk_widget_set_visible (box, FALSE);
+}
+
+gboolean
+ct_busy_active (GtkWidget *box)
+{
+  Busy *busy = g_object_get_data (G_OBJECT (box), "ct-busy");
+
+  return busy->timer != 0;
 }

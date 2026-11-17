@@ -34,8 +34,8 @@
 
 /* ===== a preference row (preference_material.xml) =============================================================== */
 
-static GtkWidget *
-pref_row (const char *title, const char *summary, GtkWidget **summary_label, GCallback clicked, gpointer data)
+GtkWidget *
+ct_pref_row (const char *title, const char *summary, GtkWidget **summary_label, GCallback clicked, gpointer data)
 {
   GtkWidget *lines = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
   GtkWidget *row = neo_pressable_new (lines);
@@ -60,8 +60,8 @@ pref_row (const char *title, const char *summary, GtkWidget **summary_label, GCa
   return row;
 }
 
-static void
-set_summary (GtkWidget *label, const char *text)
+void
+ct_pref_set_summary (GtkWidget *label, const char *text)
 {
   gtk_label_set_label (GTK_LABEL (label), text ? text : "");
   gtk_widget_set_visible (label, text && *text);
@@ -116,17 +116,17 @@ update (Settings *s)
     {
       g_autofree char *name = ct_contact_display_name (profile, ct_display_order (s->settings));
 
-      set_summary (s->my_info_summary, *name ? name : _("(No name)"));
+      ct_pref_set_summary (s->my_info_summary, *name ? name : _("(No name)"));
     }
   else
-    set_summary (s->my_info_summary, _("Set up your profile"));
+    ct_pref_set_summary (s->my_info_summary, _("Set up your profile"));
   gtk_widget_set_visible (s->my_info, ct_store_can_have_profile (s->store));
-  set_summary (s->default_summary, book ? ct_book_label (book) : NULL);
-  set_summary (s->filter_summary, g_str_equal (filter, "custom") ? _("Customized view") : _("All contacts"));
-  set_summary (s->sort_summary, ct_sort_order (s->settings) == CT_ORDER_PRIMARY ? _("First name") : _("Last name"));
-  set_summary (s->format_summary, ct_display_order (s->settings) == CT_ORDER_PRIMARY ? _("First name first")
+  ct_pref_set_summary (s->default_summary, book ? ct_book_label (book) : NULL);
+  ct_pref_set_summary (s->filter_summary, g_str_equal (filter, "custom") ? _("Customized view") : _("All contacts"));
+  ct_pref_set_summary (s->sort_summary, ct_sort_order (s->settings) == CT_ORDER_PRIMARY ? _("First name") : _("Last name"));
+  ct_pref_set_summary (s->format_summary, ct_display_order (s->settings) == CT_ORDER_PRIMARY ? _("First name first")
                                                                                     : _("Last name first"));
-  set_summary (s->phonetic_summary, g_str_equal (phonetic, "always") ? _("Always show") : _("Hide if empty"));
+  ct_pref_set_summary (s->phonetic_summary, g_str_equal (phonetic, "always") ? _("Always show") : _("Hide if empty"));
   /* Export is removed when there are no contacts to export (removeUnsupportedPreferences) */
   gtk_widget_set_visible (s->export_row, ct_store_count (s->store) > 0);
 }
@@ -420,27 +420,27 @@ ct_settings_new (GtkWidget *window)
                                                    _("Settings"), NULL, &s->title));
 
   rows = s->main_rows = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-  s->my_info = pref_row (_("My info"), NULL, &s->my_info_summary, G_CALLBACK (on_my_info), s);
+  s->my_info = ct_pref_row (_("My info"), NULL, &s->my_info_summary, G_CALLBACK (on_my_info), s);
   gtk_box_append (GTK_BOX (rows), s->my_info);
   if (have_gnome_settings ())
-    gtk_box_append (GTK_BOX (rows), pref_row (_("Accounts"), NULL, NULL, G_CALLBACK (on_accounts), s));
-  s->default_row = pref_row (_("Default account for new contacts"), NULL, &s->default_summary,
+    gtk_box_append (GTK_BOX (rows), ct_pref_row (_("Accounts"), NULL, NULL, G_CALLBACK (on_accounts), s));
+  s->default_row = ct_pref_row (_("Default account for new contacts"), NULL, &s->default_summary,
                              G_CALLBACK (on_default_account), s);
   gtk_box_append (GTK_BOX (rows), s->default_row);
-  gtk_box_append (GTK_BOX (rows), pref_row (_("Contacts to display"), NULL, &s->filter_summary,
+  gtk_box_append (GTK_BOX (rows), ct_pref_row (_("Contacts to display"), NULL, &s->filter_summary,
                                             G_CALLBACK (on_filter), s));
-  gtk_box_append (GTK_BOX (rows), pref_row (_("Sort by"), NULL, &s->sort_summary, G_CALLBACK (on_sort), s));
-  gtk_box_append (GTK_BOX (rows), pref_row (_("Name format"), NULL, &s->format_summary, G_CALLBACK (on_format), s));
-  gtk_box_append (GTK_BOX (rows), pref_row (_("Phonetic name"), NULL, &s->phonetic_summary,
+  gtk_box_append (GTK_BOX (rows), ct_pref_row (_("Sort by"), NULL, &s->sort_summary, G_CALLBACK (on_sort), s));
+  gtk_box_append (GTK_BOX (rows), ct_pref_row (_("Name format"), NULL, &s->format_summary, G_CALLBACK (on_format), s));
+  gtk_box_append (GTK_BOX (rows), ct_pref_row (_("Phonetic name"), NULL, &s->phonetic_summary,
                                             G_CALLBACK (on_phonetic), s));
-  gtk_box_append (GTK_BOX (rows), pref_row (_("Import"), NULL, NULL, G_CALLBACK (on_import), s));
-  s->export_row = pref_row (_("Export"), NULL, NULL, G_CALLBACK (on_export), s);
+  gtk_box_append (GTK_BOX (rows), ct_pref_row (_("Import"), NULL, NULL, G_CALLBACK (on_import), s));
+  s->export_row = ct_pref_row (_("Export"), NULL, NULL, G_CALLBACK (on_export), s);
   gtk_box_append (GTK_BOX (rows), s->export_row);
-  gtk_box_append (GTK_BOX (rows), pref_row (_("About Contacts"), NULL, NULL, G_CALLBACK (on_about), s));
+  gtk_box_append (GTK_BOX (rows), ct_pref_row (_("About Contacts"), NULL, NULL, G_CALLBACK (on_about), s));
   gtk_box_append (GTK_BOX (content), rows);
 
   s->about_rows = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-  gtk_box_append (GTK_BOX (s->about_rows), pref_row (_("Build version"), CT_VERSION, NULL, NULL, NULL));
+  gtk_box_append (GTK_BOX (s->about_rows), ct_pref_row (_("Build version"), CT_VERSION, NULL, NULL, NULL));
   gtk_widget_set_visible (s->about_rows, FALSE);
   gtk_box_append (GTK_BOX (content), s->about_rows);
 

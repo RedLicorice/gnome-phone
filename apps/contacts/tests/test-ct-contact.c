@@ -327,6 +327,43 @@ test_dates (void)
 }
 
 static void
+test_channels (void)
+{
+  g_autoptr(EContact) contact = e_contact_new_from_vcard (
+    "BEGIN:VCARD\nVERSION:3.0\nUID:u1\nFN:Andrea\nX-JABBER:andrea@example.org\nX-WHATSAPP;X-ABLabel=old:+39333\n"
+    "X-WHATSAPP:+39000\nEND:VCARD\n");
+  g_autoptr(GPtrArray) im = NULL;
+  g_autofree char *wa = ct_contact_get_channel (contact, "X-WHATSAPP");
+  g_autofree char *tg = ct_contact_get_channel (contact, "X-TELEGRAM");
+  g_autofree char *text = NULL;
+
+  g_assert_cmpstr (wa, ==, "+39333");
+  g_assert_cmpstr (tg, ==, "");
+  ct_contact_set_channel (contact, "X-WHATSAPP", " +39111 ");
+  ct_contact_set_channel (contact, "X-TELEGRAM", "123456");
+  text = e_vcard_to_string (E_VCARD (contact), EVC_FORMAT_VCARD_30);
+  g_assert_nonnull (strstr (text, "X-ABLabel=old"));      /* the first property keeps its parameters */
+  g_assert_null (strstr (text, "+39000"));                /* and the duplicate is gone */
+  g_assert_nonnull (strstr (text, "X-JABBER"));           /* the other IM rows are not touched */
+  im = ct_contact_get_items (contact, CT_KIND_IM);
+  g_assert_cmpuint (im->len, ==, 3);
+  {
+    CtItem *whatsapp = im->pdata[1], *telegram = im->pdata[2];
+
+    g_assert_cmpstr (whatsapp->value2, ==, "WhatsApp");
+    g_assert_cmpstr (whatsapp->value, ==, "+39111");
+    g_assert_cmpstr (telegram->value2, ==, "Telegram");
+  }
+  ct_contact_set_channel (contact, "X-WHATSAPP", "  ");
+  g_free (wa);
+  wa = ct_contact_get_channel (contact, "X-WHATSAPP");
+  g_assert_cmpstr (wa, ==, "");
+  g_clear_pointer (&im, g_ptr_array_unref);
+  im = ct_contact_get_items (contact, CT_KIND_IM);
+  g_assert_cmpuint (im->len, ==, 2);
+}
+
+static void
 test_word_prefix (void)
 {
   g_assert_cmpint (ct_index_of_word_prefix ("John Smith", "SM"), ==, 5);
@@ -402,6 +439,7 @@ main (int argc, char **argv)
   g_test_add_func ("/contact/items-round-trip", test_items_round_trip);
   g_test_add_func ("/contact/organization", test_organization);
   g_test_add_func ("/contact/dates", test_dates);
+  g_test_add_func ("/contact/channels", test_channels);
   g_test_add_func ("/contact/word-prefix", test_word_prefix);
   g_test_add_func ("/contact/search", test_search);
   return g_test_run ();

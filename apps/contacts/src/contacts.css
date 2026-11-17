@@ -473,6 +473,43 @@ text.ct-ed-text {
   color: #959595;
 }
 
+/* ---- the Minerva parts: the section of QuickContact, the strangers and the rules ---- */
+
+.ct-qc-minerva-heading {
+  padding-top: 16px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #81b5bc;
+}
+
+.ct-qc-entry-off {
+  opacity: 0.6;
+}
+
+.ct-pref-category {
+  padding: 16px 16px 4px 16px;
+  font-size: 14px;
+  font-weight: 800;
+  color: #81b5bc;
+}
+
+.ct-pref-note {
+  padding: 8px 16px 8px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #959595;
+}
+
+.ct-busy {
+  padding: 12px 20px;
+}
+
+.ct-busy-text {
+  font-size: 14px;
+  font-weight: 700;
+  color: #959595;
+}
+
 .ct-filter-row {
   min-height: 48px;
   padding: 0 16px 0 16px;

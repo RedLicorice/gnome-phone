@@ -8,6 +8,8 @@
 #include "ct-avatar.h"
 #include "ct-dialogs.h"
 #include "ct-list.h"
+#include "ct-minerva-pages.h"
+#include "ct-mnv.h"
 #include "ct-page.h"
 #include "ct-picker.h"
 #include "ct-popup.h"
@@ -1043,6 +1045,8 @@ typedef enum {
   ITEM_CREATE_LABEL,
   ITEM_ACCOUNT,
   ITEM_SETTINGS,
+  ITEM_STRANGERS,
+  ITEM_MINERVA,
 } ItemKind;
 
 static void
@@ -1090,6 +1094,12 @@ on_drawer_item (NeoPressable *row, People *people)
       break;
     case ITEM_SETTINGS:
       ct_window_push (people->window, ct_settings_new (people->window));
+      break;
+    case ITEM_STRANGERS:
+      ct_window_push (people->window, ct_strangers_new (people->window));
+      break;
+    case ITEM_MINERVA:
+      ct_window_push (people->window, ct_minerva_settings_new (people->window));
       break;
     }
 }
@@ -1252,6 +1262,15 @@ rebuild_drawer (People *people)
                                        FALSE));
         }
     }
+  /* Minerva's people that are not contacts, and her rules: only where minerva-config answered with its texts */
+  if (ct_mnv_available () && ct_mnv_ui_ready ())
+    {
+      drawer_header (items, ct_mnv_text ("title"));
+      gtk_box_append (GTK_BOX (items), drawer_item (people, ITEM_STRANGERS, "avatar-default-symbolic",
+                                                    ct_mnv_text ("strangers"), NULL, FALSE, FALSE));
+      gtk_box_append (GTK_BOX (items), drawer_item (people, ITEM_MINERVA, "preferences-system-symbolic",
+                                                    ct_mnv_text ("settings_title"), NULL, FALSE, FALSE));
+    }
   gtk_box_append (GTK_BOX (items), drawer_divider ());
   gtk_box_append (GTK_BOX (items), drawer_item (people, ITEM_SETTINGS, "ct-settings-symbolic", _("Settings"), NULL,
                                                 FALSE, TRUE));
@@ -1264,6 +1283,14 @@ static void
 on_profile_changed (CtStore *store, People *people)
 {
   rebuild_drawer (people);
+}
+
+/* `people ui` answered: the Minerva entries can show */
+static void
+on_mnv_ui (JsonObject *root, const char *err, gpointer data)
+{
+  if (!err)
+    rebuild_drawer (data);
 }
 
 /* the drawer's layer: the sheet is placed by its offset (CtDrawer below), the scrim fills the rest */
@@ -1606,5 +1633,7 @@ ct_people_new (GtkWidget *window)
   rebuild_drawer (people);
   place_drawer (people);
   refresh (people, TRUE);
+  if (ct_mnv_available ())
+    ct_mnv_ui_load (G_OBJECT (page), on_mnv_ui, people);
   return page;
 }

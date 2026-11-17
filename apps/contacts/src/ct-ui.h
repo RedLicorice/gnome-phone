@@ -62,4 +62,13 @@ GPtrArray  *ct_shown_entries (CtStore *store, GSettings *settings);
 /* ICU's {count, plural, =1 {# contact} other {# contacts}} for the two forms the app has */
 char       *ct_contacts_count (guint count, const char *account);
 
+/* The busy line of anything that is not instant (enrolling a voice, merging, creating a notebook): a spinner and
+ * what is being done, hidden until ct_busy_start. After @slow_s seconds the line becomes @slow ("{s}" is the seconds so
+ * far), so a long wait says it is still going. Starting it again with the same @what keeps the clock. The texts are
+ * the caller's (data). */
+GtkWidget *ct_busy_new    (void);
+void       ct_busy_start  (GtkWidget *busy, const char *what, const char *slow, guint slow_s);
+void       ct_busy_stop   (GtkWidget *busy);
+gboolean   ct_busy_active (GtkWidget *busy);
+
 G_END_DECLS
