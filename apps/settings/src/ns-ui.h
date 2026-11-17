@@ -85,6 +85,30 @@ GtkWidget *ns_note (GtkWidget *content, const char *text);
 void       ns_group_clear (GtkWidget *group);
 void       ns_group_set_visible (GtkWidget *group, gboolean visible);
 
+/* Feedback for anything that is not instant and runs in the background. One card, hidden until ns_busy_start: a
+ * spinner and one line saying what is being done; after `slow_s` seconds the card also says "still going" with the
+ * seconds and offers the Cancel and Retry rows that were given. Every text is the caller's (data). Starting it again
+ * while it runs keeps the clock, so a page may call it on every poll. */
+typedef struct _NsBusy NsBusy;
+typedef void (*NsBusyFn) (gpointer data);
+typedef struct {
+  const char *what;           /* "Asking WhatsApp for a code…" */
+  const char *slow;           /* printf format with one %u, the seconds: "Still going… %u s" */
+  const char *cancel;         /* label of the Cancel row, or NULL for none */
+  const char *retry;          /* label of the Retry row, or NULL for none */
+  guint       slow_s;         /* seconds before the "still going" line and the rows appear */
+  NsBusyFn    on_cancel;
+  NsBusyFn    on_retry;
+  gpointer    data;
+} NsBusyText;
+/* the card is added to `content` (it lives and dies with it) */
+NsBusy    *ns_busy_new (GtkWidget *content);
+void       ns_busy_start (NsBusy *b, const NsBusyText *t);
+/* the clock starts over and the rows go away: the action was asked again */
+void       ns_busy_restart (NsBusy *b);
+void       ns_busy_stop (NsBusy *b);
+gboolean   ns_busy_active (NsBusy *b);
+
 /* dialogs over `parent`'s window. ns_ask: a line of text, `done` gets it, or NULL when cancelled */
 void       ns_ask (GtkWidget *parent, const char *heading, const char *body, const char *initial, gboolean secret,
                    const char *ok, NsEntered done, gpointer data);

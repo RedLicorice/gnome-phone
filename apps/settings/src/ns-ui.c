@@ -1,5 +1,6 @@
 /* Neo Settings' building blocks (see ns-ui.h). */
 #include "ns-ui.h"
+#include <string.h>
 #include "ns-look.h"
 
 #include <math.h>
@@ -1029,6 +1030,140 @@ ns_row_value_set (GtkWidget *row, const char *value)
   g_free (v->value);
   v->value = g_strdup (value);
   value_show (v);
+}
+
+/* ---- background actions: one spinner card ---- */
+
+struct _NsBusy {
+  GtkWidget *group, *row, *spinner, *cancel_row, *retry_row;
+  guint      timer;
+  gint64     t0;      /* monotonic µs: when the action began */
+  gboolean   active;
+  NsBusyText t;       /* the strings are the card's own copies */
+};
+
+static void
+busy_text_clear (NsBusy *b)
+{
+  g_free ((char *) b->t.what);
+  g_free ((char *) b->t.slow);
+  g_free ((char *) b->t.cancel);
+  g_free ((char *) b->t.retry);
+  memset (&b->t, 0, sizeof b->t);
+}
+
+static void
+busy_free (NsBusy *b)
+{
+  if (b->timer)
+    g_source_remove (b->timer);
+  busy_text_clear (b);
+  g_free (b);
+}
+
+static void
+busy_set_title (GtkWidget *row, const char *text)
+{
+  gtk_label_set_text (GTK_LABEL (g_object_get_data (G_OBJECT (row), "ns-title-label")), text ? text : "");
+}
+
+static void
+busy_draw (NsBusy *b)
+{
+  guint secs = (guint) ((g_get_monotonic_time () - b->t0) / G_USEC_PER_SEC);
+  gboolean slow = secs >= b->t.slow_s;
+  g_autofree char *line = slow && b->t.slow ? g_strdup_printf (b->t.slow, secs) : NULL;
+  ns_row_set_subtitle (b->row, line);
+  gtk_widget_set_visible (b->cancel_row, slow && b->t.cancel && b->t.on_cancel);
+  gtk_widget_set_visible (b->retry_row, slow && b->t.retry && b->t.on_retry);
+}
+
+static gboolean
+busy_tick (gpointer data)
+{
+  busy_draw (data);
+  return G_SOURCE_CONTINUE;
+}
+
+static void
+busy_cancel_tapped (GtkWidget *row, gpointer data)
+{
+  NsBusy *b = data;
+  if (b->t.on_cancel)
+    b->t.on_cancel (b->t.data);
+}
+
+static void
+busy_retry_tapped (GtkWidget *row, gpointer data)
+{
+  NsBusy *b = data;
+  if (b->t.on_retry)
+    b->t.on_retry (b->t.data);
+}
+
+NsBusy *
+ns_busy_new (GtkWidget *content)
+{
+  NsBusy *b = g_new0 (NsBusy, 1);
+  b->group = ns_group (content, NULL);
+  b->row = ns_row (b->group, NULL, NULL, "", NULL);
+  gtk_widget_set_focusable (b->row, FALSE);
+  b->spinner = gtk_spinner_new ();
+  ns_row_suffix (b->row, b->spinner);
+  b->cancel_row = ns_row_button (b->group, "", FALSE, busy_cancel_tapped, b);
+  b->retry_row = ns_row_button (b->group, "", FALSE, busy_retry_tapped, b);
+  gtk_widget_set_visible (b->cancel_row, FALSE);
+  gtk_widget_set_visible (b->retry_row, FALSE);
+  ns_group_set_visible (b->group, FALSE);
+  g_object_set_data_full (G_OBJECT (b->group), "ns-busy", b, (GDestroyNotify) busy_free);
+  return b;
+}
+
+void
+ns_busy_start (NsBusy *b, const NsBusyText *t)
+{
+  gboolean same = b->active && !g_strcmp0 (b->t.what, t->what);
+  busy_text_clear (b);
+  b->t = *t;
+  b->t.what = g_strdup (t->what);
+  b->t.slow = g_strdup (t->slow);
+  b->t.cancel = g_strdup (t->cancel);
+  b->t.retry = g_strdup (t->retry);
+  busy_set_title (b->row, b->t.what);
+  busy_set_title (b->cancel_row, b->t.cancel);
+  busy_set_title (b->retry_row, b->t.retry);
+  if (!same)
+    b->t0 = g_get_monotonic_time ();
+  b->active = TRUE;
+  gtk_spinner_start (GTK_SPINNER (b->spinner));
+  ns_group_set_visible (b->group, TRUE);
+  if (!b->timer)
+    b->timer = g_timeout_add_seconds (1, busy_tick, b);
+  busy_draw (b);
+}
+
+void
+ns_busy_restart (NsBusy *b)
+{
+  b->t0 = g_get_monotonic_time ();
+  busy_draw (b);
+}
+
+void
+ns_busy_stop (NsBusy *b)
+{
+  if (b->timer)
+    g_source_remove (b->timer);
+  b->timer = 0;
+  b->active = FALSE;
+  gtk_spinner_stop (GTK_SPINNER (b->spinner));
+  ns_group_set_visible (b->group, FALSE);
+}
+
+gboolean
+ns_busy_active (NsBusy *b)
+{
+  return b->active;
 }
 
 /* ---- notes and cards ---- */

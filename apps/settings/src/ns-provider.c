@@ -30,6 +30,14 @@ say (GtkWidget *label, const char *text, gboolean error)
     gtk_widget_remove_css_class (label, "ns-danger");
 }
 
+/* a limit of messaging.conf: `messaging list` hands them over as the strings the file has */
+static guint
+limit_of (JsonObject *limits, const char *key, guint fallback)
+{
+  const char *text = str_of (limits, key);
+  return *text ? (guint) g_ascii_strtoull (text, NULL, 10) : fallback;
+}
+
 static const char *
 bad_of (JsonObject *root, const char *err, JsonObject *ui)
 {
@@ -41,16 +49,28 @@ bad_of (JsonObject *root, const char *err, JsonObject *ui)
 }
 
 /* the data's words for a provider of that pairing kind in that state: messaging_ui.json "pairing_kinds" > kind >
- * "state:label" (the daemon's own label, "offline:token mancante"), else "state". Members: status (the state's
- * name), hint (what the owner does now), action (qr | scan | token), button (the action's row), wait (before the
- * code is there) */
+ * "state:label" (the daemon's own label, "offline:token mancante"), else "state"; for an account that is already
+ * linked the same keys with "paired:" in front come first. Members: status (the state's name), hint (what the owner
+ * does now), action (start | qr | busy | scan | token), button (the action's row), wait (what is being done while the
+ * answer is awaited), cancel and retry (the labels of the rows offered when it takes long) */
 static JsonObject *
-entry_of (JsonObject *ui, const char *kind, const char *state, const char *label)
+entry_of (JsonObject *ui, const char *kind, const char *state, const char *label, gboolean paired)
 {
   JsonObject *k = obj_of (obj_of (ui, "pairing_kinds"), kind ? kind : "");
-  g_autofree char *key = g_strdup_printf ("%s:%s", state ? state : "", label ? label : "");
-  JsonObject *e = obj_of (k, key);
-  return e ? e : obj_of (k, state ? state : "");
+  state = state ? state : "";
+  label = label ? label : "";
+  JsonObject *e;
+  if (paired) {
+    g_autofree char *pkey = g_strdup_printf ("paired:%s:%s", state, label);
+    if ((e = obj_of (k, pkey)))
+      return e;
+    g_autofree char *skey = g_strdup_printf ("paired:%s", state);
+    if ((e = obj_of (k, skey)))
+      return e;
+  }
+  g_autofree char *key = g_strdup_printf ("%s:%s", state, label);
+  e = obj_of (k, key);
+  return e ? e : obj_of (k, state);
 }
 
 /* what a status answer says, in the data's words: the state ("Collegato"), and the daemon's own label after it
@@ -65,7 +85,8 @@ status_text (JsonObject *root, const char *err, JsonObject *ui, const char *kind
   if (!*state)
     state = str_of (root, "status");
   const char *label = str_of (root, "label");
-  const char *word = str_of (entry_of (ui, kind, state, label), "status");
+  gboolean paired = json_object_get_boolean_member_with_default (root, "paired", FALSE);
+  const char *word = str_of (entry_of (ui, kind, state, label, paired), "status");
   if (!*word)
     word = *state ? str_of (obj_of (ui, "states"), state) : "";
   if (!*word)
@@ -87,6 +108,7 @@ typedef struct {
   GObject           *owner;
   AdwNavigationPage *page;
   GtkWidget         *content, *msg, *group;
+  NsBusy            *busy;
   JsonObject        *ui;
   GPtrArray         *rows;   /* ProviderRow* */
 } Index;
@@ -128,6 +150,7 @@ static void
 index_loaded (JsonObject *root, const char *err, gpointer data)
 {
   Index *ix = data;
+  ns_busy_stop (ix->busy);
   const char *bad = bad_of (root, err, ix->ui);
   if (bad) {
     say (ix->msg, bad, TRUE);
@@ -159,10 +182,14 @@ index_ui_done (JsonObject *root, const char *err, gpointer data)
 {
   Index *ix = data;
   if (err || !ok_of (root)) {
+    ns_busy_stop (ix->busy);
     say (ix->msg, err ? err : str_of (obj_of (ix->ui, "labels"), "error"), TRUE);
     return;
   }
   ix->ui = json_object_ref (root);
+  /* local and quick: the line saying what it does, without the seconds (the limits come with the list) */
+  NsBusyText loading = { .what = str_of (obj_of (root, "labels"), "loading_providers") };
+  ns_busy_start (ix->busy, &loading);
   const char *title = str_of (root, "title");
   if (*title)
     ns_page_set_title (ix->page, title);
@@ -184,6 +211,9 @@ ns_page_messaging (GtkWidget *row, gpointer data)
   g_object_set_data_full (G_OBJECT (page), "mp-index", ix, (GDestroyNotify) index_free);
   ix->msg = ns_note (c, "");
   gtk_widget_set_visible (ix->msg, FALSE);
+  ix->busy = ns_busy_new (c);
+  NsBusyText wait = { .what = "" };   /* the words are what is being loaded: the spinner alone until they are here */
+  ns_busy_start (ix->busy, &wait);
   const char *args[] = { "messaging", "ui", "--json", NULL };
   ns_mc_run (ix->owner, args, NULL, index_ui_done, ix);
   ns_push (page);
@@ -197,17 +227,21 @@ typedef struct {
   GtkWidget         *content, *msg;
   char              *id, *label;
   JsonObject        *ui;
-  GtkWidget         *status_g, *status_row, *pair_g, *qr_row, *picture, *hint, *wait_row, *scan_row, *token_row, *retry_row;
+  GtkWidget         *status_g, *status_row, *pair_g, *qr_row, *picture, *hint, *start_row, *scan_row, *token_row;
+  NsBusy            *busy;        /* what is being waited for: the code, the connection, the camera, the disconnect */
   GtkWidget         *read_row, *write_row, *unread_row, *ask_row, *whitelist_row;
   GBytes            *qr_bytes;    /* what it held: a new one only when the bytes change */
   GStrv              order;       /* the scopes, in the order the pickers show them */
   GStrv              scope_names; /* their labels, in that order */
   GStrv              whitelist;
-  guint              poll_id, poll_s, stuck_s;
-  gint64             idle_since;  /* monotonic µs: since when the page has seen neither a code nor a connection */
+  guint              poll_id, poll_s, slow_s;
   char              *kind;        /* the pairing kind of messaging.conf ("" when the provider does not pair) */
   char              *state, *word; /* the last status: its state and the daemon's own label */
-  gboolean           scanning;
+  gboolean           paired;      /* the account is linked (the daemon says so) */
+  gboolean           asked;       /* the owner tapped the button and the provider has not answered with a state yet */
+  gint64             asked_at;    /* monotonic µs */
+  char              *doing;       /* an action of the page that is running (the disconnect): its words, over the rest */
+  GSubprocess       *camera;      /* neo-camera --scan while it runs */
 } Prov;
 
 static void prov_refresh_status (Prov *p);
@@ -227,6 +261,8 @@ prov_free (Prov *p)
   g_free (p->kind);
   g_free (p->state);
   g_free (p->word);
+  g_free (p->doing);
+  g_clear_object (&p->camera);
   g_strfreev (p->order);
   g_strfreev (p->scope_names);
   g_strfreev (p->whitelist);
@@ -257,7 +293,7 @@ prov_saved (JsonObject *root, const char *err, gpointer data)
 static JsonObject *
 prov_entry (Prov *p)
 {
-  return entry_of (p->ui, p->kind, p->state, p->word);
+  return entry_of (p->ui, p->kind, p->state, p->word, p->paired);
 }
 
 static gboolean
@@ -317,10 +353,7 @@ qr_draw (Prov *p, const char *png_b64, const char *svg)
   }
   qr_forget (p);
   p->qr_bytes = g_bytes_ref (fresh);
-  p->idle_since = g_get_monotonic_time ();
 }
-
-static void prov_refresh_status (Prov *p);
 
 static void
 token_open (GtkWidget *row, gpointer data)
@@ -332,31 +365,60 @@ token_open (GtkWidget *row, gpointer data)
   ns_push (page);
 }
 
-static gboolean
-prov_stuck (Prov *p)
-{
-  return !p->qr_bytes && p->stuck_s && (g_get_monotonic_time () - p->idle_since) / G_USEC_PER_SEC >= p->stuck_s;
-}
-
+/* a command of the provider whose answer only matters when it failed; the poll shows the rest */
 static void
-retry_done (JsonObject *root, const char *err, gpointer data)
+prov_told (JsonObject *root, const char *err, gpointer data)
 {
   Prov *p = data;
   const char *bad = bad_of (root, err, p->ui);
-  say (p->msg, bad ? bad : prov_text (p, "labels", "retrying"), bad != NULL);
-  p->idle_since = g_get_monotonic_time ();
+  if (bad) {
+    say (p->msg, bad, TRUE);
+    p->asked = FALSE;
+  }
   prov_refresh_status (p);
 }
 
-/* "Riprova": the provider drops its connection and starts a clean one now; the session stays */
 static void
-retry_open (GtkWidget *row, gpointer data)
+prov_tell (Prov *p, const char *verb)
+{
+  const char *args[] = { "messaging", verb, p->id, "--json", NULL };
+  ns_mc_run (p->owner, args, NULL, prov_told, p);
+}
+
+static void prov_apply (Prov *p);
+
+/* "Collega": one pairing session of the provider, with a code for as long as this page keeps asking */
+static void
+start_open (GtkWidget *row, gpointer data)
 {
   Prov *p = data;
-  const char *args[] = { "messaging", "reconnect", p->id, "--json", NULL };
-  say (p->msg, prov_text (p, "labels", "retrying"), FALSE);
-  p->idle_since = g_get_monotonic_time ();
-  ns_mc_run (p->owner, args, NULL, retry_done, p);
+  say (p->msg, "", FALSE);
+  p->asked = TRUE;
+  p->asked_at = g_get_monotonic_time ();
+  prov_apply (p);   /* the card now, not when the provider has answered */
+  prov_tell (p, "pair-start");
+}
+
+/* the card's Cancel: the session is closed and the provider leaves the network alone */
+static void
+busy_cancel (gpointer data)
+{
+  Prov *p = data;
+  p->asked = FALSE;
+  if (p->camera)
+    g_subprocess_force_exit (p->camera);
+  else
+    prov_tell (p, "pair-stop");
+  prov_apply (p);
+}
+
+/* the card's Riprova: the provider drops its connection and starts a clean one now; the session stays */
+static void
+busy_retry (gpointer data)
+{
+  Prov *p = data;
+  ns_busy_restart (p->busy);
+  prov_tell (p, "reconnect");
 }
 
 /* the camera's process ended: the pairing may be done (a camera that was running already hands the scan over and
@@ -369,7 +431,8 @@ camera_exited (GObject *src, GAsyncResult *res, gpointer data)
   g_autoptr (GError) e = NULL;
   g_subprocess_wait_finish (G_SUBPROCESS (src), res, &e);
   if (p) {
-    p->scanning = FALSE;
+    g_clear_object (&p->camera);
+    prov_apply (p);
     prov_refresh_status (p);
   }
   g_object_unref (page);
@@ -380,7 +443,7 @@ scan_open (GtkWidget *row, gpointer data)
 {
   Prov *p = data;
   g_autoptr (GError) err = NULL;
-  if (p->scanning)
+  if (p->camera)
     return;
   GSubprocess *proc = g_subprocess_new (G_SUBPROCESS_FLAGS_NONE, &err, "neo-camera", "--scan", NULL);
   if (!proc) {
@@ -388,9 +451,9 @@ scan_open (GtkWidget *row, gpointer data)
     return;
   }
   say (p->msg, "", FALSE);
-  p->scanning = TRUE;
+  p->camera = proc;
   g_subprocess_wait_async (proc, NULL, camera_exited, g_object_ref (p->page));
-  g_object_unref (proc);
+  prov_apply (p);
 }
 
 static void
@@ -400,37 +463,52 @@ row_show (GtkWidget *row, gboolean on)
     gtk_widget_set_visible (row, on);
 }
 
-/* the section as the data says it is for the state the provider is in */
+/* the card of what is being waited for, with the words of the data's entry for the state (wait, cancel, retry) */
+static void
+prov_wait (Prov *p, const char *what, const char *cancel, const char *retry)
+{
+  NsBusyText t = { .what = what, .slow = prov_text (p, "labels", "busy_slow"), .slow_s = p->slow_s,
+                   .cancel = cancel && *cancel ? cancel : NULL, .retry = retry && *retry ? retry : NULL,
+                   .on_cancel = busy_cancel, .on_retry = busy_retry, .data = p };
+  ns_busy_start (p->busy, &t);
+}
+
+/* the section as the data says it is for the state the provider is in. An action of the page that runs (the
+ * disconnect) is all it shows */
 static void
 prov_apply (Prov *p)
 {
   if (!prov_pairs (p) || !p->pair_g)
     return;
+  if (p->doing) {
+    prov_wait (p, p->doing, NULL, NULL);
+    row_show (p->hint, FALSE);
+    ns_group_set_visible (p->pair_g, FALSE);
+    return;
+  }
   JsonObject *e = prov_entry (p);
   const char *hint = str_of (e, "hint"), *action = str_of (e, "action"), *button = str_of (e, "button");
-  const char *retry = str_of (e, "retry"), *late = str_of (e, "late_hint");
-  gboolean stuck = *retry && prov_stuck (p);
-  if (stuck && *late)
-    hint = late;
-  gboolean qr = !g_strcmp0 (action, "qr");
+  gboolean qr = !g_strcmp0 (action, "qr"), start = !g_strcmp0 (action, "start"), busy = !g_strcmp0 (action, "busy");
   gboolean scan = !g_strcmp0 (action, "scan"), token = !g_strcmp0 (action, "token");
+  gboolean waiting = (qr && !p->qr_bytes) || busy || (start && p->asked) || (scan && p->camera);
 
   gtk_label_set_text (GTK_LABEL (p->hint), hint);
   gtk_widget_set_visible (p->hint, *hint);
-  if (qr && !p->wait_row)
-    p->wait_row = ns_row_info (p->pair_g, str_of (e, "wait"), "");
+  if (start && !p->start_row)
+    p->start_row = ns_row_button (p->pair_g, button, FALSE, start_open, p);
   if (scan && !p->scan_row)
     p->scan_row = ns_row_button (p->pair_g, button, FALSE, scan_open, p);
   if (token && !p->token_row)
     p->token_row = ns_row_button (p->pair_g, button, FALSE, token_open, p);
-  if (stuck && !p->retry_row)
-    p->retry_row = ns_row_button (p->pair_g, retry, FALSE, retry_open, p);
-  row_show (p->retry_row, stuck);
+  row_show (p->start_row, start && !p->asked);
   row_show (p->qr_row, qr && p->qr_bytes);
-  row_show (p->wait_row, qr && !p->qr_bytes);
-  row_show (p->scan_row, scan);
+  row_show (p->scan_row, scan && !p->camera);
   row_show (p->token_row, token);
-  ns_group_set_visible (p->pair_g, qr || scan || token || stuck);
+  if (waiting)
+    prov_wait (p, str_of (e, "wait"), str_of (e, "cancel"), str_of (e, "retry"));
+  else
+    ns_busy_stop (p->busy);
+  ns_group_set_visible (p->pair_g, (qr && p->qr_bytes) || (start && !p->asked) || (scan && !p->camera) || token);
 }
 
 static void
@@ -440,9 +518,6 @@ qr_done (JsonObject *root, const char *err, gpointer data)
   if (err || !ok_of (root))
     return;
   qr_draw (p, str_of (root, "png_base64"), str_of (root, "svg"));
-  /* the code answer carries the state: a change (paired, dropped) asks for the full status (the account's number) */
-  if (g_strcmp0 (str_of (root, "state"), p->state))
-    prov_refresh_status (p);
   prov_apply (p);
 }
 
@@ -453,7 +528,7 @@ qr_run (Prov *p)
   ns_mc_run (p->owner, args, NULL, qr_done, p);
 }
 
-/* while the page is open: the code when the provider draws one (its answer has the state too), the status otherwise */
+/* while the page is open: the status, every poll_s; the provider counts these questions as the page being there */
 static gboolean
 poll_tick (gpointer data)
 {
@@ -462,10 +537,7 @@ poll_tick (gpointer data)
     p->poll_id = 0;
     return G_SOURCE_REMOVE;
   }
-  if (!g_strcmp0 (str_of (prov_entry (p), "action"), "qr"))
-    qr_run (p);
-  else
-    prov_refresh_status (p);
+  prov_refresh_status (p);
   return G_SOURCE_CONTINUE;
 }
 
@@ -486,18 +558,23 @@ status_loaded (JsonObject *root, const char *err, gpointer data)
   gboolean ok = !err && ok_of (root);
   const char *state = ok ? str_of (root, "state") : "";
   const char *word = ok ? str_of (root, "label") : "";
-  if (g_strcmp0 (state, p->state) || g_strcmp0 (word, p->word))
-    p->idle_since = g_get_monotonic_time ();
   g_free (p->state);
   g_free (p->word);
   p->state = g_strdup (state);
   p->word = g_strdup (word);
+  p->paired = ok && json_object_get_boolean_member_with_default (root, "paired", FALSE);
+  const char *action = str_of (prov_entry (p), "action");
+  /* the button was tapped: the provider's first answers may still be the idle one; after that it is on its way */
+  if (g_strcmp0 (action, "start"))
+    p->asked = FALSE;
+  else if (p->asked && (g_get_monotonic_time () - p->asked_at) / G_USEC_PER_SEC >= 2 * (gint64) (p->poll_s ? p->poll_s : 2))
+    p->asked = FALSE;
   if (g_strcmp0 (state, "pairing"))
-    qr_forget (p);   /* no pairing, no code: a picture left from before would also hide the retry */
+    qr_forget (p);   /* no pairing, no code: a picture left from before would also hide the card */
   g_autofree char *text = status_text (root, err, p->ui, p->kind);
   ns_row_set_subtitle (p->status_row, text);
-  if (!g_strcmp0 (state, "pairing") && !g_strcmp0 (str_of (prov_entry (p), "action"), "qr") && !p->qr_bytes)
-    qr_run (p);   /* the page opens on a pairing: the code now, not at the next tick */
+  if (!g_strcmp0 (state, "pairing") && !g_strcmp0 (action, "qr"))
+    qr_run (p);   /* a code is shown the moment it exists, and asked for again while it is */
   prov_apply (p);
   poll_start (p);
 }
@@ -569,49 +646,211 @@ chat_toggled (GtkWidget *sw, GParamSpec *pspec, gpointer data)
   ns_mc_run (c->p->owner, args, NULL, chat_saved, c);
 }
 
+/* The page of the chats the owner may authorize. It opens at once with the card of what is being done: the
+ * provider reads the account's contacts and groups (`messaging chats ID --sync`), which may take a while. Cancel shows
+ * what the provider already knows. Rows come in batches so a long address book does not freeze the page. */
+
+#define CHAT_ROWS_PER_TICK 40   /* rows built per idle turn */
+
+typedef struct {
+  Prov       *p;
+  GtkWidget  *content, *group, *note, *search;
+  NsBusy     *busy;
+  JsonArray  *chats;      /* the answer being drawn (owned) */
+  guint       next, gen, idle_id;
+  GStrv       words;      /* what the search field says, one lower case word each */
+} Wl;
+
+static void wl_load (Wl *w, gboolean sync);
+
 static void
-chats_loaded (JsonObject *root, const char *err, gpointer data)
+wl_free (Wl *w)
 {
-  Prov *p = data;
-  const char *bad = bad_of (root, err, p->ui);
-  GtkWidget *c;
-  AdwNavigationPage *page = ns_page_new (prov_text (p, "labels", "whitelist"), &c);
-  if (bad) {
-    ns_note (c, bad);
-    ns_push (page);
-    return;
+  if (w->idle_id)
+    g_source_remove (w->idle_id);
+  if (w->chats)
+    json_array_unref (w->chats);
+  g_strfreev (w->words);
+  g_free (w);
+}
+
+static gboolean
+wl_match (GtkListBoxRow *row, gpointer data)
+{
+  Wl *w = data;
+  const char *text = g_object_get_data (G_OBJECT (row), "ns-text");
+  if (!w->words || !text)
+    return TRUE;
+  g_autofree char *hay = g_utf8_casefold (text, -1);
+  for (guint i = 0; w->words[i]; i++)
+    if (*w->words[i] && !strstr (hay, w->words[i]))
+      return FALSE;
+  return TRUE;
+}
+
+static void
+wl_search_changed (GtkSearchEntry *entry, gpointer data)
+{
+  Wl *w = data;
+  g_autofree char *fold = g_utf8_casefold (gtk_editable_get_text (GTK_EDITABLE (entry)), -1);
+  g_strfreev (w->words);
+  w->words = g_strsplit (fold, " ", -1);
+  gtk_list_box_invalidate_filter (GTK_LIST_BOX (w->group));
+}
+
+/* "Mario • Gruppo • 12/11 18:30": what the row says about a chat, never a word of what was said. A name the other
+ * side chose for itself is not the title: it is said as such under the number */
+static void
+wl_texts (Prov *p, JsonObject *o, char **title, char **sub)
+{
+  JsonObject *labels = obj_of (p->ui, "labels");
+  const char *chat = str_of (o, "chat"), *name = str_of (o, "name"), *label = str_of (o, "label");
+  gboolean push = json_object_get_boolean_member_with_default (o, "push", FALSE);
+  gint64 at = json_object_get_int_member_with_default (o, "at", 0);
+  int messages = (int) json_object_get_int_member_with_default (o, "messages", 0);
+  GPtrArray *parts = g_ptr_array_new_with_free_func (g_free);
+  *title = g_strdup (*name && !push ? name : (*label ? label : chat));
+  if (!g_strcmp0 (str_of (o, "kind"), "group"))
+    g_ptr_array_add (parts, g_strdup (str_of (labels, "kind_group")));
+  if (*name && push)
+    g_ptr_array_add (parts, g_strdup_printf (str_of (labels, "chat_push"), name));
+  /* a contact's number says which of two with one name it is; a group's id says nothing */
+  if (*name && !push && g_strcmp0 (name, chat) && g_strcmp0 (str_of (o, "kind"), "group"))
+    g_ptr_array_add (parts, g_strdup (chat));
+  if (at > 0) {
+    g_autoptr (GDateTime) t = g_date_time_new_from_unix_local (at);
+    g_ptr_array_add (parts, g_date_time_format (t, str_of (labels, "chat_time_format")));
   }
-  GtkWidget *g = ns_group (c, NULL);
-  JsonArray *chats = arr_of (root, "chats");
-  guint shown = 0;
-  for (guint i = 0; chats && i < json_array_get_length (chats); i++) {
-    JsonObject *o = json_array_get_object_element (chats, i);
+  if (messages > 0)
+    g_ptr_array_add (parts, g_strdup_printf (str_of (labels, "chat_messages"), messages));
+  g_ptr_array_add (parts, NULL);
+  *sub = g_strjoinv (" \xe2\x80\xa2 ", (char **) parts->pdata);
+  g_ptr_array_free (parts, TRUE);
+}
+
+static gboolean
+wl_batch (gpointer data)
+{
+  Wl *w = data;
+  Prov *p = w->p;
+  guint n = w->chats ? json_array_get_length (w->chats) : 0;
+  for (guint k = 0; k < CHAT_ROWS_PER_TICK && w->next < n; k++, w->next++) {
+    JsonObject *o = json_array_get_object_element (w->chats, w->next);
     const char *chat = str_of (o, "chat");
     if (!*chat)
       continue;
-    const char *label = str_of (o, "label");
-    g_autofree char *title = g_strdup (*label ? label : chat);
-    g_autofree char *sub = g_strdup_printf ("%d", (int) json_object_get_int_member_with_default (o, "messages", 0));
-    GtkWidget *row = ns_row_toggle (g, NULL, NULL, title, sub);
+    g_autofree char *title = NULL, *sub = NULL;
+    wl_texts (p, o, &title, &sub);
+    GtkWidget *row = ns_row_toggle (w->group, NULL, NULL, title, sub);
     Chat *ch = g_new0 (Chat, 1);
     ch->p = p;
     ch->chat = g_strdup (chat);
     ns_switch_quiet (ns_row_get_switch (row), whitelisted (p, chat));
     g_object_set_data_full (G_OBJECT (row), "mp-chat", ch, (GDestroyNotify) chat_free);
     g_signal_connect (ns_row_get_switch (row), "notify::active", G_CALLBACK (chat_toggled), ch);
-    shown++;
   }
-  if (shown == 0)
-    ns_note (c, prov_text (p, "labels", "no_chats"));
-  ns_push (page);
+  if (w->next < n)
+    return G_SOURCE_CONTINUE;
+  w->idle_id = 0;
+  if (n == 0)
+    say (w->note, prov_text (p, "labels", "no_chats"), FALSE);
+  return G_SOURCE_REMOVE;
+}
+
+typedef struct {
+  Wl   *w;
+  guint gen;
+} WlCall;
+
+static void
+wl_loaded (JsonObject *root, const char *err, gpointer data)
+{
+  WlCall *call = data;
+  Wl *w = call->w;
+  Prov *p = w->p;
+  gboolean current = call->gen == w->gen;
+  g_free (call);
+  if (!current)
+    return;   /* the owner cancelled or asked again: this answer is old */
+  ns_busy_stop (w->busy);
+  const char *bad = bad_of (root, err, p->ui);
+  if (bad) {
+    say (w->note, bad, TRUE);
+    return;
+  }
+  JsonObject *sync = obj_of (root, "sync");
+  if (sync && !json_object_get_boolean_member_with_default (sync, "ok", TRUE)) {
+    g_autofree char *partial = g_strdup_printf (prov_text (p, "labels", "sync_partial"), str_of (sync, "message"));
+    say (w->note, partial, TRUE);
+  } else {
+    say (w->note, "", FALSE);
+  }
+  ns_group_clear (w->group);
+  if (w->chats)
+    json_array_unref (w->chats);
+  JsonArray *chats = arr_of (root, "chats");
+  w->chats = chats ? json_array_ref (chats) : NULL;
+  w->next = 0;
+  gtk_widget_set_visible (w->search, TRUE);
+  if (w->idle_id)
+    g_source_remove (w->idle_id);
+  w->idle_id = g_idle_add (wl_batch, w);
+}
+
+static void
+wl_cancel (gpointer data)
+{
+  Wl *w = data;
+  w->gen++;
+  wl_load (w, FALSE);   /* what the provider already knows, without waiting for the account */
+}
+
+static void
+wl_retry (gpointer data)
+{
+  Wl *w = data;
+  wl_load (w, TRUE);
+}
+
+static void
+wl_load (Wl *w, gboolean sync)
+{
+  Prov *p = w->p;
+  w->gen++;
+  WlCall *call = g_new0 (WlCall, 1);
+  call->w = w;
+  call->gen = w->gen;
+  NsBusyText t = { .what = prov_text (p, "labels", sync ? "chats_sync" : "chats_read"), .slow = prov_text (p, "labels", "busy_slow"),
+                   .slow_s = p->slow_s, .cancel = sync ? prov_text (p, "labels", "chats_skip") : NULL,
+                   .retry = prov_text (p, "labels", "busy_retry"), .on_cancel = wl_cancel, .on_retry = wl_retry, .data = w };
+  ns_busy_start (w->busy, &t);
+  const char *args_sync[] = { "messaging", "chats", p->id, "--sync", "--json", NULL };
+  const char *args_read[] = { "messaging", "chats", p->id, "--json", NULL };
+  ns_mc_run (p->owner, sync ? args_sync : args_read, NULL, wl_loaded, call);
 }
 
 static void
 whitelist_open (GtkWidget *row, gpointer data)
 {
   Prov *p = data;
-  const char *args[] = { "messaging", "chats", p->id, "--json", NULL };
-  ns_mc_run (p->owner, args, NULL, chats_loaded, p);
+  GtkWidget *c;
+  AdwNavigationPage *page = ns_page_new (prov_text (p, "labels", "whitelist"), &c);
+  Wl *w = g_new0 (Wl, 1);
+  w->p = p;
+  w->content = c;
+  g_object_set_data_full (G_OBJECT (page), "mp-wl", w, (GDestroyNotify) wl_free);
+  w->note = ns_note (c, "");
+  gtk_widget_set_visible (w->note, FALSE);
+  w->busy = ns_busy_new (c);
+  w->search = gtk_search_entry_new ();
+  gtk_search_entry_set_placeholder_text (GTK_SEARCH_ENTRY (w->search), prov_text (p, "labels", "chats_search"));
+  gtk_widget_set_visible (w->search, FALSE);
+  gtk_box_append (GTK_BOX (c), w->search);
+  w->group = ns_group (c, NULL);
+  gtk_list_box_set_filter_func (GTK_LIST_BOX (w->group), wl_match, w, NULL);
+  g_signal_connect (w->search, "search-changed", G_CALLBACK (wl_search_changed), w);
+  ns_push (page);
+  wl_load (w, TRUE);
 }
 
 /* ---- the scopes, the flags, Disconnect ---- */
@@ -665,9 +904,11 @@ static void
 disconnected (JsonObject *root, const char *err, gpointer data)
 {
   Prov *p = data;
+  g_clear_pointer (&p->doing, g_free);
   const char *bad = bad_of (root, err, p->ui);
   if (bad) {
     say (p->msg, bad, TRUE);
+    prov_apply (p);
     return;
   }
   gtk_widget_activate_action (p->content, "navigation.pop", NULL);
@@ -680,6 +921,9 @@ disconnect_yes (gboolean yes, gpointer data)
   if (!yes)
     return;
   const char *args[] = { "messaging", "disconnect", p->id, "--json", NULL };
+  g_free (p->doing);
+  p->doing = g_strdup (prov_text (p, "labels", "disconnecting"));
+  prov_apply (p);
   ns_mc_run (p->owner, args, NULL, disconnected, p);
 }
 
@@ -741,8 +985,8 @@ prov_build (Prov *p, JsonObject *root)
   g_free (p->label);
   p->label = g_strdup (*label ? label : p->id);
   ns_page_set_title (p->page, p->label);
-  p->poll_s = (guint) json_object_get_int_member_with_default (limits, "page_poll_s", 2);
-  p->stuck_s = (guint) json_object_get_int_member_with_default (limits, "stuck_hint_s", 0);
+  p->poll_s = limit_of (limits, "page_poll_s", 2);
+  p->slow_s = limit_of (limits, "slow_hint_s", 0);
 
   JsonArray *ord = arr_of (scopes, "order");
   JsonObject *scope_labels = obj_of (scopes, "labels");
@@ -809,6 +1053,7 @@ prov_list_loaded (JsonObject *root, const char *err, gpointer data)
 {
   Prov *p = data;
   const char *bad = bad_of (root, err, p->ui);
+  ns_busy_stop (p->busy);
   if (bad) {
     say (p->msg, bad, TRUE);
     return;
@@ -829,10 +1074,13 @@ prov_ui_done (JsonObject *root, const char *err, gpointer data)
 {
   Prov *p = data;
   if (err || !ok_of (root)) {
+    ns_busy_stop (p->busy);
     say (p->msg, err ? err : str_of (obj_of (p->ui, "labels"), "error"), TRUE);
     return;
   }
   p->ui = json_object_ref (root);
+  NsBusyText loading = { .what = prov_text (p, "labels", "loading") };   /* the limits (when to say "still going") come with the list */
+  ns_busy_start (p->busy, &loading);
   prov_load_list (p);
 }
 
@@ -851,10 +1099,13 @@ ns_page_provider (GtkWidget *row, gpointer data)
   p->id = g_strdup (id);
   p->label = g_strdup (id);
   p->poll_s = 2;
-  p->idle_since = g_get_monotonic_time ();
   g_object_set_data_full (G_OBJECT (page), "mp-prov", p, (GDestroyNotify) prov_free);
   p->msg = ns_note (c, "");
   gtk_widget_set_visible (p->msg, FALSE);
+  p->busy = ns_busy_new (c);
+  /* the words are what is being loaded: until they are here the card is the spinner alone */
+  NsBusyText wait = { .what = "" };
+  ns_busy_start (p->busy, &wait);
   const char *args[] = { "messaging", "ui", "--json", NULL };
   ns_mc_run (p->owner, args, NULL, prov_ui_done, p);
   ns_push (page);
