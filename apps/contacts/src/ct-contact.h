@@ -158,14 +158,16 @@ GPtrArray *ct_contact_get_items (EContact *contact, CtKind kind);
 void       ct_contact_set_items (EContact *contact, CtKind kind, GPtrArray *items);
 
 /* --- channel identities
- * What Minerva's messaging providers know a contact by (a WhatsApp number, a Telegram id) is an IM row of the
- * contact in the address book, a vCard property of the @property name (X-WHATSAPP, X-TELEGRAM, …: the same
- * convention as X-JABBER and X-SKYPE, which the IM rows above already read). Only that property is touched. */
+ * What Minerva's messaging providers know a contact by (a WhatsApp number, a Telegram id) is an IM row of the contact
+ * in the address book, written as Minerva's memory service reads it: IMPP:<scheme>:<id> ("IMPP:whatsapp:39333…").
+ * An id an older Contacts wrote as @legacy_property (X-WHATSAPP, X-TELEGRAM) is read too, and moves to IMPP the
+ * next time the channel is written. Everything else of the vCard is left as it is. */
 
-/* its first value, "" when the contact has none */
-char *ct_contact_get_channel (EContact *contact, const char *property);
-/* sets it (the first property keeps its parameters), or removes it when @value is empty */
-void  ct_contact_set_channel (EContact *contact, const char *property, const char *value);
+/* the channel's first id, "" when the contact has none */
+char *ct_contact_get_channel (EContact *contact, const char *scheme, const char *legacy_property);
+/* sets it (the IMPP property keeps its parameters), or removes it when @value is empty; other ids of the same
+ * channel stay, and so does every other IMPP property */
+void  ct_contact_set_channel (EContact *contact, const char *scheme, const char *legacy_property, const char *value);
 
 /* --- dates (§4.16, §10.4) */
 

@@ -1000,6 +1000,25 @@ static const struct { const char *property; const char *protocol; } im_propertie
   { "X-TELEGRAM", N_("Telegram") },
 };
 
+/* the protocol's name for an IMPP scheme: the known ones by name, the others as the scheme with a capital */
+static const char *
+impp_protocol (const char *scheme)
+{
+  static const struct { const char *scheme; const char *protocol; } known[] = {
+    { "whatsapp", N_("WhatsApp") }, { "telegram", N_("Telegram") }, { "xmpp", N_("Jabber") },
+    { "matrix", N_("Matrix") }, { "skype", N_("Skype") },
+  };
+  static char other[64];
+
+  for (guint i = 0; i < G_N_ELEMENTS (known); i++)
+    if (g_ascii_strcasecmp (scheme, known[i].scheme) == 0)
+      return known[i].protocol;
+  g_snprintf (other, sizeof other, "%s", scheme);
+  if (other[0])
+    other[0] = g_ascii_toupper (other[0]);
+  return other;
+}
+
 #define ANDROID_CUSTOM "X-ANDROID-CUSTOM"
 #define MIME_EVENT "vnd.android.cursor.item/contact_event"
 #define MIME_RELATION "vnd.android.cursor.item/relation"
@@ -1077,6 +1096,24 @@ item_from_attribute (CtKind kind, EVCardAttribute *attr)
       break;
 
     case CT_KIND_IM:
+      if (g_ascii_strcasecmp (name, "IMPP") == 0)
+        {
+          g_autofree char *whole = nth_value (attr, 0);
+          const char *colon = strchr (whole, ':');
+
+          /* IMPP:<scheme>:<id>, as Minerva's memory service writes it; the scheme names the protocol */
+          item = ct_item_new (kind, 0, NULL);
+          replace (&item->value, trimmed (colon ? colon + 1 : whole));
+          if (colon && colon > whole)
+            {
+              g_autofree char *scheme = g_strndup (whole, colon - whole);
+
+              replace (&item->value2, g_strdup (_(impp_protocol (scheme))));
+            }
+          tokens = type_tokens (attr);
+          item->type = simple_type_of (tokens, FALSE, &custom, &item->primary);
+          break;
+        }
       for (guint i = 0; i < G_N_ELEMENTS (im_properties); i++)
         if (g_ascii_strcasecmp (name, im_properties[i].property) == 0)
           {
@@ -1420,41 +1457,75 @@ ct_contact_set_items (EContact *contact, CtKind kind, GPtrArray *items)
 
 /* --- channel identities */
 
-char *
-ct_contact_get_channel (EContact *contact, const char *property)
+static char *
+ct_contact_get_channel_legacy (EContact *contact, const char *property)
 {
   EVCardAttribute *attr = e_vcard_get_attribute (E_VCARD (contact), property);
 
   return attr ? nth_value (attr, 0) : g_strdup ("");
 }
 
+/* the IMPP property of the contact that holds @scheme's id ("IMPP:whatsapp:39333…", with or without an
+ * X-SERVICE-TYPE parameter), the first one; the id (after the scheme's colon) in @id */
+static EVCardAttribute *
+find_impp (EContact *contact, const char *scheme, char **id)
+{
+  for (GList *l = e_vcard_get_attributes (E_VCARD (contact)); l; l = l->next)
+    {
+      EVCardAttribute *attr = l->data;
+      g_autofree char *value = NULL;
+      const char *colon;
+
+      if (g_ascii_strcasecmp (e_vcard_attribute_get_name (attr), "IMPP") != 0)
+        continue;
+      value = nth_value (attr, 0);
+      colon = strchr (value, ':');
+      if (colon && g_ascii_strncasecmp (value, scheme, colon - value) == 0 && !scheme[colon - value])
+        {
+          if (id)
+            *id = trimmed (colon + 1);
+          return attr;
+        }
+    }
+  return NULL;
+}
+
+char *
+ct_contact_get_channel (EContact *contact, const char *scheme, const char *legacy_property)
+{
+  char *id = NULL;
+
+  if (find_impp (contact, scheme, &id))
+    return id;
+  return legacy_property && *legacy_property ? ct_contact_get_channel_legacy (contact, legacy_property)
+                                             : g_strdup ("");
+}
+
 void
-ct_contact_set_channel (EContact *contact, const char *property, const char *value)
+ct_contact_set_channel (EContact *contact, const char *scheme, const char *legacy_property, const char *value)
 {
   EVCard *vcard = E_VCARD (contact);
   g_autofree char *text = trimmed (value);
-  EVCardAttribute *first = e_vcard_get_attribute (vcard, property);
+  g_autofree char *line = g_strconcat (scheme, ":", text, NULL);
+  EVCardAttribute *impp = find_impp (contact, scheme, NULL);
 
+  /* an id an older Contacts wrote as X-WHATSAPP / X-TELEGRAM moves to IMPP with this write */
+  if (legacy_property && *legacy_property)
+    e_vcard_remove_attributes (vcard, NULL, legacy_property);
   if (!*text)
     {
-      e_vcard_remove_attributes (vcard, NULL, property);
+      if (impp)
+        e_vcard_remove_attribute (vcard, impp);
       return;
     }
-  if (first)
+  if (impp)
     {
-      /* the first property stays as it is, its parameters too; a second one of the same name goes */
-      g_autoptr(GPtrArray) extra = g_ptr_array_new ();
-
-      e_vcard_attribute_remove_values (first);
-      e_vcard_attribute_add_value (first, text);
-      for (GList *l = e_vcard_get_attributes (vcard); l; l = l->next)
-        if (l->data != first && g_ascii_strcasecmp (e_vcard_attribute_get_name (l->data), property) == 0)
-          g_ptr_array_add (extra, l->data);
-      for (guint i = 0; i < extra->len; i++)
-        e_vcard_remove_attribute (vcard, extra->pdata[i]);
+      /* the property stays as it is, its parameters too; another id of the same channel is left alone */
+      e_vcard_attribute_remove_values (impp);
+      e_vcard_attribute_add_value (impp, line);
       return;
     }
-  e_vcard_append_attribute_with_value (vcard, e_vcard_attribute_new (NULL, property), text);
+  e_vcard_append_attribute_with_value (vcard, e_vcard_attribute_new (NULL, "IMPP"), line);
 }
 
 /* --- dates */
