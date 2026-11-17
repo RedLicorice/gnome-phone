@@ -227,6 +227,9 @@ run_request (gpointer job, gpointer data)
       if (reopen)
         {
           set_state_wait (self, GST_STATE_NULL);
+          /* the element no longer plays what cur_camera says: a request that is stale before this one is over must
+           * not take it for running */
+          self->cur_playing = FALSE;
           /* the name goes to a fresh source: set again, libcamerasrc looks the camera up once more and fails
            * ("Could not find a camera named") while the camera it opened still lives in the element */
           if (!name_set && src_has (self, "camera-name"))
@@ -249,6 +252,16 @@ run_request (gpointer job, gpointer data)
 
       g_mutex_lock (&self->lock);
       self->first_pending = generation;
+      /* libcamerasrc connects Camera::requestCompleted when it opens the camera, and never disconnects (see
+       * cam_pipeline_needs_fresh_process): from here on this process has opened @camera, whether or not the first
+       * frame comes, a newer request overtakes this one, or the attempt fails. Noting it only on success let a quick
+       * A → B → A (B overtaken before its first frame) open A a second time and abort in requestCompleted. */
+      if (reopen)
+        {
+          g_hash_table_add (self->opened, g_strdup (camera));
+          g_free (self->last_opened);
+          self->last_opened = g_strdup (camera);
+        }
       g_mutex_unlock (&self->lock);
       if (gst_element_set_state (self->pipeline, GST_STATE_PLAYING) != GST_STATE_CHANGE_FAILURE)
         {
@@ -278,11 +291,6 @@ run_request (gpointer job, gpointer data)
 
   if (ok)
     {
-      g_mutex_lock (&self->lock);
-      g_hash_table_add (self->opened, g_strdup (camera));
-      g_free (self->last_opened);
-      self->last_opened = g_strdup (camera);
-      g_mutex_unlock (&self->lock);
       g_free (self->cur_camera);
       self->cur_camera = g_strdup (camera);
       self->cur_w = width;
