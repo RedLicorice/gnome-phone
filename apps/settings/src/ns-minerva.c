@@ -17,7 +17,7 @@ typedef struct Mn Mn;
 
 /* which of Minerva's pages this is: the index and the four pages it lists. Each builds only the cards it has, so a
  * refresh fills what is there and skips the rest. */
-typedef enum { MN_INDEX, MN_BRAIN, MN_VOICE, MN_PROMPT, MN_BUDGET, MN_NETWORK } MnKind;
+typedef enum { MN_INDEX, MN_BRAIN, MN_VOICE, MN_PROMPT, MN_BUDGET, MN_NETWORK, MN_KIOSK } MnKind;
 
 struct Mn {
   MnKind     kind;
@@ -979,6 +979,7 @@ static const struct {
   { "messaging", ns_page_messaging },
   { "budget", ns_page_minerva_budget },
   { "network", ns_page_minerva_network },
+  { "kiosk", ns_page_minerva_kiosk },
   { "self_notebook", open_self_notebook },
 };
 
@@ -1098,6 +1099,15 @@ network_build (Mn *m)
 }
 
 static void
+kiosk_build (Mn *m)
+{
+  page_title (m, "kiosk");
+  m->sg_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);   /* the orientation, the dock */
+  gtk_box_append (GTK_BOX (m->content), m->sg_box);
+  build_groups (m, "kiosk");
+}
+
+static void
 budget_build (Mn *m)
 {
   JsonObject *p = mn_ui_page (m, "budget"), *s = obj_of (p, "sections"), *n = obj_of (p, "notes");
@@ -1123,6 +1133,7 @@ build_page (Mn *m)
   case MN_VOICE: voice_build (m); break;
   case MN_BUDGET: budget_build (m); break;
   case MN_NETWORK: network_build (m); break;
+  case MN_KIOSK: kiosk_build (m); break;
   case MN_PROMPT: prompt_build (m); break;
   default: break;
   }
@@ -1189,6 +1200,13 @@ void
 ns_page_minerva_network (GtkWidget *row, gpointer data)
 {
   mn_page_open (MN_NETWORK);
+}
+
+/* Minerva > Kiosk (`--page minerva-kiosk`): how the face app turns with the phone, and the dock that keeps the screen on */
+void
+ns_page_minerva_kiosk (GtkWidget *row, gpointer data)
+{
+  mn_page_open (MN_KIOSK);
 }
 
 /* Minerva > Prompt (`--page prompt`): the system prompt and the state template (ns-prompt.c) */

@@ -85,6 +85,9 @@ static const Entry entries[] = {
   { "network-wireless-symbolic", "green", "Rete", "Wi-Fi • Dati mobili • Controllo di internet • Ripristino",
     "rete network wifi dati mobili sim internet offline controllo ripristino soglia segnale debole connectivity",
     ns_page_minerva_network, NULL, NULL, ns_minerva_available, TRUE },
+  { "video-display-symbolic", "blue", "Kiosk", "Orientamento • Resta acceso (dock)",
+    "kiosk orientamento orientation ruota rotazione orizzontale verticale landscape portrait dock resta acceso carica "
+    "schermo", ns_page_minerva_kiosk, NULL, NULL, ns_minerva_available, TRUE },
   { "mark-location-symbolic", "green", "Luoghi", "Il suo mondo • Note • Gradimento",
     "luoghi luogo places place mondo world kiosk gradimento nota note preferiti", ns_page_minerva_places, NULL, NULL,
     ns_minerva_available, TRUE },
@@ -363,6 +366,7 @@ static const struct {
   { "people", ns_page_people_open }, { "persone", ns_page_people_open },
   { "budget", ns_page_minerva_budget }, { "budgets", ns_page_minerva_budget }, { "spesa", ns_page_minerva_budget },
   { "minerva-network", ns_page_minerva_network }, { "rete", ns_page_minerva_network },
+  { "minerva-kiosk", ns_page_minerva_kiosk }, { "kiosk", ns_page_minerva_kiosk },
   { "events", ns_page_events }, { "eventi", ns_page_events },
   { "places", ns_page_minerva_places }, { "luoghi", ns_page_minerva_places }, { "minerva-places", ns_page_minerva_places },
   { "messaging", ns_page_messaging }, { "messaggi", ns_page_messaging },
