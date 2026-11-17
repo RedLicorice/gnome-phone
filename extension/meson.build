@@ -23,6 +23,8 @@ if gjs.found()
   test('theme', find_program('bash'), args: [files('tests/theme-test.sh')])
   # the lock screen's fingerprint states and words: plain data, no shell library to import
   test('finger', gjs, args: ['-m', files('tests/finger.test.js')])
+  # a window too big for the screen is scaled to the work area, not left with its buttons beyond the edge
+  test('fit', gjs, args: ['-m', files('tests/fit.test.js')])
 endif
 
 # appmem.py runs as a program of its own (recents.js)

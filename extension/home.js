@@ -7,6 +7,7 @@ import Meta from 'gi://Meta';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {FitWindows} from './fit.js';
 import {SingleStack} from './stack.js';
 
 // a hand-built launcher in /usr/local comes before the packaged one, as keyguard.js's gp-auth does
@@ -30,6 +31,7 @@ export class Home {
         this._spawn();
         this._takeOverview();
         this._stack = new SingleStack(this);
+        this._fit = new FitWindows(this);
     }
 
     // The overview was the mobile shell's home: whatever would show it goes home instead
@@ -118,6 +120,7 @@ export class Home {
 
     destroy() {
         this._destroyed = true;
+        this._fit.destroy();
         this._stack.destroy();
         this._giveOverview();
         global.display.disconnectObject(this);
