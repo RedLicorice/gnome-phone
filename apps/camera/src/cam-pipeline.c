@@ -1,5 +1,6 @@
 /* cam-pipeline: see cam-pipeline.h. */
 #include "cam-pipeline.h"
+#include "cam-focus.h"
 
 #include <gst/app/gstappsink.h>
 #include <gst/video/video.h>
@@ -7,12 +8,7 @@
 #include <string.h>
 
 #define FIRST_FRAME_TIMEOUT_S  5
-#define AF_CHECK_MS            700      /* the AfMode the camera reports, a few frames after the first */
-#define FOCUS_POLL_MS          100
-#define FOCUS_MIN_MS           300
-#define FOCUS_MAX_MS           2500
-#define AF_MODE_MANUAL         0
-#define AF_MODE_CONTINUOUS     2
+#define AF_MODE_MANUAL         0        /* libcamera's AfMode: its own autofocus stays still (cam-focus.h drives the lens) */
 
 /* the pause before each retry of an open: CAMSS on the Poco keeps a sensor link busy for a few seconds after a
  * close (24.9); any pipeline handler may have such a moment */
@@ -56,19 +52,15 @@ struct _CamPipeline {
   GSList       *grabs;          /* (CamGrabFunc, data) pairs waiting */
   gboolean      can_scan, scanning, scan_hold;
   double        zoom;
-  gboolean      has_af;
-  guint         af_timer, focus_timer;
-  gint64        focus_start;
-  float         last_lens;
-  int           stable_polls;
+  CamFocus     *focus;          /* the lens' autofocus, if the window gave one (cam_pipeline_set_focus) */
+  gboolean      grab_wait;      /* a photo waits for the search that is running */
+  gboolean      want_manual_af; /* the camera asked for has a lens: libcamera's autofocus is told to stay still (lock) */
 };
 
 G_DEFINE_FINAL_TYPE (CamPipeline, cam_pipeline, G_TYPE_OBJECT)
 
-enum { SIG_STREAMING, SIG_ERROR, SIG_BARCODE, SIG_FOCUSED, N_SIGNALS };
-enum { PROP_0, PROP_HAS_AF, N_PROPS };
+enum { SIG_STREAMING, SIG_ERROR, SIG_BARCODE, N_SIGNALS };
 static guint signals[N_SIGNALS];
-static GParamSpec *props[N_PROPS];
 
 /* ---- messages from other threads to the main loop -------------------------------------------------------------- */
 
@@ -215,6 +207,7 @@ run_request (gpointer job, gpointer data)
   for (guint attempt = 0; attempt < G_N_ELEMENTS (backoff_ms); attempt++)
     {
       gint64 deadline;
+      gboolean manual_af;
 
       if (backoff_ms[attempt])
         {
@@ -246,9 +239,13 @@ run_request (gpointer job, gpointer data)
         set_state_wait (self, GST_STATE_READY);
       apply_caps (self, width, height);
       apply_tone (self);
-      /* asked for on every start; what the camera answers (it stays manual without AF) tells has_af */
-      if (src_has (self, "af-mode"))
-        g_object_set (self->src, "af-mode", AF_MODE_CONTINUOUS, NULL);
+      /* libcamera's soft ISP has an autofocus of its own, continuous by default and slow: for a camera whose lens
+       * cam-focus.h drives it is told to leave the lens alone */
+      g_mutex_lock (&self->lock);
+      manual_af = self->want_manual_af;
+      g_mutex_unlock (&self->lock);
+      if (manual_af && src_has (self, "af-mode"))
+        g_object_set (self->src, "af-mode", AF_MODE_MANUAL, NULL);
 
       g_mutex_lock (&self->lock);
       self->first_pending = generation;
@@ -300,6 +297,8 @@ run_request (gpointer job, gpointer data)
     post (self, NOTE_FAILED, generation, error, NULL);
 }
 
+static void on_focus_state (CamFocus *focus, int state, int reason, CamPipeline *self);
+
 static void
 request (CamPipeline *self)
 {
@@ -327,6 +326,8 @@ on_frame (GstPad *pad, GstPadProbeInfo *info, gpointer data)
   if (first)
     post (self, NOTE_STREAMING, first, NULL, NULL);
 
+  if (self->focus)
+    cam_focus_frame (self->focus, buffer, pad);
   if (g_atomic_int_compare_and_exchange (&self->grab_pending, TRUE, FALSE))
     {
       /* a copy: the camera's buffers go back to it at once (libcamera has a handful) */
@@ -410,32 +411,6 @@ read_size (CamPipeline *self)
 }
 
 static gboolean
-on_af_check (gpointer data)
-{
-  CamPipeline *self = data;
-  int mode = AF_MODE_MANUAL;
-  gboolean has_af;
-
-  self->af_timer = 0;
-  if (!self->streaming || !src_has (self, "af-mode"))
-    return G_SOURCE_REMOVE;
-  g_object_get (self->src, "af-mode", &mode, NULL);
-  has_af = mode == AF_MODE_CONTINUOUS;
-  if (has_af != self->has_af)
-    {
-      self->has_af = has_af;
-      g_object_notify_by_pspec (G_OBJECT (self), props[PROP_HAS_AF]);
-    }
-  return G_SOURCE_REMOVE;
-}
-
-static void
-stop_focus (CamPipeline *self)
-{
-  g_clear_handle_id (&self->focus_timer, g_source_remove);
-}
-
-static gboolean
 on_note (gpointer data)
 {
   Note *note = data;
@@ -452,8 +427,8 @@ on_note (gpointer data)
           break;
         self->streaming = TRUE;
         read_size (self);
-        g_clear_handle_id (&self->af_timer, g_source_remove);
-        self->af_timer = g_timeout_add (AF_CHECK_MS, on_af_check, self);
+        if (self->focus)
+          cam_focus_streaming (self->focus, TRUE);
         g_signal_emit (self, signals[SIG_STREAMING], 0);
         break;
       }
@@ -466,6 +441,8 @@ on_note (gpointer data)
         break;
       g_warning ("camera: the stream stopped: %s", note->text);
       self->streaming = FALSE;
+      if (self->focus)
+        cam_focus_streaming (self->focus, FALSE);
       g_mutex_lock (&self->lock);
       self->force_reopen = TRUE;
       self->generation++;
@@ -514,8 +491,6 @@ cam_pipeline_dispose (GObject *object)
       g_thread_pool_free (self->worker, FALSE, TRUE);
       self->worker = NULL;
     }
-  g_clear_handle_id (&self->af_timer, g_source_remove);
-  stop_focus (self);
   if (self->pipeline)
     {
       g_autoptr(GstBus) bus = gst_element_get_bus (self->pipeline);
@@ -524,6 +499,7 @@ cam_pipeline_dispose (GObject *object)
       gst_bus_set_sync_handler (bus, NULL, NULL, NULL);
     }
   g_clear_object (&self->paintable);
+  g_clear_object (&self->focus);
   g_clear_object (&self->pipeline);
   g_clear_object (&self->clock);
   G_OBJECT_CLASS (cam_pipeline_parent_class)->dispose (object);
@@ -546,34 +522,18 @@ cam_pipeline_finalize (GObject *object)
 }
 
 static void
-cam_pipeline_get_property (GObject *object, guint id, GValue *value, GParamSpec *pspec)
-{
-  CamPipeline *self = CAM_PIPELINE (object);
-
-  if (id == PROP_HAS_AF)
-    g_value_set_boolean (value, self->has_af);
-  else
-    G_OBJECT_WARN_INVALID_PROPERTY_ID (object, id, pspec);
-}
-
-static void
 cam_pipeline_class_init (CamPipelineClass *klass)
 {
   GObjectClass *object_class = G_OBJECT_CLASS (klass);
 
   object_class->dispose = cam_pipeline_dispose;
   object_class->finalize = cam_pipeline_finalize;
-  object_class->get_property = cam_pipeline_get_property;
-  props[PROP_HAS_AF] = g_param_spec_boolean ("has-af", NULL, NULL, FALSE, G_PARAM_READABLE | G_PARAM_STATIC_STRINGS);
-  g_object_class_install_properties (object_class, N_PROPS, props);
   signals[SIG_STREAMING] = g_signal_new ("streaming", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL,
                                          NULL, G_TYPE_NONE, 0);
   signals[SIG_ERROR] = g_signal_new ("error", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
                                      G_TYPE_NONE, 2, G_TYPE_INT, G_TYPE_STRING);
   signals[SIG_BARCODE] = g_signal_new ("barcode", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
                                        G_TYPE_NONE, 1, G_TYPE_STRING);
-  signals[SIG_FOCUSED] = g_signal_new ("focused", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
-                                       G_TYPE_NONE, 0);
 }
 
 static void
@@ -692,11 +652,16 @@ cam_pipeline_start (CamPipeline *self, const char *camera_id, int width, int hei
   self->want_camera = g_strdup (camera_id);
   self->want_w = width;
   self->want_h = height;
+  self->want_manual_af = self->focus && cam_focus_has_lens (self->focus, camera_id);
   self->generation++;
   g_cond_broadcast (&self->cond);
   g_mutex_unlock (&self->lock);
   self->streaming = FALSE;
-  stop_focus (self);
+  if (self->focus)
+    {
+      cam_focus_streaming (self->focus, FALSE);
+      cam_focus_set_camera (self->focus, camera_id);
+    }
   request (self);
 }
 
@@ -710,7 +675,12 @@ cam_pipeline_stop (CamPipeline *self)
   g_cond_broadcast (&self->cond);
   g_mutex_unlock (&self->lock);
   self->streaming = FALSE;
-  stop_focus (self);
+  self->grab_wait = FALSE;
+  if (self->focus)
+    {
+      cam_focus_streaming (self->focus, FALSE);
+      cam_focus_set_camera (self->focus, NULL);
+    }
   if (was)
     request (self);
 }
@@ -728,6 +698,18 @@ cam_pipeline_get_size (CamPipeline *self, int *width, int *height)
   *height = self->streaming ? self->height : 0;
 }
 
+/* a photo taken while the lens is still searching would be blurred: the grab is armed when the search is over (the
+ * search ends by itself within the autofocus timeout) */
+static void
+on_focus_state (CamFocus *focus, int state, int reason, CamPipeline *self)
+{
+  if (self->grab_wait && state != CAM_FOCUS_SEARCHING)
+    {
+      self->grab_wait = FALSE;
+      g_atomic_int_set (&self->grab_pending, TRUE);
+    }
+}
+
 void
 cam_pipeline_grab (CamPipeline *self, CamGrabFunc done, gpointer data)
 {
@@ -737,7 +719,10 @@ cam_pipeline_grab (CamPipeline *self, CamGrabFunc done, gpointer data)
       return;
     }
   self->grabs = g_slist_append (g_slist_append (self->grabs, done), data);
-  g_atomic_int_set (&self->grab_pending, TRUE);
+  if (self->focus && cam_focus_busy (self->focus))
+    self->grab_wait = TRUE;
+  else
+    g_atomic_int_set (&self->grab_pending, TRUE);
 }
 
 void
@@ -803,59 +788,19 @@ cam_pipeline_set_zoom (CamPipeline *self, double zoom)
   apply_crop (self);
 }
 
-gboolean
-cam_pipeline_has_af (CamPipeline *self)
-{
-  return self->has_af;
-}
-
-static gboolean
-on_focus_poll (gpointer data)
-{
-  CamPipeline *self = data;
-  gint64 elapsed = (g_get_monotonic_time () - self->focus_start) / 1000;
-  float lens = 0;
-
-  if (!self->streaming)
-    {
-      self->focus_timer = 0;
-      return G_SOURCE_REMOVE;
-    }
-  if (src_has (self, "lens-position"))
-    g_object_get (self->src, "lens-position", &lens, NULL);
-  self->stable_polls = fabsf (lens - self->last_lens) < 0.005f ? self->stable_polls + 1 : 0;
-  self->last_lens = lens;
-  /* settled: the same lens position for three looks in a row, once the search has had time to begin */
-  if ((elapsed >= FOCUS_MIN_MS && self->stable_polls >= 3) || elapsed >= FOCUS_MAX_MS)
-    {
-      self->focus_timer = 0;
-      g_signal_emit (self, signals[SIG_FOCUSED], 0);
-      return G_SOURCE_REMOVE;
-    }
-  return G_SOURCE_CONTINUE;
-}
-
-static void
-on_refocus_resume (gpointer data)
-{
-  CamPipeline *self = data;
-
-  g_object_set (self->src, "af-mode", AF_MODE_CONTINUOUS, NULL);
-  self->focus_timer = g_timeout_add (FOCUS_POLL_MS, on_focus_poll, self);
-}
-
 void
-cam_pipeline_refocus (CamPipeline *self)
+cam_pipeline_set_focus (CamPipeline *self, CamFocus *focus)
 {
-  if (!self->has_af || !self->streaming)
-    return;
-  stop_focus (self);
-  /* libcamerasrc has no AfTrigger: leaving continuous AF and coming back starts a new scan */
-  g_object_set (self->src, "af-mode", AF_MODE_MANUAL, NULL);
-  self->focus_start = g_get_monotonic_time ();
-  self->stable_polls = 0;
-  self->last_lens = -1;
-  self->focus_timer = g_timeout_add_once (150, on_refocus_resume, self);
+  g_clear_object (&self->focus);
+  self->focus = focus ? g_object_ref (focus) : NULL;
+  if (self->focus)
+    g_signal_connect_object (self->focus, "state-changed", G_CALLBACK (on_focus_state), self, 0);
+}
+
+CamFocus *
+cam_pipeline_get_focus (CamPipeline *self)
+{
+  return self->focus;
 }
 
 GstClock *

@@ -7,6 +7,7 @@
 #include "cam-devices.h"
 #include "cam-dialogs.h"
 #include "cam-encoder.h"
+#include "cam-focus.h"
 #include "cam-mode-selector.h"
 #include "cam-photo.h"
 #include "cam-pipeline.h"
@@ -72,7 +73,7 @@ struct _CamView {
   GCancellable   *cancel, *thumb_cancel;
 
   /* the camera screen */
-  GtkWidget *viewfinder, *island, *countdown, *zoom_slider, *pro_row, *snackbar;
+  GtkWidget *viewfinder, *island, *countdown, *zoom_slider, *focus_slider, *pro_row, *snackbar;
   GtkWidget *pro_button, *lenses, *flash_button, *flash_icon;
   GtkWidget *gallery, *shutter, *flip, *pause, *modes, *tune_panel;
   GPtrArray *rotators;                  /* what turns with the phone (§17) */
@@ -108,6 +109,11 @@ struct _CamView {
   gint64     pinch_end;
   NeoAnim   *zoom_anim;
   guint      slider_hide;
+
+  /* focus (cam-focus.h): the lens of the camera in use, if it has one */
+  CamFocus  *focus;
+  gboolean   ring_up;                   /* the focus ring is showing this search */
+  guint      focus_save;                /* the pending write of the manual position to dconf */
 
   /* the tuning sheet: the Soft ISP's gamma, contrast and saturation of the camera in use (cam-tune.h) */
   gboolean   tune_open;
@@ -1051,6 +1057,7 @@ apply_orientation (CamView *self, gboolean animate)
     cam_rotator_set_angle (self->rotators->pdata[i], angle, animate);
   cam_countdown_set_angle (CAM_COUNTDOWN (self->countdown), angle, animate);
   cam_zoom_slider_set_angle (CAM_ZOOM_SLIDER (self->zoom_slider), angle);
+  cam_zoom_slider_set_angle (CAM_ZOOM_SLIDER (self->focus_slider), angle);
   cam_island_set_orientation (CAM_ISLAND (self->island), ui_turn (self));
   gtk_widget_queue_allocate (GTK_WIDGET (self));
 }
@@ -1118,6 +1125,9 @@ static void
 set_state (CamView *self, CamState state)
 {
   self->state = state;
+  /* a recording does not breathe: no automatic searching until it is over */
+  if (self->focus)
+    cam_focus_set_hold (self->focus, state == ST_RECORDING || state == ST_PAUSED);
   update_controls (self);
 }
 
@@ -1437,22 +1447,131 @@ on_fling (CamViewfinder *viewfinder, int direction, CamView *self)
 
 /* ---- focus (§9) ------------------------------------------------------------------------------------------------ */
 
-static void
-on_tapped (CamViewfinder *viewfinder, double x, double y, CamView *self)
+/* the words for a search that found no clear peak: what the lens saw, not an error code */
+static const char *
+focus_failed_text (CamAfReason reason)
 {
-  slide_pro (self, FALSE);
-  /* the camera's AF has no windows here: the search restarts for the whole frame, the ring shows where tapped;
-   * a fixed-focus camera shows no ring */
-  if (!cam_pipeline_has_af (self->pipeline) || !cam_pipeline_is_streaming (self->pipeline))
-    return;
-  cam_viewfinder_focus (viewfinder, x, y);
-  cam_pipeline_refocus (self->pipeline);
+  switch (reason)
+    {
+    case CAM_AF_REASON_FLAT:
+      return _("Too dark to focus");
+    case CAM_AF_REASON_TIMEOUT:
+      return _("Focusing took too long");
+    default:
+      return _("Nothing to focus on here");
+    }
 }
 
 static void
-on_focused (CamPipeline *pipeline, CamView *self)
+on_tapped (CamViewfinder *viewfinder, double x, double y, CamView *self)
 {
-  cam_viewfinder_focus_done (CAM_VIEWFINDER (self->viewfinder));
+  double fx, fy;
+
+  slide_pro (self, FALSE);
+  /* a camera without a lens has fixed focus (no ring, nothing to wait for), and MANUAL has its slider */
+  if (!self->focus || !cam_focus_available (self->focus) || !cam_pipeline_is_streaming (self->pipeline)
+      || cam_focus_get_mode (self->focus) == CAM_FOCUS_MANUAL || !cam_viewfinder_to_frame (viewfinder, x, y, &fx, &fy))
+    return;
+  /* the ring where the finger is, the search on that part of the frame */
+  self->ring_up = TRUE;
+  cam_viewfinder_focus (viewfinder, x, y);
+  cam_focus_at (self->focus, fx, fy);
+}
+
+static void
+on_focus_state (CamFocus *focus, int state, int reason, CamView *self)
+{
+  CamViewfinder *viewfinder = CAM_VIEWFINDER (self->viewfinder);
+
+  switch (state)
+    {
+    case CAM_FOCUS_SEARCHING:
+      /* a search nobody tapped for (the first one, a scene that changed): the ring is in the middle */
+      if (!self->ring_up)
+        {
+          double x, y;
+
+          cam_viewfinder_get_centre (viewfinder, &x, &y);
+          self->ring_up = TRUE;
+          cam_viewfinder_focus (viewfinder, x, y);
+        }
+      break;
+    case CAM_FOCUS_FOCUSED:
+      self->ring_up = FALSE;
+      cam_viewfinder_focus_done (viewfinder, TRUE);
+      break;
+    case CAM_FOCUS_FAILED:
+      self->ring_up = FALSE;
+      cam_viewfinder_focus_done (viewfinder, FALSE);
+      toast (self, focus_failed_text (reason));
+      break;
+    default:
+      if (self->ring_up)
+        cam_viewfinder_focus_done (viewfinder, TRUE);
+      self->ring_up = FALSE;
+      break;
+    }
+}
+
+static CamFocusMode
+focus_mode_of (CamView *self)
+{
+  g_autofree char *mode = g_settings_get_string (self->settings, "af-mode");
+
+  return g_str_equal (mode, "tap") ? CAM_FOCUS_TAP : g_str_equal (mode, "manual") ? CAM_FOCUS_MANUAL : CAM_FOCUS_AUTO;
+}
+
+/* the manual slider: where the lens stands, as 0 to 100 */
+static void
+focus_slider_sync (CamView *self)
+{
+  gboolean manual = self->focus && cam_focus_available (self->focus) && cam_focus_get_mode (self->focus) == CAM_FOCUS_MANUAL;
+  double position = g_settings_get_double (self->settings, "af-manual-position");
+  g_autofree char *text = g_strdup_printf ("%d", (int) lround (position * 100));
+
+  cam_zoom_slider_set (CAM_ZOOM_SLIDER (self->focus_slider), position, text);
+  gtk_widget_set_visible (self->focus_slider, manual);
+  gtk_widget_queue_allocate (GTK_WIDGET (self));
+}
+
+static void
+sync_focus (CamView *self)
+{
+  if (!self->focus)
+    return;
+  cam_focus_set_position (self->focus, g_settings_get_double (self->settings, "af-manual-position"));
+  cam_focus_set_mode (self->focus, focus_mode_of (self));
+  focus_slider_sync (self);
+}
+
+static gboolean
+on_focus_save (gpointer data)
+{
+  CamView *self = data;
+
+  self->focus_save = 0;
+  g_settings_set_double (self->settings, "af-manual-position", cam_focus_get_position (self->focus));
+  return G_SOURCE_REMOVE;
+}
+
+static void
+on_focus_slider (CamZoomSlider *slider, double progress, CamView *self)
+{
+  g_autofree char *text = g_strdup_printf ("%d", (int) lround (progress * 100));
+
+  cam_zoom_slider_set (slider, progress, text);
+  cam_focus_set_position (self->focus, progress);
+  g_clear_handle_id (&self->focus_save, g_source_remove);
+  self->focus_save = g_timeout_add (TUNE_SAVE_MS, on_focus_save, self);
+}
+
+static void update_settings_rows (CamView *self);
+
+static void
+on_focus_available (CamFocus *focus, GParamSpec *pspec, CamView *self)
+{
+  update_settings_rows (self);
+  sync_focus (self);
 }
 
 /* ---- photos (§4.4, §12, §21) ----------------------------------------------------------------------------------- */
@@ -2130,6 +2249,8 @@ on_setting_changed (GSettings *settings, const char *key, CamView *self)
     sync_sensors (self);
   else if (g_str_equal (key, "bright-screen") || g_str_equal (key, "volume-buttons-action"))
     sync_shell (self);
+  else if (g_str_equal (key, "af-mode"))
+    sync_focus (self);
 }
 
 static void
@@ -2202,6 +2323,20 @@ on_window_state (GtkWindow *window, GParamSpec *pspec, CamView *self)
   sync_running (self);
 }
 
+/* the Settings rows this phone can back (and the focus row only while the camera in use has a lens) */
+static void
+update_settings_rows (CamView *self)
+{
+  cam_settings_set_rows (CAM_SETTINGS (self->settings_page),
+                         (can_record (self) ? CAM_SETTINGS_VIDEO : 0)
+                         | (self->bright_hook ? CAM_SETTINGS_BRIGHT : 0)
+                         | (cam_sensors_can_locate (self->sensors) ? CAM_SETTINGS_LOCATION : 0)
+                         | (cam_sensors_has_tilt (self->sensors) ? CAM_SETTINGS_LEVELER : 0)
+                         | (shell_has (self, "TakeVolumeKeys") ? CAM_SETTINGS_GESTURES : 0)
+                         | (self->focus && cam_focus_available (self->focus) ? CAM_SETTINGS_FOCUS : 0)
+                         | (cam_devices_main_for (self->cameras, CAM_FACING_FRONT) ? CAM_SETTINGS_FRONT : 0));
+}
+
 static void
 on_encoder (gpointer data)
 {
@@ -2210,13 +2345,7 @@ on_encoder (gpointer data)
 
   g_message ("encoder: %s (720p %s, 1080p %s)", encoder && encoder->element ? encoder->element : "none",
              encoder && encoder->hd ? "yes" : "no", encoder && encoder->fhd ? "yes" : "no");
-  cam_settings_set_rows (CAM_SETTINGS (self->settings_page),
-                         (can_record (self) ? CAM_SETTINGS_VIDEO : 0)
-                         | (self->bright_hook ? CAM_SETTINGS_BRIGHT : 0)
-                         | (cam_sensors_can_locate (self->sensors) ? CAM_SETTINGS_LOCATION : 0)
-                         | (cam_sensors_has_tilt (self->sensors) ? CAM_SETTINGS_LEVELER : 0)
-                         | (shell_has (self, "TakeVolumeKeys") ? CAM_SETTINGS_GESTURES : 0)
-                         | (cam_devices_main_for (self->cameras, CAM_FACING_FRONT) ? CAM_SETTINGS_FRONT : 0));
+  update_settings_rows (self);
   if (self->mode == CAM_MODE_VIDEO && !can_record (self))
     set_mode (self, CAM_MODE_PHOTO, FALSE);
   else
@@ -2328,6 +2457,9 @@ allocate_landscape (CamView *self, int width, int height)
   if (gtk_widget_get_visible (self->zoom_slider))
     place (self->zoom_slider, (vf_w - CAM_ZOOM_SLIDER_W) / 2.0, height - CAM_ZOOM_SLIDER_H, CAM_ZOOM_SLIDER_W,
            CAM_ZOOM_SLIDER_H);
+  if (gtk_widget_get_visible (self->focus_slider))
+    place (self->focus_slider, (vf_w - CAM_ZOOM_SLIDER_W) / 2.0, height - 2 * CAM_ZOOM_SLIDER_H - CAM_FOCUS_SLIDER_GAP,
+           CAM_ZOOM_SLIDER_W, CAM_ZOOM_SLIDER_H);
   place_tune (self, vf_w, height);
   /* the pro row along the preview's bottom, sliding down off it as it hides */
   if (gtk_widget_get_visible (self->pro_row))
@@ -2393,6 +2525,9 @@ cam_view_size_allocate (GtkWidget *widget, int width, int height, int baseline)
   if (gtk_widget_get_visible (self->zoom_slider))
     place (self->zoom_slider, (width - CAM_ZOOM_SLIDER_W) / 2.0, vf_h - CAM_ZOOM_SLIDER_H, CAM_ZOOM_SLIDER_W,
            CAM_ZOOM_SLIDER_H);
+  if (gtk_widget_get_visible (self->focus_slider))
+    place (self->focus_slider, (width - CAM_ZOOM_SLIDER_W) / 2.0, vf_h - 2 * CAM_ZOOM_SLIDER_H - CAM_FOCUS_SLIDER_GAP,
+           CAM_ZOOM_SLIDER_W, CAM_ZOOM_SLIDER_H);
   place_tune (self, width, vf_h);
   /* the pro row: its bottom on the secondary bar's top, sliding down by its height as it hides */
   if (gtk_widget_get_visible (self->pro_row))
@@ -2450,6 +2585,7 @@ cam_view_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
   gtk_widget_snapshot_child (widget, self->countdown, snapshot);
   gtk_widget_snapshot_child (widget, self->island, snapshot);
   gtk_widget_snapshot_child (widget, self->zoom_slider, snapshot);
+  gtk_widget_snapshot_child (widget, self->focus_slider, snapshot);
   gtk_widget_snapshot_child (widget, self->tune_panel, snapshot);
   gtk_widget_snapshot_child (widget, self->pro_row, snapshot);
   if (is_landscape (width, height))
@@ -2509,6 +2645,8 @@ cam_view_dispose (GObject *object)
       g_object_remove_weak_pointer (G_OBJECT (self->window), (gpointer *) &self->window);
       self->window = NULL;
     }
+  if (self->focus)
+    g_signal_handlers_disconnect_by_data (self->focus, self);
   if (self->pipeline)
     {
       g_signal_handlers_disconnect_by_data (self->pipeline, self);
@@ -2534,6 +2672,7 @@ cam_view_dispose (GObject *object)
   g_cancellable_cancel (self->thumb_cancel);
   g_clear_handle_id (&self->close_timer, g_source_remove);
   g_clear_handle_id (&self->slider_hide, g_source_remove);
+  g_clear_handle_id (&self->focus_save, g_source_remove);
   g_clear_handle_id (&self->duration_timer, g_source_remove);
   g_clear_handle_id (&self->start_timer, g_source_remove);
   g_clear_handle_id (&self->flash_timer, g_source_remove);
@@ -2546,6 +2685,9 @@ cam_view_dispose (GObject *object)
   g_clear_object (&self->cancel);
   g_clear_object (&self->thumb_cancel);
   g_clear_object (&self->pipeline);
+  if (self->focus)
+    g_signal_handlers_disconnect_by_data (self->focus, self);
+  g_clear_object (&self->focus);
   g_clear_object (&self->sensors);
   g_clear_object (&self->storage);
   g_clear_object (&self->settings);
@@ -2605,6 +2747,10 @@ build (CamView *self)
   gtk_widget_set_visible (self->zoom_slider, FALSE);
   gtk_widget_set_parent (self->zoom_slider, widget);
   g_signal_connect (self->zoom_slider, "changed", G_CALLBACK (on_slider_changed), self);
+  self->focus_slider = cam_zoom_slider_new ();
+  gtk_widget_set_visible (self->focus_slider, FALSE);
+  gtk_widget_set_parent (self->focus_slider, widget);
+  g_signal_connect (self->focus_slider, "changed", G_CALLBACK (on_focus_slider), self);
 
   self->tune_panel = cam_tune_panel_new ();
   gtk_widget_set_visible (self->tune_panel, FALSE);
@@ -2836,6 +2982,9 @@ cam_window_new (GtkApplication *app)
   self->settings = g_settings_new (APP_ID);
   self->cameras = cam_devices_enumerate ();
   self->pipeline = cam_pipeline_new (&error);
+  self->focus = cam_focus_new (self->settings);
+  if (self->pipeline)
+    cam_pipeline_set_focus (self->pipeline, self->focus);
   self->sensors = cam_sensors_new ();
   self->storage = cam_storage_new ();
   self->bright_hook = shell_has (self, "KeepScreenBright");
@@ -2874,7 +3023,9 @@ cam_window_new (GtkApplication *app)
   g_signal_connect (self->pipeline, "streaming", G_CALLBACK (on_streaming), self);
   g_signal_connect (self->pipeline, "error", G_CALLBACK (on_pipeline_error), self);
   g_signal_connect (self->pipeline, "barcode", G_CALLBACK (on_barcode_found), self);
-  g_signal_connect (self->pipeline, "focused", G_CALLBACK (on_focused), self);
+  g_signal_connect (self->focus, "state-changed", G_CALLBACK (on_focus_state), self);
+  g_signal_connect (self->focus, "notify::available", G_CALLBACK (on_focus_available), self);
+  sync_focus (self);
   g_signal_connect (self->sensors, "notify::orientation", G_CALLBACK (on_orientation), self);
   g_signal_connect (self->sensors, "notify::display-rotation", G_CALLBACK (on_display_rotation), self);
   g_signal_connect (self->sensors, "notify::thermal", G_CALLBACK (on_thermal), self);

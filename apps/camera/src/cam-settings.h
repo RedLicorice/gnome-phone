@@ -3,7 +3,7 @@
  *
  * Only the rows this build can back (§20.3): Bright screen (if the shell can hold the brightness), Save location
  * data (if GeoClue is there), Shutter sound, Leveler (if the phone has a raw accelerometer), Gestures (if the shell
- * hands the app its volume keys), Mirror front camera (if there is a front camera), Enable video mirroring (if a
+ * hands the app its volume keys), Focus (if the camera in use has a lens), Mirror front camera (if there is a front camera), Enable video mirroring (if a
  * video can be recorded). The rest of Aperture's rows are left out, not shown disabled. */
 #pragma once
 
@@ -18,6 +18,7 @@ typedef enum {
   CAM_SETTINGS_FRONT    = 1 << 3,
   CAM_SETTINGS_VIDEO    = 1 << 4,
   CAM_SETTINGS_BRIGHT   = 1 << 5,
+  CAM_SETTINGS_FOCUS    = 1 << 6,
 } CamSettingsRows;
 
 #define CAM_TYPE_SETTINGS (cam_settings_get_type ())

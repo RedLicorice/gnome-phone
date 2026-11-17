@@ -33,7 +33,7 @@ struct _CamSettings {
   GtkWidget       *pages[2], *scrollers[2];
   GtkWidget       *invert_row;
   GPtrArray       *lists;       /* ListRow * */
-  GtkWidget       *bright, *location, *leveler, *gestures, *photos, *video;
+  GtkWidget       *bright, *location, *leveler, *gestures, *photos, *video, *focus;
   int              page;
 };
 
@@ -477,7 +477,8 @@ build (CamSettings *self)
 {
   static const char *const mirror_values[] = { "off", "on", "front" };
   static const char *const action_values[] = { "shutter", "focus", "mic-mute", "zoom", "default", "nothing" };
-  static const char *mirror_labels[3], *action_labels[6];
+  static const char *const af_values[] = { "auto", "tap", "manual" };
+  static const char *mirror_labels[3], *action_labels[6], *af_labels[3];
   GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
   GtkWidget *bar = gtk_overlay_new ();
   GtkWidget *up = neo_icon_button_new ("cam-back-symbolic");
@@ -487,6 +488,9 @@ build (CamSettings *self)
   mirror_labels[0] = C_("mirror", "Off");
   mirror_labels[1] = C_("mirror", "On");
   mirror_labels[2] = _("Front facing camera only");
+  af_labels[0] = _("Automatic");
+  af_labels[1] = _("Tap to focus only");
+  af_labels[2] = _("Manual");
   action_labels[0] = _("Shutter");
   action_labels[1] = _("Focus");
   action_labels[2] = _("Microphone mute");
@@ -548,6 +552,10 @@ build (CamSettings *self)
   category (self->photos, _("Photos"));
   switch_row (self, self->photos, "photo-ffc-mirror", _("Mirror front camera"),
               _("Save front camera photos as they appear in the preview"));
+  self->focus = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+  gtk_box_append (GTK_BOX (list), self->focus);
+  category (self->focus, C_("settings", "Focus"));
+  list_row (self, self->focus, "af-mode", _("Autofocus"), af_labels, af_values, 3);
   self->video = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
   gtk_box_append (GTK_BOX (list), self->video);
   category (self->video, C_("settings", "Video"));
@@ -590,6 +598,7 @@ cam_settings_set_rows (CamSettings *self, CamSettingsRows rows)
   gtk_widget_set_visible (self->gestures, rows & CAM_SETTINGS_GESTURES);
   gtk_widget_set_visible (self->photos, rows & CAM_SETTINGS_FRONT);
   gtk_widget_set_visible (self->video, rows & CAM_SETTINGS_VIDEO);
+  gtk_widget_set_visible (self->focus, rows & CAM_SETTINGS_FOCUS);
 }
 
 void

@@ -19,8 +19,9 @@ struct _CamViewfinder {
   gboolean      leveler;
   double        tilt;
   /* the focus ring */
-  gboolean      focusing;
-  double        focus_x, focus_y, focus_pad;
+  gboolean      focusing, focus_ok;
+  double        focus_x, focus_y, focus_pad, focus_angle;
+  guint         focus_tick;
   NeoAnim      *focus_anim;
   guint         focus_hide;
   /* the capture blink, 0 … 1 */
@@ -187,10 +188,33 @@ cam_viewfinder_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
       g_autoptr(GskStroke) stroke = gsk_stroke_new (1);
       GdkRGBA white = CAM_C (0xFFFFFF);
 
-      /* camera_focus_circle: a 1 dp white oval stroke inside the 75 dp view, less its padding */
+      /* camera_focus_circle: a 1 dp white oval stroke inside the 75 dp view, less its padding. Over it, once the
+       * search is over: yellow for a lens that found its peak, red for one that did not */
+      if (!self->focusing)
+        white = self->focus_ok ? CAM_C (CAM_C_YELLOW) : CAM_C (CAM_C_REC_RED);
       gsk_path_builder_add_circle (builder, &GRAPHENE_POINT_INIT (self->focus_x, self->focus_y), r - 0.5);
       path = gsk_path_builder_to_path (builder);
       gtk_snapshot_append_stroke (snapshot, path, stroke, &white);
+      if (self->focusing)
+        {
+          /* the search is running: a quarter of a circle goes round the ring */
+          g_autoptr(GskPathBuilder) arc = gsk_path_builder_new ();
+          g_autoptr(GskPath) arc_path = NULL;
+          g_autoptr(GskStroke) thick = gsk_stroke_new (3);
+
+          for (int i = 0; i <= CAM_FOCUS_ARC_STEPS; i++)
+            {
+              double a = (self->focus_angle + 90.0 * i / CAM_FOCUS_ARC_STEPS) * G_PI / 180;
+              double x = self->focus_x + (r - 0.5) * cos (a), y = self->focus_y + (r - 0.5) * sin (a);
+
+              if (i == 0)
+                gsk_path_builder_move_to (arc, x, y);
+              else
+                gsk_path_builder_line_to (arc, x, y);
+            }
+          arc_path = gsk_path_builder_to_path (arc);
+          gtk_snapshot_append_stroke (snapshot, arc_path, thick, &white);
+        }
     }
   if (self->blink > 0 && self->blink < 1)
     {
@@ -419,15 +443,36 @@ cam_viewfinder_set_leveler (CamViewfinder *self, gboolean shown, double tilt)
   gtk_widget_queue_draw (GTK_WIDGET (self));
 }
 
+static gboolean
+on_focus_tick (GtkWidget *widget, GdkFrameClock *clock, gpointer data)
+{
+  CamViewfinder *self = CAM_VIEWFINDER (widget);
+
+  if (!self->focusing)
+    {
+      self->focus_tick = 0;
+      return G_SOURCE_REMOVE;
+    }
+  self->focus_angle = fmod (gdk_frame_clock_get_frame_time (clock) / 1000.0 * 360.0 / CAM_MS_FOCUS_SPIN, 360.0);
+  gtk_widget_queue_draw (widget);
+  return G_SOURCE_CONTINUE;
+}
+
 void
 cam_viewfinder_focus (CamViewfinder *self, double x, double y)
 {
   g_clear_handle_id (&self->focus_hide, g_source_remove);
   self->focus_x = x;
   self->focus_y = y;
-  self->focusing = TRUE;
-  /* padding 0 → 8 dp, 300 ms AD */
-  neo_anim_start (self->focus_anim, 0, CAM_FOCUS_RING_INSET, CAM_MS_DEFAULT, 0, SPONGY_ACCELERATE_DECELERATE);
+  if (!self->focusing)
+    {
+      self->focusing = TRUE;
+      /* padding 0 → 8 dp, 300 ms AD */
+      neo_anim_start (self->focus_anim, 0, CAM_FOCUS_RING_INSET, CAM_MS_DEFAULT, 0, SPONGY_ACCELERATE_DECELERATE);
+    }
+  if (!self->focus_tick)
+    self->focus_tick = gtk_widget_add_tick_callback (GTK_WIDGET (self), on_focus_tick, NULL, NULL);
+  gtk_widget_queue_draw (GTK_WIDGET (self));
 }
 
 static gboolean
@@ -441,14 +486,54 @@ on_focus_hide (gpointer data)
 }
 
 void
-cam_viewfinder_focus_done (CamViewfinder *self)
+cam_viewfinder_focus_done (CamViewfinder *self, gboolean ok)
 {
   if (!self->focusing)
     return;
   self->focusing = FALSE;
+  self->focus_ok = ok;
   neo_anim_start (self->focus_anim, self->focus_pad, 0, CAM_MS_DEFAULT, 0, SPONGY_ACCELERATE_DECELERATE);
   g_clear_handle_id (&self->focus_hide, g_source_remove);
-  self->focus_hide = g_timeout_add (CAM_MS_DEFAULT + CAM_MS_FOCUS_HIDE, on_focus_hide, self);
+  self->focus_hide = g_timeout_add (CAM_MS_DEFAULT + (ok ? CAM_MS_FOCUS_HIDE : CAM_MS_FOCUS_FAILED_HIDE), on_focus_hide,
+                                    self);
+}
+
+gboolean
+cam_viewfinder_to_frame (CamViewfinder *self, double x, double y, double *frame_x, double *frame_y)
+{
+  graphene_rect_t rect, visible;
+  double scale, sx, sy, th = self->orientation * G_PI / 180, ux, uy;
+  int pw = self->paintable ? gdk_paintable_get_intrinsic_width (self->paintable) : 0;
+  int ph = self->paintable ? gdk_paintable_get_intrinsic_height (self->paintable) : 0;
+
+  if (pw <= 0 || ph <= 0)
+    pw = self->frame_w, ph = self->frame_h;
+  if (pw <= 0 || ph <= 0)
+    return FALSE;
+  picture_rect (self, &rect, NULL);
+  cam_viewfinder_get_picture (self, &visible);
+  /* the inverse of draw_preview: its scale, then undo the turn and the mirror about the visible part's middle */
+  scale = self->orientation % 180 ? MIN (rect.size.width / ph, rect.size.height / pw)
+                                  : MIN (rect.size.width / pw, rect.size.height / ph);
+  sx = (self->mirror ? -1 : 1) * scale * self->zoom;
+  sy = scale * self->zoom;
+  x = (x - (visible.origin.x + visible.size.width / 2)) / sx;
+  y = (y - (visible.origin.y + visible.size.height / 2)) / sy;
+  ux = x * cos (th) + y * sin (th) + pw / 2.0;
+  uy = -x * sin (th) + y * cos (th) + ph / 2.0;
+  *frame_x = ux / pw;
+  *frame_y = uy / ph;
+  return *frame_x >= 0 && *frame_x <= 1 && *frame_y >= 0 && *frame_y <= 1;
+}
+
+void
+cam_viewfinder_get_centre (CamViewfinder *self, double *x, double *y)
+{
+  graphene_rect_t visible;
+
+  cam_viewfinder_get_picture (self, &visible);
+  *x = visible.origin.x + visible.size.width / 2;
+  *y = visible.origin.y + visible.size.height / 2;
 }
 
 void

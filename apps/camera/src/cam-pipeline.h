@@ -16,6 +16,8 @@
  * "error" tells the window when it gives up. */
 #pragma once
 
+#include "cam-focus.h"
+
 #include <gdk/gdk.h>
 #include <gst/gst.h>
 
@@ -63,10 +65,11 @@ void          cam_pipeline_set_recording  (CamPipeline *self, CamFrameFunc func,
                                            gboolean mirror, int rotation);
 void          cam_pipeline_set_zoom       (CamPipeline *self, double zoom);
 
-/* Autofocus, where the camera has it (libcamera's AfMode answers continuous): known a moment after "streaming",
- * then "notify::has-af". cam_pipeline_refocus restarts the search; "focused" when the lens has settled. */
-gboolean      cam_pipeline_has_af         (CamPipeline *self);
-void          cam_pipeline_refocus        (CamPipeline *self);
+/* The lens' autofocus (cam-focus.h). The pipeline feeds it the frames, tells it which camera streams and when
+ * the first frame is there, and tells libcamera's own autofocus to stay still for a camera that has a lens. A photo
+ * asked for (cam_pipeline_grab) while a search runs is taken when it is over. Set it before the first start. */
+void          cam_pipeline_set_focus      (CamPipeline *self, CamFocus *focus);
+CamFocus     *cam_pipeline_get_focus      (CamPipeline *self);
 
 /* TRUE if opening @camera_id would crash libcamera's GStreamer source: this process opened it before and another camera
  * since. (libcamerasrc connects Camera::requestCompleted at every open and never disconnects, so a Camera that stays
@@ -86,7 +89,6 @@ void          cam_pipeline_set_tone       (CamPipeline *self, gboolean enabled, 
 GstClock     *cam_pipeline_get_clock      (CamPipeline *self);
 GstClockTime  cam_pipeline_get_base_time  (CamPipeline *self);
 
-/* Signals: "streaming" (), "error" (int CamPipelineError, string detail), "barcode" (string text),
- * "focused" (); property "has-af" */
+/* Signals: "streaming" (), "error" (int CamPipelineError, string detail), "barcode" (string text) */
 
 G_END_DECLS

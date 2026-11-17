@@ -36,9 +36,16 @@ gboolean   cam_viewfinder_is_frozen    (CamViewfinder *self);
 void       cam_viewfinder_set_grid     (CamViewfinder *self, CamGrid grid);
 /* the leveler, with the phone's tilt in degrees (OrientationEventListener's), NaN for none yet */
 void       cam_viewfinder_set_leveler  (CamViewfinder *self, gboolean shown, double tilt);
-/* the focus ring at a point: it shrinks while focusing, grows back on focus_done and goes 500 ms later */
+/* The focus ring at a point: it shrinks and a short arc runs round it while the lens searches (it is never silent),
+ * grows back on focus_done, yellow when the lens found its peak and red when it did not, and goes 500 ms (1 s when it
+ * failed) later. Called again while it runs, it moves to the new point. */
 void       cam_viewfinder_focus        (CamViewfinder *self, double x, double y);
-void       cam_viewfinder_focus_done   (CamViewfinder *self);
+void       cam_viewfinder_focus_done   (CamViewfinder *self, gboolean ok);
+/* where a point of the viewfinder is in the frame as the sensor sends it (the picture is turned, mirrored, fitted and
+ * zoomed): fractions of its width and height. FALSE if the frame's size is not known yet or the point is outside it. */
+gboolean   cam_viewfinder_to_frame     (CamViewfinder *self, double x, double y, double *frame_x, double *frame_y);
+/* the middle of the picture's visible part */
+void       cam_viewfinder_get_centre   (CamViewfinder *self, double *x, double *y);
 void       cam_viewfinder_blink        (CamViewfinder *self);
 /* where the picture shows, in the viewfinder's coordinates */
 void       cam_viewfinder_get_picture  (CamViewfinder *self, graphene_rect_t *rect);

@@ -24,6 +24,7 @@ executable('neo-camera',
            'src/cam-sensors.c', 'src/cam-recorder.c', 'src/cam-photo.c', 'src/cam-storage.c', 'src/cam-sounds.c',
            'src/cam-widgets.c', 'src/cam-mode-selector.c', 'src/cam-viewfinder.c', 'src/cam-qr-sheet.c',
            'src/cam-settings.c', 'src/cam-dialogs.c', 'src/cam-key-import.c', 'src/cam-tune.c', 'src/cam-tone.c',
+           'src/cam-af.c', 'src/cam-lens.c', 'src/cam-focus.c',
            'src/cam-restart.c',
            resources,
            dependencies: deps, install: true)
@@ -51,3 +52,12 @@ test('tone', executable('test-tone', 'tests/test-tone.c', 'src/cam-tone.c', incl
 # a restarted Camera is a plain launch (service-mode argv left it without a window)
 test('restart', executable('test-restart', 'tests/test-restart.c', 'src/cam-restart.c', include_directories: 'src',
                            dependencies: deps))
+
+# the autofocus search on synthetic sharpness curves, its sharpness measure, its config and the lens lookup (no camera)
+test('af', executable('test-af', 'tests/test-af.c', 'src/cam-af.c', 'src/cam-lens.c', include_directories: 'src',
+                      dependencies: deps, build_by_default: false),
+     env: {'CAM_SCHEMA_DIR': meson.current_source_dir() / 'data'})
+
+# the autofocus on the real camera without the window: run `live-af` on the phone (docs in tests/live-af.c)
+executable('live-af', 'tests/live-af.c', 'src/cam-af.c', 'src/cam-lens.c', 'src/cam-focus.c', 'src/cam-devices.c',
+           include_directories: 'src', dependencies: deps, build_by_default: false)

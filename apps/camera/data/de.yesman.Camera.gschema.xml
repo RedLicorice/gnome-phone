@@ -74,6 +74,131 @@
       <default>false</default>
       <summary>The flash button's long press was explained (or used)</summary>
     </key>
+    <!-- Autofocus (src/cam-af.h), for a camera with a lens actuator: the POCO X3 NFC's main camera. libcamera's soft ISP
+         has an Af algorithm of its own (continuous, slow, no region), so the app drives the lens itself. Lens positions
+         are the actuator's own counts (DW9807: 0 to 1023). Minerva's eyes (minerva_eyes/focus.py) has the same keys in
+         its [focus] section. -->
+    <key name="af-mode" type="s">
+      <default>'auto'</default>
+      <summary>Autofocus: auto (focuses on its own and when the scene changes), tap (only when the viewfinder is tapped) or manual (the slider)</summary>
+    </key>
+    <key name="af-manual-position" type="d">
+      <default>0.5</default>
+      <range min="0" max="1"/>
+      <summary>Manual focus: where the lens stands between af-pos-min and af-pos-max</summary>
+    </key>
+    <key name="af-pos-min" type="i">
+      <default>384</default>
+      <range min="0" max="65535"/>
+      <summary>The sweep starts at this lens position; the spring holds the lens at its stop under 384 (libcamera imx682.yaml scanMin)</summary>
+    </key>
+    <key name="af-pos-max" type="i">
+      <default>1023</default>
+      <range min="1" max="65535"/>
+      <summary>The sweep ends at this lens position (clamped to what the lens reports)</summary>
+    </key>
+    <key name="af-coarse-steps" type="i">
+      <default>8</default>
+      <range min="3" max="32"/>
+      <summary>Positions of the first sweep</summary>
+    </key>
+    <key name="af-refine-levels" type="i">
+      <default>3</default>
+      <range min="0" max="8"/>
+      <summary>Each level measures the best position and half the previous distance either side of it</summary>
+    </key>
+    <key name="af-settle-ms" type="i">
+      <default>250</default>
+      <range min="0" max="2000"/>
+      <summary>After a lens move, frames are ignored for this long (libcamera shows the old position for about 150 ms and the coil needs up to 250 ms more)</summary>
+    </key>
+    <key name="af-skip-frames" type="i">
+      <default>2</default>
+      <range min="0" max="30"/>
+      <summary>Frames ignored after that</summary>
+    </key>
+    <key name="af-roi" type="d">
+      <default>0.3</default>
+      <range min="0.02" max="1"/>
+      <summary>Side of the measured square, a fraction of the frame short side</summary>
+    </key>
+    <key name="af-min-contrast" type="d">
+      <default>1.25</default>
+      <range min="1" max="1000"/>
+      <summary>Best over worst sharpness under this: no clear peak, the lens goes back to its last good position</summary>
+    </key>
+    <key name="af-min-score" type="d">
+      <default>0.0002</default>
+      <range min="0" max="1000"/>
+      <summary>A best sharpness under this: nothing to focus on (a dark or blank scene)</summary>
+    </key>
+    <key name="af-min-luma" type="d">
+      <default>12</default>
+      <range min="0" max="255"/>
+      <summary>A measured region whose mean grey (0 to 255) is under this is dark: its sharpness counts as 0</summary>
+    </key>
+    <key name="af-early-contrast" type="d">
+      <default>6.0</default>
+      <range min="1" max="1000"/>
+      <summary>The sweep stops at a peak this far over the worst score ...</summary>
+    </key>
+    <key name="af-early-drop" type="d">
+      <default>0.6</default>
+      <range min="0.01" max="1"/>
+      <summary>... once af-early-count scores in a row fell under this fraction of it</summary>
+    </key>
+    <key name="af-early-count" type="i">
+      <default>2</default>
+      <range min="1" max="8"/>
+      <summary>Scores in a row that confirm the sweep went past the peak</summary>
+    </key>
+    <key name="af-plateau-tol" type="d">
+      <default>0.03</default>
+      <range min="0" max="1"/>
+      <summary>Positions within this fraction of the peak are one plateau: its middle is taken</summary>
+    </key>
+    <key name="af-timeout-ms" type="i">
+      <default>8000</default>
+      <range min="500" max="60000"/>
+      <summary>A search that takes longer fails</summary>
+    </key>
+    <key name="af-start-delay-ms" type="i">
+      <default>600</default>
+      <range min="0" max="10000"/>
+      <summary>After the first frame, before the first search (the exposure settles)</summary>
+    </key>
+    <key name="af-watch-every-ms" type="i">
+      <default>500</default>
+      <range min="100" max="10000"/>
+      <summary>Auto mode looks at the sharpness this often ...</summary>
+    </key>
+    <key name="af-watch-drop" type="d">
+      <default>0.6</default>
+      <range min="0.05" max="1"/>
+      <summary>... and searches again when it fell under this fraction of its reference ...</summary>
+    </key>
+    <key name="af-watch-count" type="i">
+      <default>3</default>
+      <range min="1" max="20"/>
+      <summary>... this many looks in a row ...</summary>
+    </key>
+    <key name="af-watch-gap-ms" type="i">
+      <default>3000</default>
+      <range min="0" max="60000"/>
+      <summary>... and not within this time of the last search</summary>
+    </key>
+    <key name="af-dt-root" type="s">
+      <default>'/sys/firmware/devicetree/base'</default>
+      <summary>Where the kernel shows the devicetree (a sensor node names its lens in lens-focus)</summary>
+    </key>
+    <key name="af-subdev-class" type="s">
+      <default>'/sys/class/video4linux'</default>
+      <summary>The V4L2 class directory, to find the lens subdev</summary>
+    </key>
+    <key name="af-dev-dir" type="s">
+      <default>'/dev'</default>
+      <summary>Where the subdev nodes are</summary>
+    </key>
     <!-- Settings (res/xml/root_preferences.xml, gestures_preferences.xml) -->
     <key name="bright-screen" type="b">
       <default>false</default>

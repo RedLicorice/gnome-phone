@@ -44,6 +44,7 @@
 #define CAM_FOCUS_RING_INSET       8        /* padding 0 → 8 dp while focusing              §9     */
 #define CAM_ZOOM_SLIDER_W          250
 #define CAM_ZOOM_SLIDER_H          32
+#define CAM_FOCUS_SLIDER_GAP       8        /* the manual focus slider over the zoom slider */
 #define CAM_TUNE_MARGIN            8        /* the sheet's distance from the viewfinder's edges and bottom           */
 #define CAM_TUNE_LABEL_W           74       /* the tuning sheet: a slider's name                                 */
 #define CAM_FLING_MIN              75       /*                                               §1     */
@@ -78,6 +79,9 @@
 #define CAM_MS_SLIDE_DOWN          200
 #define CAM_MS_SLIDER_HIDE         2000
 #define CAM_MS_FOCUS_HIDE          500
+#define CAM_MS_FOCUS_FAILED_HIDE   1000     /* a ring that did not find its focus stays longer: it says why */
+#define CAM_MS_FOCUS_SPIN          900      /* the arc that runs round the ring while the lens searches: one turn */
+#define CAM_FOCUS_ARC_STEPS        12
 #define CAM_MS_PINCH_GUARD         500      /* no mode fling after a pinch                  §8     */
 #define CAM_MS_COUNTDOWN_FADE      800      /* scale 1 → 2.5, alpha 1 → 0, AD               §10    */
 #define CAM_MS_COUNTDOWN_TICK      1000
