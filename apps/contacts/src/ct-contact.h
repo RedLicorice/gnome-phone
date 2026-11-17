@@ -169,6 +169,26 @@ char *ct_contact_get_channel (EContact *contact, const char *scheme, const char 
  * channel stay, and so does every other IMPP property */
 void  ct_contact_set_channel (EContact *contact, const char *scheme, const char *legacy_property, const char *value);
 
+/* --- merging two contacts
+ * The rule, which the app shows before it merges: @into is the contact that stays. Its name, photo, company and
+ * birthday are kept; where it has none, @from's are taken. Every row that can be many (numbers, emails, addresses,
+ * websites, nicknames, relations, notes, other dates, instant-messaging ids such as IMPP:whatsapp:…, labels) is added
+ * up, without a row that is there already (a number is the same number by its last digits). What @into's own vCard
+ * has besides stays as it is. The result says where both had one and they differed. */
+/* two numbers are the same number when their last digits are (the people library's and the memory service's
+ * min_match_digits): +39 333 111 2222 and 0039 333 111 2222 */
+#define CT_MERGE_MIN_MATCH_DIGITS 7
+
+typedef enum {
+  CT_MERGE_NAME = 1 << 0,
+  CT_MERGE_PHOTO = 1 << 1,
+  CT_MERGE_ORGANIZATION = 1 << 2,
+  CT_MERGE_BIRTHDAY = 1 << 3,
+} CtMergeConflict;
+
+/* writes the merged card into @into (a copy of the contact, the caller saves it); the CtMergeConflict bits */
+guint ct_contact_merge (EContact *into, EContact *from);
+
 /* --- dates (§4.16, §10.4) */
 
 /* yyyy-MM-dd, --MM-dd, yyyyMMdd, --MMdd, with an optional time part after a T; @year 0 when the date has none */

@@ -394,6 +394,69 @@ test_channels (void)
 }
 
 static void
+test_merge (void)
+{
+  g_autoptr(EContact) into = e_contact_new_from_vcard (
+    "BEGIN:VCARD\nVERSION:3.0\nUID:to\nN:Rossi;Andrea;;;\nFN:Andrea Rossi\nTEL;TYPE=CELL:+39 333 111 2222\n"
+    "EMAIL;TYPE=HOME:andrea@example.org\nBDAY:1990-03-15\nORG:Acme;\nIMPP:whatsapp:393331112222\n"
+    "X-EVOLUTION-FILE-AS:Rossi\\, Andrea\nEND:VCARD\n");
+  g_autoptr(EContact) from = e_contact_new_from_vcard (
+    "BEGIN:VCARD\nVERSION:3.0\nUID:from\nN:Rossi;Andy;;;\nFN:Andy Rossi\nTEL;TYPE=WORK:0039 333 111 2222\n"
+    "TEL;TYPE=HOME:+39 06 555 0100\nEMAIL;TYPE=WORK:ANDREA@example.org\nEMAIL;TYPE=WORK:work@example.org\n"
+    "BDAY:1991-01-01\nORG:Other;\nPHOTO;ENCODING=b;TYPE=PNG:aGVsbG8=\nIMPP:whatsapp:393331112222\n"
+    "IMPP;X-SERVICE-TYPE=Telegram:telegram:777\nNOTE:from note\nCATEGORIES:Friends\nEND:VCARD\n");
+  g_autoptr(GPtrArray) phones = NULL, emails = NULL;
+  g_autofree char *text = NULL;
+  guint conflicts = ct_contact_merge (into, from);
+
+  /* where both have one, the surviving contact's stays, and the conflict is said */
+  g_assert_cmpuint (conflicts, ==, CT_MERGE_NAME | CT_MERGE_ORGANIZATION | CT_MERGE_BIRTHDAY);
+  text = e_vcard_to_string (E_VCARD (into), EVC_FORMAT_VCARD_30);
+  g_assert_nonnull (strstr (text, "FN:Andrea Rossi"));
+  g_assert_nonnull (strstr (text, "1990-03-15"));
+  g_assert_nonnull (strstr (text, "ORG:Acme"));
+  g_assert_null (strstr (text, "1991-01-01"));
+  g_assert_nonnull (strstr (text, "PHOTO"));                       /* it had none: the other's */
+  g_assert_nonnull (strstr (text, "X-EVOLUTION-FILE-AS:Rossi"));   /* what its vCard has besides stays */
+  /* rows add up without doubles: the same number by its digits is one, an email is the same without case */
+  phones = ct_contact_get_items (into, CT_KIND_PHONE);
+  g_assert_cmpuint (phones->len, ==, 2);
+  emails = ct_contact_get_items (into, CT_KIND_EMAIL);
+  g_assert_cmpuint (emails->len, ==, 2);
+  g_assert_nonnull (strstr (text, "from note"));
+  g_assert_nonnull (strstr (text, "Friends"));
+  /* the channels: the same id once, the other one added with its parameters */
+  {
+    g_autofree char *wa = ct_contact_get_channel (into, "whatsapp", NULL);
+    g_autofree char *tg = ct_contact_get_channel (into, "telegram", NULL);
+
+    g_assert_cmpstr (wa, ==, "393331112222");
+    g_assert_cmpstr (tg, ==, "777");
+    g_assert_nonnull (strstr (text, "X-SERVICE-TYPE=Telegram"));
+  }
+  /* once more changes nothing */
+  g_assert_cmpuint (ct_contact_merge (into, from), ==, CT_MERGE_NAME | CT_MERGE_ORGANIZATION | CT_MERGE_BIRTHDAY);
+  {
+    g_autofree char *again = e_vcard_to_string (E_VCARD (into), EVC_FORMAT_VCARD_30);
+
+    g_assert_cmpstr (again, ==, text);
+  }
+}
+
+static void
+test_merge_fills_what_is_missing (void)
+{
+  g_autoptr(EContact) into = e_contact_new_from_vcard ("BEGIN:VCARD\nVERSION:3.0\nUID:to\nTEL:+39 333 1\nEND:VCARD\n");
+  g_autoptr(EContact) from = e_contact_new_from_vcard (
+    "BEGIN:VCARD\nVERSION:3.0\nUID:from\nN:Bianchi;Marco;;;\nFN:Marco Bianchi\nORG:Acme;\nBDAY:1990-03-15\nEND:VCARD\n");
+  g_autofree char *name = NULL;
+
+  g_assert_cmpuint (ct_contact_merge (into, from), ==, 0);
+  name = ct_contact_display_name (into, CT_ORDER_PRIMARY);
+  g_assert_cmpstr (name, ==, "Marco Bianchi");
+}
+
+static void
 test_word_prefix (void)
 {
   g_assert_cmpint (ct_index_of_word_prefix ("John Smith", "SM"), ==, 5);
@@ -470,6 +533,8 @@ main (int argc, char **argv)
   g_test_add_func ("/contact/organization", test_organization);
   g_test_add_func ("/contact/dates", test_dates);
   g_test_add_func ("/contact/channels", test_channels);
+  g_test_add_func ("/contact/merge", test_merge);
+  g_test_add_func ("/contact/merge-fills", test_merge_fills_what_is_missing);
   g_test_add_func ("/contact/word-prefix", test_word_prefix);
   g_test_add_func ("/contact/search", test_search);
   return g_test_run ();

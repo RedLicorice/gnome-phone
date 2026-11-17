@@ -111,3 +111,69 @@ ct_mnv_date (JsonObject *o, const char *member, const char *format)
     }
   return when ? g_date_time_format (when, format && *format ? format : "%x") : NULL;
 }
+
+static JsonArray *
+people_of (JsonObject *known)
+{
+  return known && json_object_has_member (known, "people") ? json_object_get_array_member (known, "people") : NULL;
+}
+
+const char *
+ct_mnv_owner_contact (JsonObject *known)
+{
+  JsonArray *people = people_of (known);
+  const char *owner = known ? json_object_get_string_member_with_default (known, "owner", "") : "";
+
+  for (guint i = 0; *owner && people && i < json_array_get_length (people); i++)
+    {
+      JsonObject *person = json_array_get_object_element (people, i);
+
+      if (person && !g_strcmp0 (json_object_get_string_member_with_default (person, "id", ""), owner))
+        return json_object_get_string_member_with_default (person, "contact_uid", "");
+    }
+  return "";
+}
+
+gboolean
+ct_mnv_is_owner (JsonObject *known, JsonObject *person)
+{
+  const char *owner = known ? json_object_get_string_member_with_default (known, "owner", "") : "";
+
+  return *owner && person && !g_strcmp0 (json_object_get_string_member_with_default (person, "id", ""), owner);
+}
+
+GPtrArray *
+ct_mnv_owned_by (JsonObject *known, const char *uid)
+{
+  GPtrArray *owned = g_ptr_array_new ();
+  JsonArray *people = people_of (known);
+
+  for (guint i = 0; uid && *uid && people && i < json_array_get_length (people); i++)
+    {
+      JsonObject *person = json_array_get_object_element (people, i);
+
+      if (person && !g_strcmp0 (json_object_get_string_member_with_default (person, "owner_contact", ""), uid))
+        g_ptr_array_add (owned, person);
+    }
+  return owned;
+}
+
+GPtrArray *
+ct_mnv_of_kind (JsonObject *known, const char *kind, gboolean loose_only)
+{
+  GPtrArray *found = g_ptr_array_new ();
+  JsonArray *people = people_of (known);
+
+  for (guint i = 0; people && i < json_array_get_length (people); i++)
+    {
+      JsonObject *person = json_array_get_object_element (people, i);
+
+      if (!person || !json_object_has_member (person, "id")
+          || g_strcmp0 (json_object_get_string_member_with_default (person, "kind", "person"), kind))
+        continue;
+      if (loose_only && *json_object_get_string_member_with_default (person, "contact_uid", ""))
+        continue;
+      g_ptr_array_add (found, person);
+    }
+  return found;
+}

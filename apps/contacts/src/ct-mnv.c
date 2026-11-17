@@ -4,6 +4,7 @@
 
 #include "ns-mc.h"
 
+#include <libsoup/soup.h>
 #include <string.h>
 
 static JsonObject *ui;          /* `people ui` once per process: the texts do not change under a running app */
@@ -266,4 +267,325 @@ ct_mnv_rule_set (GObject *owner, const char *key, const char *value, CtMnvDone d
   g_autofree char *pair = g_strconcat (key, "=", value, NULL);
 
   people (owner, NULL, done, data, "rules-set", pair, NULL);
+}
+
+void
+ct_mnv_set_owner (GObject *owner, const char *pid, const char *contact_uid, CtMnvDone done, gpointer data)
+{
+  if (contact_uid && *contact_uid)
+    people (owner, NULL, done, data, "owner", pid, contact_uid, NULL);
+  else
+    people (owner, NULL, done, data, "owner", pid, NULL);
+}
+
+void
+ct_mnv_rename (GObject *owner, const char *pid, const char *name, CtMnvDone done, gpointer data)
+{
+  people (owner, NULL, done, data, "rename", pid, name, NULL);
+}
+
+/* ---- the memory service ---- */
+
+static GKeyFile *memory_conf;
+static SoupSession *memory_session;
+
+static GKeyFile *
+conf (void)
+{
+  if (!memory_conf)
+    {
+      const char *named = g_getenv ("MINERVA_CONTACTS_CONF");
+      g_autofree char *path = named && *named ? g_strdup (named)
+                                              : g_build_filename (g_get_user_config_dir (), "minerva", "contacts.conf",
+                                                                  NULL);
+
+      memory_conf = g_key_file_new ();
+      g_key_file_load_from_file (memory_conf, path, G_KEY_FILE_NONE, NULL);   /* none: not configured */
+    }
+  return memory_conf;
+}
+
+static char *
+memory_token (void)
+{
+  return g_key_file_get_string (conf (), "memory", "token", NULL);
+}
+
+gboolean
+ct_mnv_memory_configured (void)
+{
+  g_autofree char *token = memory_token ();
+
+  return token && *token;
+}
+
+typedef struct {
+  CtMnvDone done;
+  gpointer data;
+  GObject *owner;
+  SoupMessage *message;
+} Memory;
+
+static void
+memory_finished (GObject *session, GAsyncResult *res, gpointer data)
+{
+  Memory *memory = data;
+  g_autoptr (GError) error = NULL;
+  g_autoptr (GBytes) body = soup_session_send_and_read_finish (SOUP_SESSION (session), res, &error);
+  guint status = soup_message_get_status (memory->message);
+  g_autofree char *why = NULL;
+
+  if (error)
+    why = g_strdup (error->message);
+  else if (status < 200 || status > 299)
+    {
+      /* {"error": …, "message": …} as the service answers a refusal */
+      g_autoptr (JsonParser) parser = json_parser_new ();
+      gsize size = 0;
+      const char *text = g_bytes_get_data (body, &size);
+
+      if (text && json_parser_load_from_data (parser, text, (gssize) size, NULL)
+          && JSON_NODE_HOLDS_OBJECT (json_parser_get_root (parser)))
+        {
+          JsonObject *o = json_node_get_object (json_parser_get_root (parser));
+          const char *message = ns_json_str (o, "message");
+
+          why = g_strdup_printf ("%s %s", ns_json_str (o, "error"), message);
+        }
+      if (!why || !*g_strstrip (why))
+        {
+          g_free (why);
+          why = g_strdup_printf ("HTTP %u", status);
+        }
+    }
+  memory->done (NULL, why, memory->data);
+  g_object_unref (memory->message);
+  g_clear_object (&memory->owner);
+  g_free (memory);
+}
+
+/* POST @path with @body (JSON) and the bearer token; the service answers 2xx with nothing to read */
+static void
+memory_post (GObject *owner, const char *path, const char *body, CtMnvDone done, gpointer data)
+{
+  g_autofree char *token = memory_token ();
+  g_autofree char *base = g_key_file_get_string (conf (), "memory", "url", NULL);
+  g_autofree char *url = NULL, *bearer = NULL;
+  Memory *memory;
+  g_autoptr (GBytes) bytes = NULL;
+  g_autoptr (GError) error = NULL;
+
+  if (!token || !*token)
+    {
+      done (NULL, ct_mnv_text ("memory_off"), data);
+      return;
+    }
+  if (!base || !*base)
+    base = g_strdup (ct_mnv_text ("memory_url"));
+  url = g_strconcat (base, path, NULL);
+  if (!memory_session)
+    {
+      int seconds = g_key_file_get_integer (conf (), "memory", "timeout_s", NULL);
+
+      memory_session = soup_session_new ();
+      soup_session_set_timeout (memory_session, (guint) (seconds > 0 ? seconds : ct_mnv_int ("memory_timeout_s")));
+    }
+  memory = g_new0 (Memory, 1);
+  memory->done = done;
+  memory->data = data;
+  memory->owner = owner ? g_object_ref (owner) : NULL;
+  memory->message = soup_message_new ("POST", url);
+  if (!memory->message)
+    {
+      done (NULL, url, data);
+      g_clear_object (&memory->owner);
+      g_free (memory);
+      return;
+    }
+  bearer = g_strconcat ("Bearer ", token, NULL);
+  soup_message_headers_append (soup_message_get_request_headers (memory->message), "Authorization", bearer);
+  bytes = g_bytes_new (body, strlen (body));
+  soup_message_set_request_body_from_bytes (memory->message, "application/json", bytes);
+  soup_session_send_and_read_async (memory_session, memory->message, G_PRIORITY_DEFAULT, NULL, memory_finished, memory);
+}
+
+void
+ct_mnv_memory_contact_deleted (GObject *owner, const char *id, const char *proof_json, CtMnvDone done, gpointer data)
+{
+  g_autofree char *escaped = g_uri_escape_string (id, NULL, FALSE);
+  g_autofree char *path = g_strdup_printf ("/v1/contacts/%s/deleted", escaped);
+  g_autofree char *body = g_strdup_printf ("{\"immediate\":true,\"proof\":%s}", proof_json);
+
+  memory_post (owner, path, body, done, data);
+}
+
+void
+ct_mnv_memory_contact_merged (GObject *owner, const char *from, const char *to, const char *proof_json,
+                              CtMnvDone done, gpointer data)
+{
+  g_autofree char *a = g_uri_escape_string (from, NULL, FALSE), *b = g_uri_escape_string (to, NULL, FALSE);
+  g_autofree char *path = g_strdup_printf ("/v1/contacts/%s/merged-into/%s", a, b);
+  g_autofree char *body = g_strdup_printf ("{\"proof\":%s}", proof_json);
+
+  memory_post (owner, path, body, done, data);
+}
+
+/* ---- the people archive follows the contact ---- */
+
+typedef struct {
+  GObject *owner;
+  GPtrArray *commands;          /* NULL-terminated argument vectors after "people", run one after the other */
+  guint next;
+  CtMnvDone done;
+  gpointer data;
+  char *from, *to;
+  JsonObject *known;
+} Cascade;
+
+static void cascade_run (Cascade *cascade);
+
+static void
+cascade_free (Cascade *cascade)
+{
+  g_clear_pointer (&cascade->commands, g_ptr_array_unref);
+  g_clear_pointer (&cascade->known, json_object_unref);
+  g_free (cascade->from);
+  g_free (cascade->to);
+  g_free (cascade);
+}
+
+static void
+cascade_stepped (JsonObject *root, const char *err, gpointer data)
+{
+  Cascade *cascade = data;
+
+  if (err)
+    {
+      cascade->done (NULL, err, cascade->data);
+      cascade_free (cascade);
+      return;
+    }
+  cascade_run (cascade);
+}
+
+static void
+cascade_run (Cascade *cascade)
+{
+  gchar **argv;
+
+  if (cascade->next >= cascade->commands->len)
+    {
+      cascade->done (NULL, NULL, cascade->data);
+      cascade_free (cascade);
+      return;
+    }
+  argv = cascade->commands->pdata[cascade->next++];
+  {
+    g_autoptr (GPtrArray) full = g_ptr_array_new ();
+    Call *call = g_new0 (Call, 1);
+
+    call->done = cascade_stepped;
+    call->data = cascade;
+    g_ptr_array_add (full, (gpointer) "people");
+    for (guint i = 0; argv[i]; i++)
+      g_ptr_array_add (full, argv[i]);
+    g_ptr_array_add (full, (gpointer) "--json");
+    g_ptr_array_add (full, NULL);
+    ns_mc_run (cascade->owner, (const char *const *) full->pdata, NULL, answered, call);
+  }
+}
+
+static void
+add_command (Cascade *cascade, const char *first, ...)
+{
+  g_autoptr (GPtrArray) argv = g_ptr_array_new ();
+  va_list ap;
+
+  va_start (ap, first);
+  for (const char *arg = first; arg; arg = va_arg (ap, const char *))
+    g_ptr_array_add (argv, g_strdup (arg));
+  va_end (ap);
+  g_ptr_array_add (argv, NULL);
+  g_ptr_array_add (cascade->commands, g_strdupv ((gchar **) argv->pdata));
+  for (guint i = 0; i + 1 < argv->len; i++)
+    g_free (argv->pdata[i]);
+}
+
+/* the animals and objects of @from, owned by @to now ("" for nobody) */
+static void
+repoint_owned (Cascade *cascade, const char *to)
+{
+  g_autoptr (GPtrArray) owned = ct_mnv_owned_by (cascade->known, cascade->from);
+
+  for (guint i = 0; i < owned->len; i++)
+    {
+      const char *pid = ns_json_str (owned->pdata[i], "id");
+
+      if (to && *to)
+        add_command (cascade, "owner", pid, to, NULL);
+      else
+        add_command (cascade, "owner", pid, NULL);
+    }
+}
+
+static Cascade *
+cascade_new (GObject *owner, const char *from, const char *to, JsonObject *known, CtMnvDone done, gpointer data)
+{
+  Cascade *cascade = g_new0 (Cascade, 1);
+
+  cascade->owner = owner;
+  cascade->commands = g_ptr_array_new_with_free_func ((GDestroyNotify) g_strfreev);
+  cascade->done = done;
+  cascade->data = data;
+  cascade->from = g_strdup (from);
+  cascade->to = g_strdup (to);
+  cascade->known = known ? json_object_ref (known) : NULL;
+  return cascade;
+}
+
+/* the person of a contact in the answer of `people known`, NULL when she has none */
+static JsonObject *
+person_of_contact (JsonObject *known, const char *uid)
+{
+  JsonArray *people = ns_json_arr (known, "people");
+
+  for (guint i = 0; uid && *uid && people && i < json_array_get_length (people); i++)
+    {
+      JsonObject *person = json_array_get_object_element (people, i);
+
+      if (person && !g_strcmp0 (ns_json_str (person, "contact_uid"), uid))
+        return person;
+    }
+  return NULL;
+}
+
+void
+ct_mnv_archive_contact_deleted (GObject *owner, const char *uid, JsonObject *known, CtMnvDone done, gpointer data)
+{
+  Cascade *cascade = cascade_new (owner, uid, NULL, known, done, data);
+  JsonObject *person = person_of_contact (known, uid);
+
+  repoint_owned (cascade, NULL);
+  if (person)
+    add_command (cascade, "delete", ns_json_str (person, "id"), NULL);
+  cascade_run (cascade);
+}
+
+void
+ct_mnv_archive_contact_merged (GObject *owner, const char *from, const char *to, JsonObject *known, CtMnvDone done,
+                               gpointer data)
+{
+  Cascade *cascade = cascade_new (owner, from, to, known, done, data);
+  JsonObject *gone = person_of_contact (known, from), *stays = person_of_contact (known, to);
+
+  repoint_owned (cascade, to);
+  if (gone && stays)
+    {
+      /* two entries linked to two contacts cannot be merged: the one that goes is let go of its contact first */
+      add_command (cascade, "unlink", ns_json_str (gone, "id"), NULL);
+      add_command (cascade, "merge", ns_json_str (gone, "id"), ns_json_str (stays, "id"), NULL);
+    }
+  else if (gone)
+    add_command (cascade, "link", ns_json_str (gone, "id"), to, NULL);
+  cascade_run (cascade);
 }

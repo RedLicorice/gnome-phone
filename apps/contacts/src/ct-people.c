@@ -10,6 +10,8 @@
 #include "ct-list.h"
 #include "ct-minerva-pages.h"
 #include "ct-mnv.h"
+#include "ct-removal.h"
+#include "ns-mc.h"
 #include "ct-page.h"
 #include "ct-picker.h"
 #include "ct-popup.h"
@@ -492,6 +494,15 @@ on_delete (NeoPressable *button, People *people)
 
   deletion->people = people;
   deletion->uids = selected_uids (people);
+  /* with Minerva: its own dialog, the proof and the cascade (ct-removal.c) */
+  if (ct_removal_active ())
+    {
+      stop_selection (people);
+      ct_removal_delete (people->window, deletion->uids, NULL, NULL);
+      g_ptr_array_unref (deletion->uids);
+      g_free (deletion);
+      return;
+    }
   ct_confirm_dialog (people->page, NULL, _("Delete selected contacts?"), _("Delete"), on_delete_confirmed, deletion);
 }
 
@@ -1045,7 +1056,7 @@ typedef enum {
   ITEM_CREATE_LABEL,
   ITEM_ACCOUNT,
   ITEM_SETTINGS,
-  ITEM_STRANGERS,
+  ITEM_MNV_LIST,
   ITEM_MINERVA,
 } ItemKind;
 
@@ -1095,8 +1106,8 @@ on_drawer_item (NeoPressable *row, People *people)
     case ITEM_SETTINGS:
       ct_window_push (people->window, ct_settings_new (people->window));
       break;
-    case ITEM_STRANGERS:
-      ct_window_push (people->window, ct_strangers_new (people->window));
+    case ITEM_MNV_LIST:
+      ct_window_push (people->window, ct_mnv_list_new (people->window, name));
       break;
     case ITEM_MINERVA:
       ct_window_push (people->window, ct_minerva_settings_new (people->window));
@@ -1266,8 +1277,16 @@ rebuild_drawer (People *people)
   if (ct_mnv_available () && ct_mnv_ui_ready ())
     {
       drawer_header (items, ct_mnv_text ("title"));
-      gtk_box_append (GTK_BOX (items), drawer_item (people, ITEM_STRANGERS, "avatar-default-symbolic",
-                                                    ct_mnv_text ("strangers"), NULL, FALSE, FALSE));
+      JsonArray *lists = ct_mnv_list ("lists");
+
+      for (guint i = 0; lists && i < json_array_get_length (lists); i++)
+        {
+          JsonObject *def = json_array_get_object_element (lists, i);
+
+          gtk_box_append (GTK_BOX (items), drawer_item (people, ITEM_MNV_LIST, ns_json_str (def, "icon"),
+                                                        ns_json_str (def, "title"), ns_json_str (def, "id"), FALSE,
+                                                        FALSE));
+        }
       gtk_box_append (GTK_BOX (items), drawer_item (people, ITEM_MINERVA, "preferences-system-symbolic",
                                                     ct_mnv_text ("settings_title"), NULL, FALSE, FALSE));
     }

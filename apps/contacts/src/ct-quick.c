@@ -26,6 +26,8 @@
 #include "ct-avatar.h"
 #include "ct-dialogs.h"
 #include "ct-minerva.h"
+#include "ct-mnv.h"
+#include "ct-removal.h"
 #include "ct-page.h"
 #include "ct-popup.h"
 #include "ct-settings.h"
@@ -1008,32 +1010,74 @@ on_delete_confirmed (int response, gpointer data)
 }
 
 static void
-on_menu_chosen (int index, gpointer data)
+on_removed (guint deleted, gpointer data)
 {
   Quick *quick = data;
 
-  if (GPOINTER_TO_INT (g_object_get_data (G_OBJECT (quick->overflow), "ct-menu-delete")) && index == 0)
-    ct_confirm_dialog (quick->page, NULL, _("Delete this contact?"), _("Delete"), on_delete_confirmed, quick);
-  else
-    {
-      g_autoptr(GPtrArray) uids = g_ptr_array_new_with_free_func (g_free);
+  if (deleted)
+    ct_window_pop (quick->window, quick->page);
+}
 
-      g_ptr_array_add (uids, g_strdup (quick->profile ? CT_PROFILE_UID : quick->uid));
-      ct_export_contacts (quick->window, uids, g_dngettext (NULL, "Share contact via", "Share contacts via", 1));
+enum {
+  MENU_DELETE,
+  MENU_MERGE,
+  MENU_SHARE,
+};
+
+static void
+on_menu_chosen (int index, gpointer data)
+{
+  Quick *quick = data;
+  const int *items = g_object_get_data (G_OBJECT (quick->overflow), "ct-menu-items");
+
+  switch (items[index])
+    {
+    case MENU_DELETE:
+      if (ct_removal_active ())
+        {
+          g_autoptr(GPtrArray) uids = g_ptr_array_new_with_free_func (g_free);
+
+          g_ptr_array_add (uids, g_strdup (quick->uid));
+          ct_removal_delete (quick->window, uids, on_removed, quick);
+        }
+      else
+        ct_confirm_dialog (quick->page, NULL, _("Delete this contact?"), _("Delete"), on_delete_confirmed, quick);
+      break;
+    case MENU_MERGE:
+      ct_removal_merge (quick->window, quick->uid, NULL, NULL);
+      break;
+    default:
+      {
+        g_autoptr(GPtrArray) uids = g_ptr_array_new_with_free_func (g_free);
+
+        g_ptr_array_add (uids, g_strdup (quick->profile ? CT_PROFILE_UID : quick->uid));
+        ct_export_contacts (quick->window, uids, g_dngettext (NULL, "Share contact via", "Share contacts via", 1));
+      }
     }
 }
 
-/* quickcontact.xml (§3.8): Delete (not for "My info") and Share; the rest is left out (the top comment) */
+/* quickcontact.xml (§3.8): Delete (not for "My info") and Share; the rest is left out (the top comment). With
+ * Minerva, Merge too (not for "My info"): the contact picks a second one to take in. */
 static void
 on_overflow (NeoPressable *button, Quick *quick)
 {
-  const char *labels[2];
+  static int items[3];
+  const char *labels[3];
   int n = 0;
 
   if (!quick->profile)
-    labels[n++] = _("Delete");
+    {
+      items[n] = MENU_DELETE;
+      labels[n++] = _("Delete");
+    }
+  if (!quick->profile && ct_removal_active ())
+    {
+      items[n] = MENU_MERGE;
+      labels[n++] = ct_mnv_text ("merge_menu");
+    }
+  items[n] = MENU_SHARE;
   labels[n++] = _("Share");
-  g_object_set_data (G_OBJECT (quick->overflow), "ct-menu-delete", GINT_TO_POINTER (!quick->profile));
+  g_object_set_data (G_OBJECT (quick->overflow), "ct-menu-items", items);
   ct_popup_show (GTK_WIDGET (button), labels, n, CT_POPUP_OVER_END, 0, 0, 0, on_menu_chosen, quick);
 }
 

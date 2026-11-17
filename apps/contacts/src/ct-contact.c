@@ -1528,6 +1528,154 @@ ct_contact_set_channel (EContact *contact, const char *scheme, const char *legac
   e_vcard_append_attribute_with_value (vcard, e_vcard_attribute_new (NULL, "IMPP"), line);
 }
 
+/* --- merging two contacts */
+
+/* two rows say the same: the same text without case or spaces, the same digits for a number */
+static gboolean
+same_row (const CtItem *a, const CtItem *b)
+{
+  g_autofree char *x = trimmed (a->value), *y = trimmed (b->value);
+
+  if (a->kind == CT_KIND_PHONE)
+    {
+      g_autoptr(GString) dx = g_string_new (NULL), dy = g_string_new (NULL);
+
+      for (const char *p = x; *p; p++)
+        if (g_ascii_isdigit (*p))
+          g_string_append_c (dx, *p);
+      for (const char *p = y; *p; p++)
+        if (g_ascii_isdigit (*p))
+          g_string_append_c (dy, *p);
+      /* as the people library and the memory service compare numbers: by their last digits */
+      if (dx->len >= CT_MERGE_MIN_MATCH_DIGITS && dy->len >= CT_MERGE_MIN_MATCH_DIGITS)
+        return g_str_equal (dx->str + dx->len - CT_MERGE_MIN_MATCH_DIGITS, dy->str + dy->len - CT_MERGE_MIN_MATCH_DIGITS);
+      return dx->len && g_str_equal (dx->str, dy->str);
+    }
+  return g_ascii_strcasecmp (x, y) == 0;
+}
+
+static gboolean
+has_same_row (GPtrArray *items, const CtItem *item)
+{
+  for (guint i = 0; i < items->len; i++)
+    if (same_row (items->pdata[i], item))
+      return TRUE;
+  return FALSE;
+}
+
+/* the first row of @items of @type (an event's), or NULL */
+static const CtItem *
+row_of_type (GPtrArray *items, int type)
+{
+  for (guint i = 0; i < items->len; i++)
+    if (((CtItem *) items->pdata[i])->type == type)
+      return items->pdata[i];
+  return NULL;
+}
+
+static gboolean
+has_attribute_like (EVCard *vcard, EVCardAttribute *attr)
+{
+  g_autofree char *wanted = nth_value (attr, 0);
+
+  for (GList *l = e_vcard_get_attributes (vcard); l; l = l->next)
+    if (g_ascii_strcasecmp (e_vcard_attribute_get_name (l->data), e_vcard_attribute_get_name (attr)) == 0)
+      {
+        g_autofree char *value = nth_value (l->data, 0);
+
+        if (g_ascii_strcasecmp (value, wanted) == 0)
+          return TRUE;
+      }
+  return FALSE;
+}
+
+guint
+ct_contact_merge (EContact *into, EContact *from)
+{
+  static const CtKind kinds[] = { CT_KIND_NICKNAME, CT_KIND_PHONE, CT_KIND_EMAIL, CT_KIND_ADDRESS, CT_KIND_WEBSITE,
+                                  CT_KIND_EVENT, CT_KIND_RELATION, CT_KIND_NOTE };
+  EVCard *a = E_VCARD (into), *b = E_VCARD (from);
+  guint conflicts = 0;
+  g_autoptr(CtName) name_a = ct_contact_get_name (into);
+  g_autoptr(CtName) name_b = ct_contact_get_name (from);
+  EVCardAttribute *photo_a = e_vcard_get_attribute (a, EVC_PHOTO), *photo_b = e_vcard_get_attribute (b, EVC_PHOTO);
+  g_autoptr(GPtrArray) org_a = ct_contact_get_items (into, CT_KIND_ORGANIZATION);
+  g_autoptr(GPtrArray) org_b = ct_contact_get_items (from, CT_KIND_ORGANIZATION);
+  g_autoptr(GPtrArray) labels = ct_contact_dup_labels (from);
+
+  /* the names, the photo, the company: one each, the surviving contact's; the other's only when it has none */
+  if (ct_name_is_empty (name_a))
+    {
+      if (!ct_name_is_empty (name_b))
+        ct_contact_set_name (into, name_b);
+    }
+  else if (!ct_name_is_empty (name_b) && !ct_name_equal (name_a, name_b))
+    conflicts |= CT_MERGE_NAME;
+  if (photo_b)
+    {
+      g_autofree char *x = nth_value (photo_b, 0);
+      g_autofree char *y = photo_a ? nth_value (photo_a, 0) : NULL;
+
+      if (!photo_a)
+        e_vcard_append_attribute (a, e_vcard_attribute_copy (photo_b));
+      else if (g_strcmp0 (x, y))
+        conflicts |= CT_MERGE_PHOTO;
+    }
+  if (org_b->len && !ct_item_is_empty (org_b->pdata[0]))
+    {
+      if (!org_a->len || ct_item_is_empty (org_a->pdata[0]))
+        ct_contact_set_items (into, CT_KIND_ORGANIZATION, org_b);
+      else if (!ct_item_equal (org_a->pdata[0], org_b->pdata[0]))
+        conflicts |= CT_MERGE_ORGANIZATION;
+    }
+
+  /* everything with many rows adds up, without a row that is there already; one birthday and one anniversary */
+  for (guint k = 0; k < G_N_ELEMENTS (kinds); k++)
+    {
+      g_autoptr(GPtrArray) mine = ct_contact_get_items (into, kinds[k]);
+      g_autoptr(GPtrArray) theirs = ct_contact_get_items (from, kinds[k]);
+      gboolean added = FALSE;
+
+      for (guint i = 0; i < theirs->len; i++)
+        {
+          CtItem *item = theirs->pdata[i];
+
+          if (kinds[k] == CT_KIND_EVENT && (item->type == 3 || item->type == 1))
+            {
+              const CtItem *have = row_of_type (mine, item->type);
+
+              if (have)
+                {
+                  if (item->type == 3 && !same_row (have, item))
+                    conflicts |= CT_MERGE_BIRTHDAY;
+                  continue;
+                }
+            }
+          if (ct_item_is_empty (item) || has_same_row (mine, item))
+            continue;
+          g_ptr_array_add (mine, ct_item_copy (item));
+          added = TRUE;
+        }
+      if (added)
+        ct_contact_set_items (into, kinds[k], mine);
+    }
+
+  /* the instant-messaging ids (IMPP, X-JABBER …) one by one: they carry the channels of Minerva */
+  for (GList *l = e_vcard_get_attributes (b); l; l = l->next)
+    {
+      g_autoptr(CtItem) im = item_from_attribute (CT_KIND_IM, l->data);
+
+      if (im && !has_attribute_like (a, l->data))
+        e_vcard_append_attribute (a, e_vcard_attribute_copy (l->data));
+    }
+
+  for (guint i = 0; i < labels->len; i++)
+    ct_contact_add_label (into, labels->pdata[i]);
+  if (ct_contact_is_starred (from))
+    ct_contact_set_starred (into, TRUE);
+  return conflicts;
+}
+
 /* --- dates */
 
 static gboolean

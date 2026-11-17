@@ -5,6 +5,7 @@
 #include "ct-mnv-core.h"
 #include "ct-mnv.h"
 #include "ct-page.h"
+#include "ct-picker.h"
 #include "ct-settings.h"
 #include "ct-store.h"
 #include "ct-ui.h"
@@ -21,10 +22,7 @@ typedef struct {
   GtkWidget *page, *window, *busy, *rows;
   JsonObject *known;            /* the last `people known` (a ref) */
   int ops;
-  /* Sconosciuti */
-  GtkWidget *note;
-  /* Minerva */
-  GtkWidget *rules_note;
+  char *list_id;                /* an entries list: its id in the data's "lists" */
 } P;
 
 static void
@@ -33,6 +31,7 @@ p_free (gpointer data)
   P *p = data;
 
   g_clear_pointer (&p->known, json_object_unref);
+  g_free (p->list_id);
   g_free (p);
 }
 
@@ -106,6 +105,7 @@ toast (P *p, const char *text)
 typedef struct {
   P *p;
   char *a, *b, *c;
+  GPtrArray *actions;           /* an entry's dialog: the action of each row */
   const char *done;             /* the key of the text that says it was done */
 } Op;
 
@@ -129,6 +129,7 @@ op_free (Op *op)
   g_free (op->a);
   g_free (op->b);
   g_free (op->c);
+  g_clear_pointer (&op->actions, g_ptr_array_unref);
   g_free (op);
   g_object_unref (page);
 }
@@ -150,7 +151,7 @@ busy_off (P *p)
 
 /* ===== Sconosciuti ============================================================================================= */
 
-static void strangers_load (P *p);
+static void list_load (P *p);
 
 static void
 stranger_finished (JsonObject *root, const char *err, gpointer data)
@@ -159,7 +160,7 @@ stranger_finished (JsonObject *root, const char *err, gpointer data)
 
   busy_off (op->p);
   toast (op->p, err ? err : ct_mnv_text (op->done));
-  strangers_load (op->p);
+  list_load (op->p);
   op_free (op);
 }
 
@@ -232,43 +233,134 @@ forget_confirmed (int response, gpointer data)
 }
 
 static void
-stranger_action (int response, gpointer data)
+renamed_entered (const char *text, gpointer data)
 {
   Op *op = data;
-  const char *const pairs[] = { "name", op->b, NULL };
 
-  if (response == 0)
+  if (!text)
     {
-      ct_text_dialog (op->p->window, ct_mnv_text ("add_heading"), op->b, ct_mnv_text ("add_hint"),
-                      ct_mnv_int ("name_max_chars"), NULL, add_entered, op);
+      op_free (op);
       return;
     }
-  if (response == 1)
+  op->done = "renamed";
+  busy_on (op->p, "busy_rename");
+  ct_mnv_rename (G_OBJECT (op->p->page), op->a, text, stranger_finished, op);
+}
+
+static void
+owner_picked (GPtrArray *uids, gpointer data)
+{
+  Op *op = data;
+
+  if (uids->len)
+    {
+      op->done = "owner_set";
+      busy_on (op->p, "busy_owner");
+      ct_mnv_set_owner (G_OBJECT (op->p->page), op->a, uids->pdata[0], stranger_finished, op);
+    }
+  else
+    op_free (op);
+}
+
+static void
+entry_action (int response, gpointer data)
+{
+  Op *op = data;
+  const char *action = op->actions && response >= 0 && (guint) response < op->actions->len
+                         ? op->actions->pdata[response] : NULL;
+  const char *const pairs[] = { "name", op->b, NULL };
+
+  if (!action)
+    op_free (op);
+  else if (!g_strcmp0 (action, "rename"))
+    ct_text_dialog (op->p->window, ct_mnv_text ("rename_heading"), op->b, ct_mnv_text ("add_hint"),
+                    ct_mnv_int ("name_max_chars"), NULL, renamed_entered, op);
+  else if (!g_strcmp0 (action, "add"))
+    ct_text_dialog (op->p->window, ct_mnv_text ("add_heading"), op->b, ct_mnv_text ("add_hint"),
+                    ct_mnv_int ("name_max_chars"), NULL, add_entered, op);
+  else if (!g_strcmp0 (action, "owner"))
+    {
+      g_autofree char *title = ct_mnv_textf ("owner_pick_title", pairs);
+
+      /* the picker calls back only when a contact is picked: the state of this action is kept until then */
+      ct_window_push (op->p->window, ct_picker_new (op->p->window, title, NULL, FALSE, owner_picked, op));
+    }
+  else if (!g_strcmp0 (action, "owner_clear"))
+    {
+      op->done = "owner_cleared";
+      busy_on (op->p, "busy_owner");
+      ct_mnv_set_owner (G_OBJECT (op->p->page), op->a, "", stranger_finished, op);
+    }
+  else if (!g_strcmp0 (action, "forget"))
     {
       g_autofree char *heading = ct_mnv_textf ("forget_heading", pairs);
       g_autofree char *body = ct_mnv_textf ("forget_body", pairs);
 
       ct_confirm_dialog (op->p->window, heading, body, ct_mnv_text ("forget_ok"), forget_confirmed, op);
-      return;
     }
-  op_free (op);
+  else
+    op_free (op);
+}
+
+static JsonObject *
+list_def (const char *id)
+{
+  JsonArray *lists = ct_mnv_list ("lists");
+
+  for (guint i = 0; lists && i < json_array_get_length (lists); i++)
+    {
+      JsonObject *def = json_array_get_object_element (lists, i);
+
+      if (!g_strcmp0 (ns_json_str (def, "id"), id))
+        return def;
+    }
+  return NULL;
+}
+
+/* a row's data key for each action the list's definition names */
+static const char *
+action_label (const char *action)
+{
+  g_autofree char *key = g_strconcat ("action_", action, NULL);
+
+  return ct_mnv_text (key);
 }
 
 static void
-on_stranger (NeoPressable *row, gpointer data)
+on_entry (NeoPressable *row, gpointer data)
 {
   P *p = data;
   const char *id = g_object_get_data (G_OBJECT (row), "ct-id"), *name = g_object_get_data (G_OBJECT (row), "ct-name");
-  const char *const labels[] = { ct_mnv_text ("add"), ct_mnv_text ("forget") };
+  gboolean protected_ = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (row), "ct-protected"));
+  gboolean owned = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (row), "ct-owned"));
+  JsonArray *actions = ns_json_arr (list_def (p->list_id), "actions");
+  Op *op = op_new (p, id, name);
+  g_autoptr (GPtrArray) labels = g_ptr_array_new ();
 
-  ct_list_dialog (p->window, CT_DIALOG_APPCOMPAT, name, labels, 2, TRUE, stranger_action, op_new (p, id, name));
+  op->actions = g_ptr_array_new_with_free_func (g_free);
+  for (guint i = 0; actions && i < json_array_get_length (actions); i++)
+    {
+      const char *action = json_array_get_string_element (actions, i);
+
+      /* the owner of Minerva is never forgotten from a list */
+      if (protected_ && !g_strcmp0 (action, "forget"))
+        continue;
+      g_ptr_array_add (op->actions, g_strdup (action));
+      g_ptr_array_add (labels, (gpointer) action_label (action));
+      if (owned && !g_strcmp0 (action, "owner"))
+        {
+          g_ptr_array_add (op->actions, g_strdup ("owner_clear"));
+          g_ptr_array_add (labels, (gpointer) action_label ("owner_clear"));
+        }
+    }
+  ct_list_dialog (p->window, CT_DIALOG_APPCOMPAT, name, (const char *const *) labels->pdata, (int) labels->len, TRUE,
+                  entry_action, op);
 }
 
-/* an entry's line in the list: kind • samples • sightings • last time */
+/* an entry's line in the list: [Minerva's owner •] [owner of the thing •] samples • sightings • last time */
 static char *
-stranger_sub (JsonObject *o)
+entry_sub (P *p, JsonObject *o, gboolean protected_)
 {
-  const char *kind = ct_mnv_map ("kind_one", ns_json_str (o, "kind"));
   gint64 samples = json_object_get_int_member_with_default (o, "samples", 0);
   gint64 sightings = json_object_get_int_member_with_default (o, "sightings", 0);
   g_autofree char *ns = g_strdup_printf ("%" G_GINT64_FORMAT, samples), *nv = g_strdup_printf ("%" G_GINT64_FORMAT, sightings);
@@ -276,15 +368,32 @@ stranger_sub (JsonObject *o)
   g_autofree char *row = ct_mnv_textf ("stranger_row", (const char *const[]) { "samples", ns, "sightings", nv, NULL });
   g_autofree char *seen = date ? ct_mnv_textf ("last_seen", (const char *const[]) { "date", date, NULL })
                                : g_strdup (ct_mnv_text ("never_seen"));
+  g_autoptr (GString) out = g_string_new (NULL);
 
-  return g_strdup_printf ("%s%s%s • %s", kind, *kind ? " • " : "", row, seen);
+  if (protected_)
+    g_string_append_printf (out, "%s • ", ct_mnv_text ("owner_label"));
+  if (json_object_get_boolean_member_with_default (o, "ownable", FALSE))
+    {
+      const char *uid = ns_json_str (o, "owner_contact");
+      CtEntry *entry = *uid ? ct_store_lookup (ct_window_get_store (p->window), uid) : NULL;
+      g_autofree char *who = entry ? ct_contact_display_name (entry->contact,
+                                                              ct_display_order (ct_window_get_settings (p->window)))
+                                   : NULL;
+      g_autofree char *text = who && *who ? ct_mnv_textf ("owner_row", (const char *const[]) { "name", who, NULL })
+                                          : g_strdup (ct_mnv_text ("no_owner"));
+
+      g_string_append_printf (out, "%s • ", text);
+    }
+  g_string_append_printf (out, "%s • %s", row, seen);
+  return g_string_free (g_steal_pointer (&out), FALSE);
 }
 
 static void
-strangers_loaded (JsonObject *root, const char *err, gpointer data)
+list_loaded (JsonObject *root, const char *err, gpointer data)
 {
   P *p = data;
-  g_autoptr (GPtrArray) loose = NULL;
+  JsonObject *def = list_def (p->list_id);
+  g_autoptr (GPtrArray) found = NULL;
   JsonObject *rules;
   g_autofree char *days = NULL, *text = NULL;
 
@@ -296,41 +405,50 @@ strangers_loaded (JsonObject *root, const char *err, gpointer data)
   clear_rows (p);
   rules = ns_json_obj (root, "rules");
   days = g_strdup_printf ("%" G_GINT64_FORMAT, rules ? json_object_get_int_member_with_default (rules, "forget_days", 0) : 0);
-  text = ct_mnv_textf ("stranger_note", (const char *const[]) { "days", days, NULL });
-  note (p, text);
-  loose = ct_mnv_loose (root);
-  if (!loose->len)
-    note (p, ct_mnv_text ("strangers_empty"));
-  for (guint i = 0; i < loose->len; i++)
+  if (*ns_json_str (def, "note"))
     {
-      JsonObject *o = loose->pdata[i];
-      g_autofree char *sub = stranger_sub (o);
-      GtkWidget *row = ct_pref_row (ns_json_str (o, "name"), sub, NULL, G_CALLBACK (on_stranger), p);
+      text = ct_mnv_format (ns_json_str (def, "note"), (const char *const[]) { "days", days, NULL });
+      note (p, text);
+    }
+  found = ct_mnv_of_kind (root, ns_json_str (def, "kind"),
+                          json_object_get_boolean_member_with_default (def, "loose", FALSE));
+  if (!found->len)
+    note (p, ns_json_str (def, "empty"));
+  for (guint i = 0; i < found->len; i++)
+    {
+      JsonObject *o = found->pdata[i];
+      gboolean protected_ = ct_mnv_is_owner (root, o);
+      g_autofree char *sub = entry_sub (p, o, protected_);
+      GtkWidget *row = ct_pref_row (ns_json_str (o, "name"), sub, NULL, G_CALLBACK (on_entry), p);
 
       g_object_set_data_full (G_OBJECT (row), "ct-id", g_strdup (ns_json_str (o, "id")), g_free);
       g_object_set_data_full (G_OBJECT (row), "ct-name", g_strdup (ns_json_str (o, "name")), g_free);
+      g_object_set_data (G_OBJECT (row), "ct-protected", GINT_TO_POINTER (protected_));
+      g_object_set_data (G_OBJECT (row), "ct-owned", GINT_TO_POINTER (*ns_json_str (o, "owner_contact") != '\0'));
       gtk_box_append (GTK_BOX (p->rows), row);
     }
 }
 
 static void
-strangers_load (P *p)
+list_load (P *p)
 {
-  ct_mnv_known (G_OBJECT (p->page), strangers_loaded, p);
+  ct_mnv_known (G_OBJECT (p->page), list_loaded, p);
 }
 
 static void
-on_strangers_map (GtkWidget *page, gpointer data)
+on_list_map (GtkWidget *page, gpointer data)
 {
-  strangers_load (data);        /* back on the page (from the contact it opened, another app): as it is now */
+  list_load (data);        /* back on the page (from the picker, another app): as it is now */
 }
 
 GtkWidget *
-ct_strangers_new (GtkWidget *window)
+ct_mnv_list_new (GtkWidget *window, const char *id)
 {
-  P *p = page_new (window, ct_mnv_text ("strangers"), "ct-strangers");
+  JsonObject *def = list_def (id);
+  P *p = page_new (window, ns_json_str (def, "title"), "ct-mnv-list");
 
-  g_signal_connect (p->page, "map", G_CALLBACK (on_strangers_map), p);
+  p->list_id = g_strdup (id);
+  g_signal_connect (p->page, "map", G_CALLBACK (on_list_map), p);
   return p->page;
 }
 
@@ -426,7 +544,7 @@ on_open_strangers (NeoPressable *row, gpointer data)
 {
   P *p = data;
 
-  ct_window_push (p->window, ct_strangers_new (p->window));
+  ct_window_push (p->window, ct_mnv_list_new (p->window, "strangers"));
 }
 
 static void
@@ -476,7 +594,7 @@ rules_loaded (JsonObject *root, const char *err, gpointer data)
       voices += json_object_get_boolean_member_with_default (o, "voiceprint", FALSE);
       linked += *ns_json_str (o, "contact_uid") != '\0';
     }
-  loose = ct_mnv_loose (root);
+  loose = ct_mnv_of_kind (root, "person", TRUE);
   count_row (p, ct_mnv_text ("count_linked"), linked, NULL);
   count_row (p, ct_mnv_text ("count_voices"), voices, NULL);
   count_row (p, ct_mnv_text ("strangers"), loose->len, G_CALLBACK (on_open_strangers));

@@ -69,4 +69,27 @@ void ct_mnv_known       (GObject *owner, CtMnvDone done, gpointer data);
 /* one rule of `known` (people.conf): {rules: {…}} */
 void ct_mnv_rule_set    (GObject *owner, const char *key, const char *value, CtMnvDone done, gpointer data);
 
+/* The memory service's two calls the Contacts app makes about a whole contact (docs/superpowers/specs/
+ * 2026-11-17-minerva-memory-service-design.md): `contact_deleted` (the cascade now, no bin) and `contact_merged`,
+ * each with the human proof's JSON (ct-proof.h). Configured by ~/.config/minerva/contacts.conf (MINERVA_CONTACTS_CONF
+ * names another file), [memory] token (the bearer token of the Contacts app's client), url (the data's memory_url
+ * by default), timeout_s. Without a token there is no service to call: ct_mnv_memory_configured says so. */
+gboolean ct_mnv_memory_configured (void);
+void ct_mnv_memory_contact_deleted (GObject *owner, const char *id, const char *proof_json, CtMnvDone done,
+                                    gpointer data);
+void ct_mnv_memory_contact_merged  (GObject *owner, const char *from, const char *to, const char *proof_json,
+                                    CtMnvDone done, gpointer data);
+
+/* What the people archive (this file's other calls) does when the contact goes: @uid's person is forgotten and every
+ * animal and object that was hers has no owner; or, for a merge, @from's person joins @to's (or becomes it when
+ * @to has none) and what was @from's now belongs to @to. @known is a `people known` answer, ref'd until done. */
+void ct_mnv_archive_contact_deleted (GObject *owner, const char *uid, JsonObject *known, CtMnvDone done,
+                                     gpointer data);
+void ct_mnv_archive_contact_merged  (GObject *owner, const char *from, const char *to, JsonObject *known,
+                                     CtMnvDone done, gpointer data);
+
+/* an animal's or object's owner: a contact's UID, "" for nobody */
+void ct_mnv_set_owner   (GObject *owner, const char *pid, const char *contact_uid, CtMnvDone done, gpointer data);
+void ct_mnv_rename      (GObject *owner, const char *pid, const char *name, CtMnvDone done, gpointer data);
+
 G_END_DECLS

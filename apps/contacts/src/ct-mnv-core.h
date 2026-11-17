@@ -28,4 +28,15 @@ gboolean   ct_mnv_rule_value (const char *text, double lo, double hi, gboolean i
  * the member has none (absent, 0, empty) */
 char      *ct_mnv_date (JsonObject *o, const char *member, const char *format);
 
+/* The archive's owner (`people known`'s "owner" is her person id): the contact UID that person is linked to, "" when
+ * she is not linked to one, or when there is no such person. Borrowed from @known. */
+const char *ct_mnv_owner_contact (JsonObject *known);
+/* whether the person object @person is the archive's owner (her id is `known`'s "owner") */
+gboolean    ct_mnv_is_owner (JsonObject *known, JsonObject *person);
+/* The people of the answer that belong to the contact @uid (their owner_contact): a new array of the answer's
+ * objects (borrowed). They are the animals and objects whose owner is going away. */
+GPtrArray  *ct_mnv_owned_by (JsonObject *known, const char *uid);
+/* The people of the answer of one kind, in the answer's order; with @loose_only only those not linked to a contact */
+GPtrArray  *ct_mnv_of_kind (JsonObject *known, const char *kind, gboolean loose_only);
+
 G_END_DECLS
