@@ -488,6 +488,9 @@ export class Keyguard extends Signals.EventEmitter {
         const names = [mobile.present ? mobile.operator || 'Emergency calls only' : 'No SIM'];
         if (wifi.connected && wifi.name)
             names.push(wifi.name);
+        const {internet} = this._state;
+        if (internet?.offline && internet.text)
+            names.push(internet.text);   // minerva-net: the internet does not answer
         const carrier = names.join(' | ');
         if (carrier !== this._carrierText) {
             this._carrierText = carrier;

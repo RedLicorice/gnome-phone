@@ -45,6 +45,7 @@ const CHIP_ICON = 38;
 const CHIP_COLOUR = [0x2e, 0x9e, 0x4f];
 // the clock's face: mono in the Renaissance looks
 const clockFont = () => dataFont(...Type.labelLargeEmphasized) ?? font(...Type.labelLargeEmphasized);
+const OFFLINE_GAP = 28;                 // from the word 'Offline' to the first system icon
 const SYSTEM_SPAN = 300 + CHIP_W + 19;  // signal, Wi-Fi and the widest battery (228) end to end, the chip, and room
 const ICONS_TAIL = 2;                   // the battery's antialiased edge past its end
 const ICON_GAP = 19;                    // between signal, Wi-Fi and battery
@@ -136,9 +137,10 @@ export function paintSignal(cr, x, bottom, level, color, alpha = 1) {
 }
 
 // The Wi-Fi fan, ic_wifi_0..3 (the new icons squash 5 levels into 4: 3 -> 2, 4 -> 3)
-export function paintWifi(cr, x, top, level, color, alpha = 1) {
+// With @error the same fan with Android's exclamation mark: connected, and the internet does not answer
+export function paintWifi(cr, x, top, level, color, alpha = 1, error = false) {
     const drawn = [0, 1, 2, 2, 3][level] ?? 0;
-    paintIcon(cr, `ic_wifi_${drawn}`, x, top - (WIFI_W - ICON_H) / 2, WIFI_W, color, alpha);
+    paintIcon(cr, `ic_wifi_${drawn}${error ? '_error' : ''}`, x, top - (WIFI_W - ICON_H) / 2, WIFI_W, color, alpha);
 }
 
 // The unified battery (UnifiedBattery.kt, BatteryFrame.kt): a 24 x 13 rounded body filled to the level, then the
@@ -299,6 +301,12 @@ function systemIconsLayout(state, end) {
     return at;
 }
 
+// Where the right-hand cluster's leftmost part begins (screen px), from the cluster's right edge @end
+export function systemIconsLeft(state, end) {
+    const xs = Object.values(systemIconsLayout(state, end));
+    return xs.length ? Math.min(...xs) : end;
+}
+
 // The tap box [x0, x1] (screen px) of each drawn status item, from the cluster's right edge @end: the shade header's
 // status items open Settings on a tap, and an item that is not drawn has no box
 export function systemIconBoxes(state, end) {
@@ -321,7 +329,7 @@ export function paintSystemIcons(cr, state, end, centerY) {
     if (battery.present)
         paintBattery(cr, at.battery, centerY - BATTERY_H / 2, battery, !!powerSave);
     if (wifi.connected)
-        paintWifi(cr, at.wifi, centerY - ICON_H / 2, wifi.level, Color.onWall);
+        paintWifi(cr, at.wifi, centerY - ICON_H / 2, wifi.level, Color.onWall, 1, !!state.internet?.offline);
     if (mobile.present)
         paintSignal(cr, at.signal, centerY + ICON_H / 2, mobile.level, Color.onWall);
     if (at.chip !== undefined)
@@ -331,9 +339,9 @@ export function paintSystemIcons(cr, state, end, centerY) {
 // What paintSystemIcons draws. The state changes far more often than that (an access point's strength within a bar,
 // UPower's energy rate), and a repaint is a texture across the whole bar converted on the CPU on its way to the GPU:
 // 15 ms of the shell's frame, wherever it lands in an animation
-function systemIconsKey({wifi, mobile, battery, powerSave, camera}) {
+function systemIconsKey({wifi, mobile, battery, powerSave, camera, internet}) {
     return [battery.present, battery.level, battery.plugged, !!powerSave, wifi.connected, wifi.level, mobile.present,
-        mobile.level, !!camera?.inUse].join();
+        mobile.level, !!camera?.inUse, !!internet?.offline].join();
 }
 
 export const SystemIcons = GObject.registerClass(
@@ -483,6 +491,17 @@ class StatusBar extends St.Widget {
         this._notifications = new St.Widget({x: 0, y: 0});
         this.add_child(this._notifications);
 
+        // 'Offline' (minerva-net), left of the system icons, only while the internet is known to be missing
+        this._offline = bindColor(new Clutter.Text(), Color.onWall);
+        this._offline.font_name = clockFont();
+        restyleActor(this._offline, () => {
+            this._offline.font_name = clockFont();
+        });
+        this._offline.visible = false;
+        this.add_child(this._offline);
+        this._systemEnd = SYSTEM_END;
+        state.connectObject('changed', () => this._syncOffline(), this);
+
         this._system = new SystemIcons(state, {span: SYSTEM_SPAN});
         this.add_child(this._system);
 
@@ -546,9 +565,25 @@ class StatusBar extends St.Widget {
         const atStart = inBar && holeX + holeW < W / 2;
         const atEnd = inBar && !atStart;
         this._clockInkX = atStart ? holeX + holeW + PAD_START : CLOCK_INK_X;
-        this._system.setEnd(atEnd ? holeX - CUTOUT_GAP : W - OPEN_END);
+        this._systemEnd = atEnd ? holeX - CUTOUT_GAP : W - OPEN_END;
+        this._system.setEnd(this._systemEnd);
         this._system.setCenterY(CENTER_Y - this._raise);
         this._syncClock();
+        this._syncOffline();
+    }
+
+    // the word 'Offline' at the clock's height, its right ink edge OFFLINE_GAP before the first system icon
+    _syncOffline() {
+        const internet = this._state.internet;
+        const show = !!internet?.offline && !!internet.text;
+        this._offline.visible = show;
+        if (!show)
+            return;
+        if (this._offline.text !== internet.text)
+            this._offline.text = internet.text;
+        const ink = inkBox(this._offline);
+        const left = systemIconsLeft(this._state, this._systemEnd);
+        this._offline.set_position(px(left - OFFLINE_GAP - ink.width * SCALE) - ink.x, px(CLOCK_INK_TOP - this._raise) - ink.y);
     }
 
     // the bar's height in screen px: 116 upright, 84 turned

@@ -17,7 +17,7 @@ typedef struct Mn Mn;
 
 /* which of Minerva's pages this is: the index and the four pages it lists. Each builds only the cards it has, so a
  * refresh fills what is there and skips the rest. */
-typedef enum { MN_INDEX, MN_BRAIN, MN_VOICE, MN_PROMPT, MN_BUDGET } MnKind;
+typedef enum { MN_INDEX, MN_BRAIN, MN_VOICE, MN_PROMPT, MN_BUDGET, MN_NETWORK } MnKind;
 
 struct Mn {
   MnKind     kind;
@@ -739,12 +739,16 @@ fill_voiceprint (Mn *m)
     m->poll_id = g_timeout_add_seconds (m->poll_s, poll_tick, m);
 }
 
+/* the groups of one page: a group of settings_ui.json names its page, the Voice page when it names none */
 static void
-build_groups (Mn *m)
+build_groups (Mn *m, const char *page)
 {
   JsonArray *gs = arr_of (m->st, "setting_groups");
   for (guint i = 0; gs && i < json_array_get_length (gs); i++) {
     JsonObject *g = json_array_get_object_element (gs, i);
+    const char *gp = str_of (g, "page");
+    if (g_strcmp0 (*gp ? gp : "voice", page))
+      continue;
     GtkWidget *grp = ns_group (m->sg_box, str_of (g, "title"));
     JsonArray *rows = arr_of (g, "rows");
     for (guint j = 0; rows && j < json_array_get_length (rows); j++) {
@@ -974,6 +978,7 @@ static const struct {
   { "events", ns_page_events },
   { "messaging", ns_page_messaging },
   { "budget", ns_page_minerva_budget },
+  { "network", ns_page_minerva_network },
   { "self_notebook", open_self_notebook },
 };
 
@@ -1078,9 +1083,18 @@ voice_build (Mn *m)
   note_if (n, "stt", m->content);
   m->sg_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);   /* the wake word, the reply, the voiceprint */
   gtk_box_append (GTK_BOX (m->content), m->sg_box);
-  build_groups (m);
+  build_groups (m, "voice");
   const char *const stt_args[] = { "stt-status", "--json", NULL };
   mn_run (m, stt_args, stt_status_done, NULL);   /* the Claude CLI's login, a second or so: shown when it comes */
+}
+
+static void
+network_build (Mn *m)
+{
+  page_title (m, "network");
+  m->sg_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);   /* the link, the internet check, the repair ladder */
+  gtk_box_append (GTK_BOX (m->content), m->sg_box);
+  build_groups (m, "network");
 }
 
 static void
@@ -1108,6 +1122,7 @@ build_page (Mn *m)
   case MN_BRAIN: brain_build (m); break;
   case MN_VOICE: voice_build (m); break;
   case MN_BUDGET: budget_build (m); break;
+  case MN_NETWORK: network_build (m); break;
   case MN_PROMPT: prompt_build (m); break;
   default: break;
   }
@@ -1167,6 +1182,13 @@ void
 ns_page_minerva_budget (GtkWidget *row, gpointer data)
 {
   mn_page_open (MN_BUDGET);
+}
+
+/* Minerva > Rete (`--page network`): Wi-Fi first, mobile data, the internet check, the repair ladder */
+void
+ns_page_minerva_network (GtkWidget *row, gpointer data)
+{
+  mn_page_open (MN_NETWORK);
 }
 
 /* Minerva > Prompt (`--page prompt`): the system prompt and the state template (ns-prompt.c) */

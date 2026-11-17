@@ -79,6 +79,7 @@ void     ns_page_minerva (GtkWidget *row, gpointer data);
 void     ns_page_minerva_brain (GtkWidget *row, gpointer data);
 void     ns_page_minerva_voice (GtkWidget *row, gpointer data);
 void     ns_page_minerva_budget (GtkWidget *row, gpointer data);
+void     ns_page_minerva_network (GtkWidget *row, gpointer data);
 void     ns_page_api_keys (GtkWidget *row, gpointer data);
 /* the agent's accounts (ns-account.c): a card for the Accounts page, filled from `minerva-config accounts list`
  * (hidden while it has none), and --page's way to the first account */

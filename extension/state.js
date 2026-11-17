@@ -17,6 +17,7 @@ import {getRfkillManager} from 'resource:///org/gnome/shell/ui/status/rfkill.js'
 
 import {Brightness} from './brightness.js';
 import {CameraWatch} from './camera.js';
+import {InternetWatch} from './internet.js';
 import {setUserOrientationLock, userOrientationLock} from './rotation.js';
 
 Gio._promisify(NM.Client, 'new_async');
@@ -177,6 +178,9 @@ export const SystemState = GObject.registerClass({
         this._torch = findTorch();
         // the camera indicator's facts (minerva-camwatch): the chip in the status bar, the sheet a tap opens
         this.camera = new CameraWatch();
+        // whether the internet answers (minerva-net): 'Offline' on the lock screen and in the status bar
+        this.internet = new InternetWatch();
+        this.internet.connectObject('changed', () => this._changed(), this);
 
         this._cancellable = new Gio.Cancellable();
         this._changedId = 0;
@@ -638,6 +642,8 @@ export const SystemState = GObject.registerClass({
         delete Main.brightnessManager._showOSD;
         this._brightness.destroy();
         this.camera.destroy();
+        this.internet.disconnectObject(this);
+        this.internet.destroy();
         for (const obj of [this._notifications, this._interface, this._location, this._touchscreen, this._power,
             this._color, this._client, this._wifiDevice, this._accessPoint, this._modemDevice, this._modem, this._upower,
             this._upowerDaemon, this._ppd, this._bt, this._rfkill])
