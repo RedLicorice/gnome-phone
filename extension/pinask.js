@@ -14,6 +14,7 @@ import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
+import Pango from 'gi://Pango';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
@@ -22,7 +23,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {PinView} from './bouncer.js';
 import {raiseToTop} from './endmark.js';
 import {GP_AUTH, checkPin} from './keyguard.js';
-import {px} from './units.js';
+import {px, sp} from './units.js';
 
 const PIN_IFACE = `<node>
   <interface name="org.minerva.Pin1">
@@ -58,16 +59,22 @@ const MAX_SECONDS = 600;
 const DEFAULT_TRIES = 5;
 // the backdrop's fade, as the view's own disappear (200 ms)
 const FADE_MS = 200;
+// room kept at each side of the question's sheet, dp
+const SIDE_MARGIN = 32;
 
 // The sheet of the two verbs that take no PIN: the caller's words, centred, and Sì / No when it is a question. (The
 // PIN's sheet is bouncer.js PinView, which brings its own pad.) It answers ownsPoint() for a tap off the sheet.
 const AskView = GObject.registerClass(
 class AskView extends St.BoxLayout {
-    constructor(text, buttons = null, onAnswer = null) {
-        super({vertical: true, x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.CENTER,
-            style: `spacing: ${px(32)}px;`});
-        this.add_child(new St.Label({text, x_align: Clutter.ActorAlign.CENTER,
-            style: `font-size: ${px(20)}px; font-weight: 600;`}));
+    // @width: the sheet's width, the monitor's less its margins: the words wrap inside it
+    constructor(text, width, buttons = null, onAnswer = null) {
+        super({orientation: Clutter.Orientation.VERTICAL, width, style: `spacing: ${px(32)}px;`});
+        const label = new St.Label({text, x_expand: true,
+            style: `font-size: ${sp(20)}px; font-weight: 600; text-align: center;`});
+        label.clutter_text.set_line_wrap(true);
+        label.clutter_text.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR);
+        label.clutter_text.set_ellipsize(Pango.EllipsizeMode.NONE);
+        this.add_child(label);
         if (!buttons)
             return;
         const row = new St.BoxLayout({x_align: Clutter.ActorAlign.CENTER, style: `spacing: ${px(24)}px;`});
@@ -79,6 +86,12 @@ class AskView extends St.BoxLayout {
             row.add_child(b);
         }
         this.add_child(row);
+    }
+
+    // the backdrop has no layout of its own: the sheet is put in the middle of the monitor by hand
+    centreIn(monitor) {
+        const [, height] = this.get_preferred_height(this.width);
+        this.set_position(Math.round((monitor.width - this.width) / 2), Math.round((monitor.height - height) / 2));
     }
 
     ownsPoint(x, y) {
@@ -194,10 +207,14 @@ export class PinAsk {
         this._show(sheet, seconds);
     }
 
+    _askWidth() {
+        return Main.layoutManager.primaryMonitor.width - 2 * px(SIDE_MARGIN);
+    }
+
     _openFinger(resolve, reason, seconds) {
         const sheet = {resolve, reason: reason || '', timeoutId: 0, grab: null, proc: null};
 
-        sheet.view = new AskView(sheet.reason);
+        sheet.view = new AskView(sheet.reason, this._askWidth());
         this._show(sheet, seconds);
         this._runFinger(sheet);
     }
@@ -206,7 +223,8 @@ export class PinAsk {
         const sheet = {resolve, reason: sentence || '', timeoutId: 0, grab: null, proc: null};
         const answer = ok => this._finish(sheet, ok, ok ? '' : 'no');
 
-        sheet.view = new AskView(sheet.reason, [{label: 'Sì', ok: true}, {label: 'No', ok: false}], answer);
+        sheet.view = new AskView(sheet.reason, this._askWidth(), [{label: 'Sì', ok: true}, {label: 'No', ok: false}],
+            answer);
         this._show(sheet, seconds);
     }
 
@@ -275,6 +293,7 @@ export class PinAsk {
         });
 
         Main.layoutManager.uiGroup.add_child(sheet.backdrop);
+        sheet.view.centreIn?.(monitor);
         raiseToTop(sheet.backdrop);
         sheet.grab = Main.pushModal(sheet.backdrop, {actionMode: Shell.ActionMode.SYSTEM_MODAL});
         global.stage.set_key_focus(sheet.backdrop);
