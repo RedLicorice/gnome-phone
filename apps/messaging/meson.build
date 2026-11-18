@@ -55,6 +55,7 @@ gnome.post_install(glib_compile_schemas: true, gtk_update_icon_cache: true, upda
 test('sms-store', executable('test-sms-store', 'tests/test-sms-store.c', link_with: store, dependencies: [gio]))
 test('sms-segments', executable('test-sms-segments', 'tests/test-sms-segments.c', 'src/sms-segments.c',
                                 dependencies: [gio]))
+test('sms-group', executable('test-sms-group', 'tests/test-sms-group.c', 'src/sms-provider.c', dependencies: [gio]))
 # the message flows end to end, against a mock modem and notification server on buses of their own
 test('sms-flow', find_program('python3'), timeout: 120,
      args: [files('tests/test-sms.py'), meson.current_build_dir(), meson.current_source_dir()])

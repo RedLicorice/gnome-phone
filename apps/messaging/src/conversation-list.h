@@ -22,6 +22,9 @@ GtkWidget *conversation_list_new (SmsClient *client, Contacts *contacts, gboolea
 GtkWidget *conversation_list_new_forward (SmsClient *client, Contacts *contacts);
 /* scrolled to its top, with nothing selected: what comes is then seen (SetVisible 0) */
 gboolean   conversation_list_is_at_top (ConversationList *self);
+/* the group the conversation is listed under (SMS, a provider's chats) is the one shown: a notification's tap and the
+ * Back from it land where the conversation is */
+void       conversation_list_show_group_of (ConversationList *self, gint64 id);
 /* leaves select mode; FALSE when it was not in it (Back then closes the screen) */
 gboolean   conversation_list_back (ConversationList *self);
 

@@ -172,6 +172,12 @@ sms_provider_is (const char *destination)
 }
 
 char *
+sms_provider_group (const char * const *destinations)
+{
+  return destinations && destinations[0] && !destinations[1] ? owner_or_null (destinations[0]) : NULL;
+}
+
+char *
 sms_provider_label (const char *provider_id)
 {
   GKeyFile *file = conf ();

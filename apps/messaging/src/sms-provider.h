@@ -24,6 +24,10 @@ char *sms_provider_chat (const char *destination);
 /* TRUE when the destination belongs to a provider at all */
 gboolean sms_provider_is (const char *destination);
 
+/* the group a conversation is listed under, from its destinations: the provider's id when the conversation is with
+ * one provider's chat alone, else NULL (plain SMS/MMS, and groups of people) */
+char *sms_provider_group (const char * const *destinations);
+
 /* a provider's keys, from its section: the label to show, and how to treat a name it sends */
 char *sms_provider_label (const char *provider_id);
 gboolean sms_provider_flag (const char *provider_id, const char *key);

@@ -22,5 +22,12 @@
       <summary>SMS delivery reports</summary>
       <description>Request a delivery report for each SMS you send</description>
     </key>
+
+    <!-- the conversation list's group (a provider's id from messaging.conf; empty: plain SMS), kept for the next start -->
+    <key name="last-group" type="s">
+      <default>""</default>
+      <summary>Last conversation group</summary>
+      <description>The group of conversations the list showed last: a messaging provider's id, or empty for SMS</description>
+    </key>
   </schema>
 </schemalist>

@@ -304,6 +304,7 @@ open_conversation (Shell *shell, gint64 id, const char *draft, gboolean replace)
   GtkWidget *top = msg_navigator_get_top (MSG_NAVIGATOR (shell->navigator));
   GtkWidget *view;
 
+  conversation_list_show_group_of (MSG_CONVERSATION_LIST (shell->list), id);
   if (MSG_IS_CONVERSATION_VIEW (top) && conversation_view_get_id (MSG_CONVERSATION_VIEW (top)) == id)
     {
       if (draft)

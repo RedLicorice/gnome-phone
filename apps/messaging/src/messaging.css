@@ -6,6 +6,38 @@
   background-color: #181c1d;
 }
 
+/* --- the conversation groups: filter chips under the action bar */
+
+.msg-chips {
+  padding: 8px 12px 0 12px;
+}
+
+.msg-chip {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid #5a6465;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  font-family: "Neo Roboto", Roboto, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  color: #a6a6a6;
+}
+
+.msg-chip:checked {
+  border-color: #33666d;
+  background-color: #33666d;
+  color: #ffffff;
+}
+
+.msg-chip-dot {
+  min-width: 8px;
+  min-height: 8px;
+  border-radius: 4px;
+  background-color: #b8ebf3;
+}
+
 /* --- the action bar (§1.2, §2.2) */
 
 .msg-action-bar {

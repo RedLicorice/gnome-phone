@@ -2,6 +2,7 @@
 #include "conversation-list.h"
 #include "blocked-numbers.h"
 #include "sms-agent.h"
+#include "sms-provider.h"
 #include "msg-add-contact.h"
 #include "msg-action-bar.h"
 #include "msg-avatar.h"
@@ -51,6 +52,9 @@ struct _ConversationList {
   GtkWidget *bar, *select_bar;
   GtkWidget *archive_action, *unarchive_action, *add_contact_action, *block_action;
   GtkWidget *scroll, *list, *empty, *fab;
+  GtkWidget *strip, *chips;     /* the groups (SMS, and each provider of messaging.conf), main list only */
+  char *chips_key;              /* the groups the chips were made for: they are made again when the file changes */
+  char *group;                  /* the group shown ("" is SMS); NULL: all of them (archived, forward) */
   NeoSnackbar *snackbar;
   GHashTable *rows;             /* id -> Row */
   GHashTable *selected;         /* ids */
@@ -593,6 +597,115 @@ row_free (gpointer data)
   g_free (row);
 }
 
+/* --- groups: the conversations by who they are with, taken from messaging.conf (sms-provider.h) */
+
+static char *
+group_of (const SmsConversation *conversation)
+{
+  char *group = sms_provider_group ((const char * const *) conversation->destinations);
+
+  return group ? group : g_strdup ("");
+}
+
+static void
+on_chip_toggled (GtkToggleButton *chip, gpointer data)
+{
+  ConversationList *self = data;
+  const char *group = g_object_get_data (G_OBJECT (chip), "group");
+
+  if (!gtk_toggle_button_get_active (chip) || !g_strcmp0 (group, self->group))
+    return;
+  g_free (self->group);
+  self->group = g_strdup (group);
+  g_settings_set_string (self->settings, "last-group", group);
+  reload (self);
+}
+
+static GtkWidget *
+make_chip (ConversationList *self, const char *group, const char *label, GtkWidget *first)
+{
+  GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+  GtkWidget *dot = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+  GtkWidget *chip = gtk_toggle_button_new ();
+
+  gtk_widget_add_css_class (dot, "msg-chip-dot");
+  gtk_widget_set_valign (dot, GTK_ALIGN_CENTER);
+  gtk_widget_set_visible (dot, FALSE);
+  gtk_box_append (GTK_BOX (box), gtk_label_new (label));
+  gtk_box_append (GTK_BOX (box), dot);
+  gtk_button_set_child (GTK_BUTTON (chip), box);
+  gtk_widget_add_css_class (chip, "msg-chip");
+  gtk_toggle_button_set_group (GTK_TOGGLE_BUTTON (chip), first ? GTK_TOGGLE_BUTTON (first) : NULL);
+  g_object_set_data_full (G_OBJECT (chip), "group", g_strdup (group), g_free);
+  g_object_set_data (G_OBJECT (chip), "dot", dot);
+  return chip;
+}
+
+/* the chips of the groups, made again only when the file's providers are not the ones they were made for; the group
+ * shown is the last one used, or the first when it is gone */
+static void
+sync_chips (ConversationList *self)
+{
+  g_auto(GStrv) ids = sms_provider_ids ();
+  g_autofree char *key = g_strjoinv (",", ids);
+  GtkWidget *first = NULL, *child, *active = NULL;
+
+  if (!g_strcmp0 (key, self->chips_key))
+    return;
+  g_free (self->chips_key);
+  self->chips_key = g_steal_pointer (&key);
+  while ((child = gtk_widget_get_first_child (self->chips)))
+    gtk_box_remove (GTK_BOX (self->chips), child);
+  if (!self->group)
+    self->group = g_settings_get_string (self->settings, "last-group");
+  for (guint i = 0; i <= g_strv_length (ids); i++)
+    {
+      /* SMS first, then the providers in the file's order */
+      const char *group = i ? ids[i - 1] : "";
+      g_autofree char *provider_label = i ? sms_provider_label (group) : NULL;
+      GtkWidget *chip = make_chip (self, group, i ? (provider_label ? provider_label : group) : _("SMS"), first);
+
+      gtk_box_append (GTK_BOX (self->chips), chip);
+      first = first ? first : chip;
+      if (!g_strcmp0 (group, self->group))
+        active = chip;
+    }
+  if (!active)
+    {
+      active = first;
+      g_free (self->group);
+      self->group = g_strdup ("");
+    }
+  gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (active), TRUE);
+  /* listening only now: making the group is not choosing one */
+  for (child = gtk_widget_get_first_child (self->chips); child; child = gtk_widget_get_next_sibling (child))
+    g_signal_connect (child, "toggled", G_CALLBACK (on_chip_toggled), self);
+  /* no provider is no choice: no chips */
+  gtk_widget_set_visible (self->strip, g_strv_length (ids) > 0);
+}
+
+/* the dot of each chip: some conversation of its group is unread */
+static void
+sync_dots (ConversationList *self, GHashTable *unread)
+{
+  for (GtkWidget *chip = gtk_widget_get_first_child (self->chips); chip; chip = gtk_widget_get_next_sibling (chip))
+    gtk_widget_set_visible (g_object_get_data (G_OBJECT (chip), "dot"),
+                            g_hash_table_contains (unread, g_object_get_data (G_OBJECT (chip), "group")));
+}
+
+void
+conversation_list_show_group_of (ConversationList *self, gint64 id)
+{
+  SmsStore *store = sms_client_get_store (self->client);
+  g_autoptr(SmsConversation) conversation = store && self->chips ? sms_store_get (store, id) : NULL;
+  g_autofree char *group = conversation ? group_of (conversation) : NULL;
+
+  for (GtkWidget *chip = gtk_widget_get_first_child (self->chips); group && chip;
+       chip = gtk_widget_get_next_sibling (chip))
+    if (!g_strcmp0 (group, g_object_get_data (G_OBJECT (chip), "group")))
+      gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (chip), TRUE);
+}
+
 static void
 reload (ConversationList *self)
 {
@@ -602,12 +715,25 @@ reload (ConversationList *self)
   GtkWidget *child;
   GHashTableIter iter;
   gpointer key;
+  g_autoptr(GHashTable) unread = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
 
+  if (self->chips)
+    sync_chips (self);
   while ((child = gtk_widget_get_first_child (self->list)))
     gtk_box_remove (GTK_BOX (self->list), child);
   g_hash_table_remove_all (self->rows);
   for (guint i = 0; conversations && i < conversations->len; i++)
-    gtk_box_append (GTK_BOX (self->list), make_row (self, conversations->pdata[i], now));
+    {
+      SmsConversation *conversation = conversations->pdata[i];
+      g_autofree char *group = self->chips ? group_of (conversation) : NULL;
+
+      if (group && !conversation->read)
+        g_hash_table_add (unread, g_strdup (group));
+      if (!group || !g_strcmp0 (group, self->group))
+        gtk_box_append (GTK_BOX (self->list), make_row (self, conversation, now));
+    }
+  if (self->chips)
+    sync_dots (self, unread);
   /* what was selected and is gone stays unselected */
   g_hash_table_iter_init (&iter, self->selected);
   while (g_hash_table_iter_next (&iter, &key, NULL))
@@ -784,6 +910,8 @@ conversation_list_dispose (GObject *object)
   if (self->settings)
     g_signal_handlers_disconnect_by_data (self->settings, self);
   g_clear_object (&self->settings);
+  g_clear_pointer (&self->chips_key, g_free);
+  g_clear_pointer (&self->group, g_free);
   g_clear_object (&self->client);
   g_clear_object (&self->contacts);
   g_clear_pointer (&self->box, gtk_widget_unparent);
@@ -870,6 +998,19 @@ build (SmsClient *client, Contacts *contacts, gboolean archived, gboolean forwar
   gtk_widget_set_visible (self->select_bar, FALSE);
   gtk_box_append (GTK_BOX (self->box), self->select_bar);
 
+  if (!archived && !forward)
+    {
+      /* the groups, as chips that scroll sideways when there are more than fit */
+      GtkWidget *strip = self->strip = gtk_scrolled_window_new ();
+
+      self->chips = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+      gtk_widget_add_css_class (self->chips, "msg-chips");
+      gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (strip), GTK_POLICY_AUTOMATIC, GTK_POLICY_NEVER);
+      gtk_scrolled_window_set_propagate_natural_height (GTK_SCROLLED_WINDOW (strip), TRUE);
+      gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (strip), self->chips);
+      gtk_widget_set_visible (strip, FALSE);
+      gtk_box_append (GTK_BOX (self->box), strip);
+    }
   self->list = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
   gtk_widget_set_margin_top (self->list, LIST_TOP_PADDING);
   gtk_box_append (GTK_BOX (inner), self->list);
