@@ -69,6 +69,10 @@ static const char introspection[] =
   "    <method name='SetVisible'><arg name='conversation' type='x' direction='in'/></method>"
   /* bugle_db changed: this conversation, or 0 for more than one */
   "    <signal name='Changed'><arg name='conversation' type='x'/></signal>"
+  /* a conversation's unread messages are now this many (0: all read); GetUnread for the count before any change */
+  "    <signal name='UnreadChanged'><arg name='conversation' type='x'/><arg name='count' type='u'/></signal>"
+  "    <method name='GetUnread'><arg name='conversation' type='x' direction='in'/>"
+  "      <arg name='count' type='u' direction='out'/></method>"
   /* a message written into an agent's conversation (Send, Resend), for the bridge to take; kept as sending until
    * Delivered says it took it (ok) or could not */
   "    <signal name='Outgoing'><arg name='message' type='x'/><arg name='conversation' type='x'/>"
@@ -129,6 +133,7 @@ typedef struct {
   guint32 failure_notification;
   gint64 failure_conversation;
   GHashTable *failed;           /* the messages given up since that was looked at: id -> conversation id */
+  GHashTable *unread;           /* the unread count of each conversation as last signalled (UnreadChanged) */
 
   GQueue outbox;                /* message ids to send now, in order */
   gint64 sending;               /* the one going, or 0 */
@@ -152,11 +157,35 @@ country (Service *self)
   return self->modem ? sms_modem_get_country (self->modem) : NULL;
 }
 
+/* UnreadChanged for each conversation whose unread count is not the one signalled last (a message came, one was
+ * read, one deleted): the chat overlay's badge follows Messages' read state instead of keeping a count of its own */
+static void
+emit_unread (Service *self)
+{
+  g_autoptr(GHashTable) now = sms_store_unread_counts (self->store);
+  GHashTableIter iter;
+  gpointer key, value;
+
+  g_hash_table_iter_init (&iter, now);
+  while (g_hash_table_iter_next (&iter, &key, &value))
+    if (g_hash_table_lookup (self->unread, key) != value)
+      g_dbus_connection_emit_signal (self->session, NULL, SMS_PATH, SMS_INTERFACE, "UnreadChanged",
+                                     g_variant_new ("(xu)", *(gint64 *) key, GPOINTER_TO_UINT (value)), NULL);
+  g_hash_table_iter_init (&iter, self->unread);
+  while (g_hash_table_iter_next (&iter, &key, NULL))
+    if (!g_hash_table_contains (now, key))
+      g_dbus_connection_emit_signal (self->session, NULL, SMS_PATH, SMS_INTERFACE, "UnreadChanged",
+                                     g_variant_new ("(xu)", *(gint64 *) key, 0u), NULL);
+  g_hash_table_unref (self->unread);
+  self->unread = g_steal_pointer (&now);
+}
+
 static void
 emit_changed (Service *self, gint64 conversation)
 {
   g_dbus_connection_emit_signal (self->session, NULL, SMS_PATH, SMS_INTERFACE, "Changed",
                                  g_variant_new ("(x)", conversation), NULL);
+  emit_unread (self);
 }
 
 static void
@@ -1110,6 +1139,14 @@ on_method_call (GDBusConnection *bus, const char *sender, const char *path, cons
   gboolean flag;
   const char *text;
 
+  if (g_str_equal (method, "GetUnread"))
+    {
+      g_variant_get (parameters, "(x)", &id);
+      g_dbus_method_invocation_return_value (invocation, g_variant_new ("(u)",
+                                             GPOINTER_TO_UINT (g_hash_table_lookup (self->unread, &id))));
+      return;
+    }
+
   if (g_str_equal (method, "GetConversation"))
     {
       g_autofree const char **numbers = NULL;
@@ -1414,6 +1451,7 @@ main (int argc, char **argv)
   g_signal_connect (service.contacts, "changed", G_CALLBACK (on_contacts_changed), &service);
   service.notifier = notifier_new (on_notification_action, on_notifications_restart, &service);
   service.failed = g_hash_table_new_full (g_int64_hash, g_int64_equal, g_free, g_free);
+  service.unread = sms_store_unread_counts (service.store);
   service.retries = g_hash_table_new_full (g_int64_hash, g_int64_equal, g_free, retry_free);
   service.reports = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, report_free);
   service.settings = app_settings ();
@@ -1465,6 +1503,7 @@ main (int argc, char **argv)
   g_hash_table_unref (service.agent_waits);
   g_clear_object (&service.settings);
   g_hash_table_unref (service.failed);
+  g_hash_table_unref (service.unread);
   notifier_free (service.notifier);
   g_signal_handlers_disconnect_by_data (service.contacts, &service);
   g_object_unref (service.contacts);

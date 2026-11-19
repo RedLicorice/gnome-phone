@@ -718,6 +718,23 @@ sms_store_list_unsent (SmsStore *self)
   return list_messages (self, "m.message_status IN (4, 5, 6, 7)", 0, 0);
 }
 
+GHashTable *
+sms_store_unread_counts (SmsStore *self)
+{
+  GHashTable *counts = g_hash_table_new_full (g_int64_hash, g_int64_equal, g_free, NULL);
+  sqlite3_stmt *select = prepare (self, "SELECT conversation_id, COUNT(*) FROM messages WHERE read = 0"
+                                        " GROUP BY conversation_id");
+
+  if (select)
+    {
+      while (sqlite3_step (select) == SQLITE_ROW)
+        g_hash_table_insert (counts, g_memdup2 (&(gint64) { sqlite3_column_int64 (select, 0) }, sizeof (gint64)),
+                             GINT_TO_POINTER (sqlite3_column_int (select, 1)));
+      sqlite3_finalize (select);
+    }
+  return counts;
+}
+
 GStrv
 sms_store_list_frequent (SmsStore *self, guint limit)
 {

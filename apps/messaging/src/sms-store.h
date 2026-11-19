@@ -111,6 +111,8 @@ GPtrArray      *sms_store_list_unseen (SmsStore *store);
 GPtrArray      *sms_store_list_unsent (SmsStore *store);
 /* the people written with most, the most messages first (the picker's Frequents): destinations */
 GStrv           sms_store_list_frequent (SmsStore *store, guint limit);
+/* the unread messages of every conversation that has any: conversation id (gint64 *) -> count (GINT_TO_POINTER) */
+GHashTable     *sms_store_unread_counts (SmsStore *store);
 
 void sms_conversation_free (SmsConversation *conversation);
 void sms_message_free (SmsMessage *message);

@@ -92,6 +92,9 @@ class Test:
             Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION, None, None)
         self.store = store
         self.changed = []
+        self.unread = []
+        self.bus.signal_subscribe(None, IFACE, 'UnreadChanged', PATH, None, Gio.DBusSignalFlags.NONE,
+                                  lambda *a: self.unread.append(a[5].unpack()))
         self.bus.signal_subscribe(None, IFACE, 'Changed', PATH, None, Gio.DBusSignalFlags.NONE,
                                   lambda *a: self.changed.append(a[5].unpack()[0]))
         self.outgoing = []
@@ -442,6 +445,8 @@ def run_agents(t):
     check('as one that came, unread, with the id Inject gave', rows and rows[-1][0] == message
           and rows[-1][1:3] == (INCOMING, 0), rows)
     t.wait('Changed names its conversation', lambda: minerva in t.changed)
+    t.wait('UnreadChanged counts it', lambda: (minerva, 1) in t.unread)
+    check('GetUnread says the same', t.service('GetUnread', (minerva,), '(x)')[0] == 1)
     n = t.wait('and notified, by the agent\'s name', lambda: t.notification('Minerva'))
     if n:
         check('its text', n[1]['body'] == 'Ciao, sono Minerva', n)
@@ -459,6 +464,7 @@ def run_agents(t):
           t.error('Inject', (ANNA, 'Hello'), '(ss)') == invalid)
     t.service('SetVisible', (minerva,), '(x)')
     t.wait('opening it takes the notification away', lambda: t.notification('Minerva') is None)
+    t.wait('and its unread count to 0', lambda: (minerva, 0) in t.unread)
     message = t.service('Inject', (AGENT, 'Ti vedo'), '(ss)')[0]
     t.wait('a message into the open conversation is read', lambda: t.messages(minerva)[-1][0] == message
            and t.messages(minerva)[-1][2] == 1)
