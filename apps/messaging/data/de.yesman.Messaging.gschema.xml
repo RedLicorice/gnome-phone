@@ -32,6 +32,25 @@
       <description>A conversation opens with its newest this many messages; scrolling to the top shows as many more</description>
     </key>
 
+    <!-- agents write Markdown (**bold**, `code`, lists): a message's text is drawn formatted (msg-markdown.c), its
+         copy stays the text as written -->
+    <key name="markdown" type="b">
+      <default>true</default>
+      <summary>Formatted messages</summary>
+      <description>Show Markdown in messages as formatting: bold, italic, code, lists, links and headings</description>
+    </key>
+
+    <!-- a message's text is bold already (messaging.css, .msg-message-text): its strong text must be heavier -->
+    <key name="markdown-strong-weight" type="s">
+      <choices>  <!-- Pango markup's weight names -->
+        <choice value="normal"/> <choice value="medium"/> <choice value="semibold"/> <choice value="bold"/>
+        <choice value="ultrabold"/> <choice value="heavy"/> <choice value="ultraheavy"/>
+      </choices>
+      <default>"heavy"</default>
+      <summary>Weight of strong text</summary>
+      <description>The Pango weight of **strong** text and headings in formatted messages: from normal to ultraheavy</description>
+    </key>
+
     <!-- the conversation list's group (a provider's id from messaging.conf; empty: plain SMS), kept for the next start -->
     <key name="last-group" type="s">
       <default>""</default>

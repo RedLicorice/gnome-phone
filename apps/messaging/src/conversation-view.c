@@ -8,6 +8,7 @@
 #include "msg-dates.h"
 #include "msg-dialog.h"
 #include "msg-image.h"
+#include "msg-markdown.h"
 #include "msg-people.h"
 #include "msg-directory.h"
 #include "msg-sound.h"
@@ -203,7 +204,10 @@ make_message (ConversationView *self, const SmsMessage *message, gboolean cluste
   GtkWidget *row = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
   GtkWidget *avatar = msg_avatar_new (AVATAR);
   GtkWidget *content = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-  GtkWidget *text = gtk_label_new (message->text);
+  GtkWidget *text = gtk_label_new (NULL);
+  g_autofree char *weight = g_settings_get_string (self->settings, "markdown-strong-weight");
+  g_autofree char *markup = message->text && g_settings_get_boolean (self->settings, "markdown") ?
+                            msg_markdown_to_pango (message->text, weight) : NULL;
   GtkWidget *bubble, *pressable;
   GdkRGBA color;
 
@@ -227,6 +231,10 @@ make_message (ConversationView *self, const SmsMessage *message, gboolean cluste
       g_signal_connect (avatar, "long-pressed", G_CALLBACK (on_bubble_long_pressed), NULL);
     }
 
+  if (markup)
+    gtk_label_set_markup (GTK_LABEL (text), markup);
+  else if (message->text)
+    gtk_label_set_text (GTK_LABEL (text), message->text);
   gtk_label_set_wrap (GTK_LABEL (text), TRUE);
   gtk_label_set_wrap_mode (GTK_LABEL (text), PANGO_WRAP_WORD_CHAR);
   gtk_label_set_xalign (GTK_LABEL (text), 0);
@@ -889,6 +897,8 @@ conversation_view_dispose (GObject *object)
     g_signal_handlers_disconnect_by_data (spongy_scroll_view_get_vadjustment (SPONGY_SCROLL_VIEW (self->scroll)), self);
   self->scroll = NULL;
   g_clear_handle_id (&self->older_id, g_source_remove);
+  if (self->settings)
+    g_signal_handlers_disconnect_by_data (self->settings, self);
   g_clear_object (&self->settings);
   if (self->client)
     g_signal_handlers_disconnect_by_data (self->client, self);
@@ -943,6 +953,7 @@ conversation_view_new (SmsClient *client, Contacts *contacts, gint64 conversatio
   self->people = g_ptr_array_new ();
   self->settings = g_settings_new ("de.yesman.Messaging");
   self->shown = g_settings_get_uint (self->settings, "conversation-page");
+  g_signal_connect_swapped (self->settings, "changed::markdown", G_CALLBACK (reload), self);
   self->box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
   gtk_widget_set_parent (self->box, GTK_WIDGET (self));
   gtk_widget_add_css_class (self->box, "msg-page");

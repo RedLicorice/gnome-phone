@@ -26,18 +26,20 @@ executable('neo-messaging-sms', 'src/sms-service.c', 'src/sms-modem.c', 'src/sms
 # the app: the conversation list, a conversation, the contact picker
 gnome = import('gnome')
 gtk = dependency('gtk4', version: '>= 4.14')
+md4c = dependency('md4c')
 resources = gnome.compile_resources('messaging-resources', 'src/messaging.gresource.xml', source_dir: ['src', 'data'])
 executable('neo-messaging', 'src/messaging-main.c', 'src/messaging-window.c', 'src/msg-navigator.c',
            'src/blocked-contacts.c', 'src/people-options.c', 'src/msg-settings.c', 'src/msg-directory.c', 'src/msg-sound.c',
            'src/conversation-list.c', 'src/conversation-view.c', 'src/contact-picker.c', 'src/msg-action-bar.c',
            'src/msg-add-contact.c', 'src/msg-avatar.c', 'src/msg-bubble.c', 'src/msg-dates.c', 'src/msg-image.c',
-           'src/msg-people.c', 'src/sms-provider.c', 'src/msg-swipe.c', 'src/sms-client.c', 'src/sms-segments.c',
+           'src/msg-markdown.c', 'src/msg-people.c', 'src/sms-provider.c', 'src/msg-swipe.c', 'src/sms-client.c',
+           'src/sms-segments.c',
            '../dialer/src/popup-menu.c', '../dialer/src/contacts-app.c', '../dialer/src/app-action.c', resources,
            link_with: [store, phone],
            include_directories: dialer, install: true,
            c_args: ['-DSOUNDS_DIR="@0@"'.format(datadir / 'neo-messaging/sounds')],
            dependencies: [gio, ebook, gtk, dependency('json-glib-1.0'), dependency('neo-1'), dependency('spongy-gtk-1'),
-                          dependency('gstreamer-1.0'), meson.get_compiler('c').find_library('m')])
+                          dependency('gstreamer-1.0'), md4c, meson.get_compiler('c').find_library('m')])
 
 unit = configuration_data({'bindir': bindir})
 configure_file(input: 'data/neo-messaging-sms.service.in', output: 'neo-messaging-sms.service',
@@ -55,6 +57,8 @@ gnome.post_install(glib_compile_schemas: true, gtk_update_icon_cache: true, upda
 test('sms-store', executable('test-sms-store', 'tests/test-sms-store.c', link_with: store, dependencies: [gio]))
 test('sms-segments', executable('test-sms-segments', 'tests/test-sms-segments.c', 'src/sms-segments.c',
                                 dependencies: [gio]))
+test('msg-markdown', executable('test-msg-markdown', 'tests/test-msg-markdown.c', 'src/msg-markdown.c',
+                                 include_directories: 'src', dependencies: [gio, md4c]))
 test('sms-group', executable('test-sms-group', 'tests/test-sms-group.c', 'src/sms-provider.c', dependencies: [gio]))
 # the message flows end to end, against a mock modem and notification server on buses of their own
 test('sms-flow', find_program('python3'), timeout: 120,
