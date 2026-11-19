@@ -6,9 +6,12 @@
 
 typedef void (*NsActivate) (GtkWidget *row, gpointer data);
 
-/* the app's navigation: pages are pushed onto it */
+/* the app's navigation, the page pane's (main.c: beside the menu, or over it): pages are pushed onto it */
 void       ns_ui_init (AdwNavigationView *nav);
 void       ns_push (AdwNavigationPage *page);
+/* runs `cb` (a menu entry's page) with the page it pushes made the first of the navigation, the pages there before
+ * gone; TRUE when it pushed one */
+gboolean   ns_open_root (NsActivate cb, GtkWidget *row, gpointer data);
 
 /* a sub page: back arrow and the title in the bar, `content` is the column to add groups to */
 AdwNavigationPage *ns_page_new (const char *title, GtkWidget **content);

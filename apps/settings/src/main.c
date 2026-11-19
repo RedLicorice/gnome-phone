@@ -103,16 +103,91 @@ static const Entry entries[] = {
 };
 
 static GPtrArray *groups;        /* the cards, to hide the ones a search empties */
+static GPtrArray *menu_rows;     /* the menu's rows, each with its Entry ("ns-entry") */
 static GtkWidget *search_entry, *title_box;
+
+/* Recent Android's two-pane Settings: wide enough (the split-condition setting), the menu on the left and the page
+ * on the right (AdwNavigationSplitView, expanded by an AdwBreakpoint); otherwise collapsed, the menu opens the page
+ * over itself, as before. The page pane is a navigation of its own (nav_view), so a page's sub-pages open inside
+ * it with a back arrow while the menu stays; its first page has no back arrow side by side. */
+static GtkWidget *split, *nav_view;
+static GSettings *app_settings;  /* de.yesman.NeoSettings; NULL where it is not installed: never side by side */
+static GtkWidget *current_row;   /* the menu row whose page the pane shows, marked side by side */
+
+static const char *entry_id (const Entry *e);
+
+static GtkWidget *
+menu_row_for (NsActivate page)
+{
+  for (guint i = 0; menu_rows && i < menu_rows->len; i++) {
+    const Entry *e = g_object_get_data (menu_rows->pdata[i], "ns-entry");
+    if (e->page == page)
+      return menu_rows->pdata[i];
+  }
+  return NULL;
+}
+
+/* the menu row of the pane's first page is the current one, and is remembered (a page not in the menu: none) */
+static void
+mark_current (NsActivate page)
+{
+  if (current_row)
+    gtk_widget_remove_css_class (current_row, "ns-current");
+  current_row = menu_row_for (page);
+  if (!current_row)
+    return;
+  gtk_widget_add_css_class (current_row, "ns-current");
+  const char *id = entry_id (g_object_get_data (G_OBJECT (current_row), "ns-entry"));
+  if (app_settings && id)
+    g_settings_set_string (app_settings, "last-page", id);
+}
+
+/* `page` becomes the pane's first page; `show`: and the pane is shown (collapsed, over the menu) */
+static gboolean
+open_root (NsActivate page, GtkWidget *row, gpointer data, gboolean show)
+{
+  if (!ns_open_root (page, row, data))
+    return FALSE;
+  mark_current (page);
+  if (show)
+    adw_navigation_split_view_set_show_content (ADW_NAVIGATION_SPLIT_VIEW (split), TRUE);
+  return TRUE;
+}
 
 static void
 activate_entry (GtkWidget *row, gpointer data)
 {
   const Entry *e = data;
   if (e->page)
-    e->page (row, NULL);
+    open_root (e->page, row, NULL, TRUE);
   else if (e->argv)
     ns_spawn (e->argv);
+}
+
+/* side by side the pane is never empty: the page opened last, else the menu's first */
+static void
+fill_pane (void)
+{
+  if (adw_navigation_view_get_visible_page (ADW_NAVIGATION_VIEW (nav_view)))
+    return;
+  g_autofree char *last = app_settings ? g_settings_get_string (app_settings, "last-page") : NULL;
+  GtkWidget *row = NULL;
+  for (guint i = 0; !row && menu_rows && i < menu_rows->len; i++) {
+    const Entry *e = g_object_get_data (menu_rows->pdata[i], "ns-entry");
+    const char *id = entry_id (e);
+    if (last && id && g_str_equal (last, id))
+      row = menu_rows->pdata[i];
+  }
+  for (guint i = 0; !row && menu_rows && i < menu_rows->len; i++) {
+    const Entry *e = g_object_get_data (menu_rows->pdata[i], "ns-entry");
+    if (e->page && !e->search_only)
+      row = menu_rows->pdata[i];
+  }
+  if (row) {
+    const Entry *e = g_object_get_data (G_OBJECT (row), "ns-entry");
+    /* the pane fills beside the menu: turned back upright, the menu is what shows, as it did */
+    open_root (e->page, row, NULL, FALSE);
+  }
 }
 
 static gboolean
@@ -206,6 +281,7 @@ main_page (void)
   gtk_box_append (GTK_BOX (outer), sc);
 
   groups = g_ptr_array_new ();
+  menu_rows = g_ptr_array_new ();
   GtkWidget *g = NULL;
   for (guint i = 0; i < G_N_ELEMENTS (entries); i++) {
     const Entry *e = &entries[i];
@@ -225,6 +301,8 @@ main_page (void)
     g_autofree char *text = g_strjoin (" ", e->title, e->subtitle, e->keywords, NULL);
     g_object_set_data_full (G_OBJECT (r), "ns-search", g_utf8_strdown (text, -1), g_free);
     ns_row_on_activate (r, activate_entry, (gpointer) e);
+    g_object_set_data (G_OBJECT (r), "ns-entry", (gpointer) e);
+    g_ptr_array_add (menu_rows, r);
   }
 
   AdwNavigationPage *page = adw_navigation_page_new (outer, "Settings");
@@ -235,25 +313,116 @@ main_page (void)
 
 /* ---- the app ---- */
 
-/* back (Alt+Left from Neo's edge swipe) and Escape: the page before, or out of Settings from the main menu */
+/* back (Alt+Left from Neo's edge swipe) and Escape: the page before in the pane; collapsed, from its first page the
+ * menu (focus on the row it came from); from the menu, or side by side from the pane's first page, out of Settings */
 static gboolean
-go_back (GtkWidget *win, GVariant *args, gpointer nav)
+go_back (GtkWidget *win, GVariant *args, gpointer data)
 {
-  if (!adw_navigation_view_pop (nav))
-    gtk_window_close (GTK_WINDOW (win));
+  AdwNavigationSplitView *sv = ADW_NAVIGATION_SPLIT_VIEW (split);
+  gboolean over_menu = adw_navigation_split_view_get_collapsed (sv) && adw_navigation_split_view_get_show_content (sv);
+  if (over_menu || !adw_navigation_split_view_get_collapsed (sv))
+    if (adw_navigation_view_pop (ADW_NAVIGATION_VIEW (nav_view)))
+      return TRUE;
+  if (over_menu) {
+    adw_navigation_split_view_set_show_content (sv, FALSE);
+    if (current_row)
+      gtk_widget_grab_focus (current_row);
+    return TRUE;
+  }
+  gtk_window_close (GTK_WINDOW (win));
   return TRUE;
 }
 
 static void
-add_back (GtkWidget *win, GtkWidget *nav)
+add_back (GtkWidget *win)
 {
   GtkEventController *keys = gtk_shortcut_controller_new ();
   gtk_shortcut_controller_set_scope (GTK_SHORTCUT_CONTROLLER (keys), GTK_SHORTCUT_SCOPE_GLOBAL);
   gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (keys),
     gtk_shortcut_new (gtk_alternative_trigger_new (gtk_shortcut_trigger_parse_string ("<Alt>Left"),
                                                    gtk_shortcut_trigger_parse_string ("Escape")),
-                      gtk_callback_action_new (go_back, nav, NULL)));
+                      gtk_callback_action_new (go_back, NULL, NULL)));
   gtk_widget_add_controller (win, keys);
+}
+
+/* ---- side by side ---- */
+
+static void
+split_applied (AdwBreakpoint *bp, GtkWidget *win)
+{
+  gtk_widget_add_css_class (win, "ns-split");
+  fill_pane ();
+}
+
+static void
+split_unapplied (AdwBreakpoint *bp, GtkWidget *win)
+{
+  gtk_widget_remove_css_class (win, "ns-split");
+}
+
+/* the condition follows the setting live; an empty or unreadable one never holds */
+static void
+split_condition_changed (GSettings *s, const char *key, AdwBreakpoint *bp)
+{
+  g_autofree char *text = g_settings_get_string (s, key);
+  AdwBreakpointCondition *c = *g_strstrip (text) ? adw_breakpoint_condition_parse (text) : NULL;
+  adw_breakpoint_set_condition (bp, c);
+  if (c)
+    adw_breakpoint_condition_free (c);
+}
+
+/* the pane's page carries the title of the page it shows (what the window and the screen reader name) */
+static void
+pane_page_changed (AdwNavigationView *nav, GParamSpec *ps, AdwNavigationPage *pane)
+{
+  AdwNavigationPage *p = adw_navigation_view_get_visible_page (nav);
+  adw_navigation_page_set_title (pane, p ? adw_navigation_page_get_title (p) : "Settings");
+}
+
+/* side by side, a page opened inside the pane is what the user is at: turned upright, it shows, not the menu */
+static void
+pane_pushed (AdwNavigationView *nav, AdwNavigationSplitView *sv)
+{
+  if (!adw_navigation_split_view_get_collapsed (sv))
+    adw_navigation_split_view_set_show_content (sv, TRUE);
+}
+
+static GtkWidget *
+split_new (GtkWidget *win)
+{
+  split = adw_navigation_split_view_new ();
+  /* collapsed unless the breakpoint holds: what the app was before, also where the schema is missing */
+  adw_navigation_split_view_set_collapsed (ADW_NAVIGATION_SPLIT_VIEW (split), TRUE);
+  nav_view = adw_navigation_view_new ();
+  ns_ui_init (ADW_NAVIGATION_VIEW (nav_view));
+  AdwNavigationPage *pane = adw_navigation_page_new (nav_view, "Settings");
+  g_signal_connect_object (nav_view, "notify::visible-page", G_CALLBACK (pane_page_changed), pane, 0);
+  g_signal_connect_object (nav_view, "pushed", G_CALLBACK (pane_pushed), split, 0);
+  adw_navigation_split_view_set_sidebar (ADW_NAVIGATION_SPLIT_VIEW (split), main_page ());
+  adw_navigation_split_view_set_content (ADW_NAVIGATION_SPLIT_VIEW (split), pane);
+
+  app_settings = ns_settings ("de.yesman.NeoSettings");
+  if (!app_settings) {
+    g_message ("de.yesman.NeoSettings is not installed: the menu and the page never side by side");
+    return split;
+  }
+  g_settings_bind (app_settings, "sidebar-width-fraction", split, "sidebar-width-fraction", G_SETTINGS_BIND_GET);
+  g_settings_bind (app_settings, "sidebar-min-width", split, "min-sidebar-width", G_SETTINGS_BIND_GET);
+  g_settings_bind (app_settings, "sidebar-max-width", split, "max-sidebar-width", G_SETTINGS_BIND_GET);
+  g_settings_bind (app_settings, "window-min-width", win, "width-request", G_SETTINGS_BIND_GET);
+  g_settings_bind (app_settings, "window-min-height", win, "height-request", G_SETTINGS_BIND_GET);
+  /* no condition yet (adw_breakpoint_new wants one): the setting gives it below */
+  AdwBreakpoint *bp = g_object_new (ADW_TYPE_BREAKPOINT, NULL);
+  g_auto (GValue) expanded = G_VALUE_INIT;
+  g_value_init (&expanded, G_TYPE_BOOLEAN);
+  g_value_set_boolean (&expanded, FALSE);
+  adw_breakpoint_add_setter (bp, G_OBJECT (split), "collapsed", &expanded);
+  g_signal_connect_object (bp, "apply", G_CALLBACK (split_applied), win, 0);
+  g_signal_connect_object (bp, "unapply", G_CALLBACK (split_unapplied), win, 0);
+  g_signal_connect_object (app_settings, "changed::split-condition", G_CALLBACK (split_condition_changed), bp, 0);
+  split_condition_changed (app_settings, "split-condition", bp);
+  adw_application_window_add_breakpoint (ADW_APPLICATION_WINDOW (win), bp);
+  return split;
 }
 
 static void
@@ -264,8 +433,6 @@ dark_changed (AdwStyleManager *sm, GParamSpec *ps, GtkWidget *win)
   else
     gtk_widget_remove_css_class (win, "ns-dark");
 }
-
-static GtkWidget *nav_view;
 
 static void
 activate (GtkApplication *app, gpointer data)
@@ -285,11 +452,8 @@ activate (GtkApplication *app, gpointer data)
   /* style.css with the tokens of the Renaissance look in force, and the look's classes on the window, live with the
    * settings (the theme's wallpaper is swapped in by the shell extension, theme.js) */
   ns_look_init (win);
-  GtkWidget *nav = nav_view = adw_navigation_view_new ();
-  ns_ui_init (ADW_NAVIGATION_VIEW (nav));
-  adw_navigation_view_add (ADW_NAVIGATION_VIEW (nav), main_page ());
-  adw_application_window_set_content (ADW_APPLICATION_WINDOW (win), nav);
-  add_back (win, nav);
+  adw_application_window_set_content (ADW_APPLICATION_WINDOW (win), split_new (win));
+  add_back (win);
   gtk_window_present (GTK_WINDOW (win));
 }
 
@@ -370,6 +534,16 @@ static const struct {
   { "permissions", ns_page_permissions }, { "agent-permissions", ns_page_permissions },
 };
 
+/* an entry's id: the primary --page name of its page, NULL when it has none */
+static const char *
+entry_id (const Entry *e)
+{
+  for (guint d = 0; e->page && d < G_N_ELEMENTS (direct); d++)
+    if (direct[d].page == e->page)
+      return direct[d].name;
+  return NULL;
+}
+
 /* `--list-pages`: the pages the menu shows, as one JSON array, for the launcher's search provider: id (the primary
  * --page name from direct[]), title, subtitle, keywords, icon. Derived from entries[] and direct[], no table of
  * its own; what the menu hides (schema not installed, not available) and the entries that open another app are
@@ -384,10 +558,7 @@ list_pages (void)
     const Entry *e = &entries[i];
     if (!e->title || !e->page || !installed (e))
       continue;
-    const char *id = NULL;
-    for (guint d = 0; !id && d < G_N_ELEMENTS (direct); d++)
-      if (direct[d].page == e->page)
-        id = direct[d].name;
+    const char *id = entry_id (e);
     if (!id)
       continue;
     json_builder_begin_object (b);
@@ -413,21 +584,28 @@ list_pages (void)
 }
 
 static void
+app_page (GtkWidget *row, gpointer id)
+{
+  ns_page_app (id);
+}
+
+/* the page asked for becomes the pane's first, the pages before gone (the menu's row marked, if it is one) */
+static void
 open_page (GApplication *app, const char *name, const char *arg)
 {
   g_application_activate (app);
-  adw_navigation_view_pop_to_tag (ADW_NAVIGATION_VIEW (nav_view), "main");
   if (arg && *arg && (!g_strcmp0 (name, "applications") || !g_strcmp0 (name, "apps"))) {
-    ns_page_app (arg);
+    open_root (app_page, NULL, (gpointer) arg, TRUE);
     return;
   }
   for (guint i = 0; name && *name && i < G_N_ELEMENTS (direct); i++)
     if (g_str_equal (name, direct[i].name)) {
-      direct[i].page (NULL, NULL);
+      open_root (direct[i].page, NULL, NULL, TRUE);
       return;
     }
   if (name && *name)
     g_message ("no page for the panel '%s': the main menu", name);
+  adw_navigation_split_view_set_show_content (ADW_NAVIGATION_SPLIT_VIEW (split), FALSE);
 }
 
 /* org.gnome.Settings' "launch-panel" (and Mobile Settings' "set-panel"): (panel, [parameters]) */

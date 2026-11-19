@@ -29,6 +29,7 @@ executable('neo-settings',
   install: true)
 install_data('data/de.yesman.NeoSettings.desktop', install_dir: get_option('datadir') / 'applications')
 install_data('data/de.yesman.NeoSettings.svg', install_dir: get_option('datadir') / 'icons' / 'hicolor' / 'scalable' / 'apps')
+install_data('data/de.yesman.NeoSettings.gschema.xml', install_dir: get_option('datadir') / 'glib-2.0' / 'schemas')
 install_data('data/neo-keyring-rekey', install_dir: get_option('libexecdir'), install_mode: 'rwxr-xr-x')
 # D-Bus activation (DBusActivatable=true): whatever opens a page through GApplication's "launch-panel" action,
 # GNOME's way of opening a Settings panel, starts the app when it is not running
@@ -36,3 +37,4 @@ service = configuration_data()
 service.set('bindir', get_option('prefix') / get_option('bindir'))
 configure_file(input: 'data/de.yesman.NeoSettings.service.in', output: 'de.yesman.NeoSettings.service',
                configuration: service, install_dir: get_option('datadir') / 'dbus-1' / 'services')
+gnome.post_install(glib_compile_schemas: true)

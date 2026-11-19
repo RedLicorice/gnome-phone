@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Neo Settings' own settings: how the window lays itself out. Read live: a change applies to the open window. -->
+<schemalist>
+  <schema id="de.yesman.NeoSettings" path="/de/yesman/NeoSettings/">
+    <!-- recent Android's two-pane Settings (ActivityEmbedding): wide enough, the menu and the page side by side -->
+    <key name="split-condition" type="s">
+      <default>'min-aspect-ratio: 4/3'</default>
+      <summary>When the menu and the page show side by side</summary>
+      <description>An AdwBreakpoint condition on the window (adw_breakpoint_condition_parse syntax, e.g.
+        "min-aspect-ratio: 4/3" for landscape, "min-width: 600sp"). While it holds, the menu is on the left and the
+        page on the right; otherwise the menu opens the page full screen, with a back arrow. Empty: never side by
+        side.</description>
+    </key>
+
+    <!-- AdwNavigationSplitView's sidebar sizing; the unit is the split view's (sp) -->
+    <key name="sidebar-width-fraction" type="d">
+      <range min="0.05" max="0.95"/>
+      <default>0.4</default>
+      <summary>Menu width, as a fraction of the window</summary>
+      <description>Side by side, the menu takes this fraction of the window's width, within the minimum and the
+        maximum below.</description>
+    </key>
+    <key name="sidebar-min-width" type="d">
+      <range min="0" max="2000"/>
+      <default>280</default>
+      <summary>Smallest menu width (sp)</summary>
+      <description>Side by side, the menu is never narrower than this.</description>
+    </key>
+    <key name="sidebar-max-width" type="d">
+      <range min="0" max="2000"/>
+      <default>360</default>
+      <summary>Largest menu width (sp)</summary>
+      <description>Side by side, the menu is never wider than this.</description>
+    </key>
+
+    <!-- a window with breakpoints lays its content out at any size above its own minimum, so it needs one: the
+         GNOME HIG's smallest phone window, which fits a phone either way up -->
+    <key name="window-min-width" type="i">
+      <range min="1" max="10000"/>
+      <default>360</default>
+      <summary>Smallest window width (px)</summary>
+      <description>The window is never made narrower than this.</description>
+    </key>
+    <key name="window-min-height" type="i">
+      <range min="1" max="10000"/>
+      <default>294</default>
+      <summary>Smallest window height (px)</summary>
+      <description>The window is never made lower than this.</description>
+    </key>
+
+    <key name="last-page" type="s">
+      <default>''</default>
+      <summary>The menu page opened last</summary>
+      <description>The --page name of the menu entry opened last. Side by side, the app opens with it so the page
+        pane is never empty (the menu's first entry when this is empty or no longer in the menu).</description>
+    </key>
+  </schema>
+</schemalist>

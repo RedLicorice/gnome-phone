@@ -11,6 +11,8 @@
 
 static AdwNavigationView *nav;
 static gint64 tapped;          /* when a row was tapped: NS_TIMING logs how long its page took to build */
+static gboolean root_next;     /* ns_open_root is running: the next page pushed replaces the stack */
+static gboolean root_pushed;   /* and it did push one */
 
 void
 ns_ui_init (AdwNavigationView *n)
@@ -25,7 +27,24 @@ ns_push (AdwNavigationPage *page)
     g_message ("%s: built in %.1f ms", adw_navigation_page_get_title (page),
                (g_get_monotonic_time () - tapped) / 1000.0);
   tapped = 0;
+  if (root_next) {
+    root_next = FALSE;
+    root_pushed = TRUE;
+    adw_navigation_view_replace (nav, &page, 1);
+    return;
+  }
   adw_navigation_view_push (nav, page);
+}
+
+gboolean
+ns_open_root (NsActivate cb, GtkWidget *row, gpointer data)
+{
+  root_next = TRUE;
+  root_pushed = FALSE;
+  cb (row, data);
+  /* a page that pushed nothing (it opened a dialog): the next push is an ordinary one */
+  root_next = FALSE;
+  return root_pushed;
 }
 
 GtkWidget *
