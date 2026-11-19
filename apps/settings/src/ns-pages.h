@@ -91,9 +91,6 @@ void     ns_page_prompt (GtkWidget *row, gpointer data);
 void     ns_prompt_build (GtkWidget *content, GObject *owner, JsonObject *ui);
 /* ns-events.c: Minerva > Eventi (the apps that send events, their channels' levels, the scheduled wake-ups) */
 void ns_page_events (GtkWidget *row, gpointer data);
-/* ns-places.c: Minerva > Luoghi (the places of her world, the shipped ones and her own; hers can be renamed and
- * deleted). Reached from the Minerva index like the other pages. */
-void ns_page_minerva_places (GtkWidget *row, gpointer data);
 
 /* ns-provider.c: Minerva > Messaggi (the messaging providers of Messages) and Accounts' Telegram bot token */
 void     ns_page_messaging (GtkWidget *row, gpointer data);

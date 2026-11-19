@@ -85,9 +85,6 @@ static const Entry entries[] = {
   { "video-display-symbolic", "blue", "Kiosk", "Orientamento • Resta acceso (dock)",
     "kiosk orientamento orientation ruota rotazione orizzontale verticale landscape portrait dock resta acceso carica "
     "schermo", ns_page_minerva_kiosk, NULL, NULL, ns_minerva_available, TRUE },
-  { "mark-location-symbolic", "green", "Luoghi", "Il suo mondo • Note • Gradimento",
-    "luoghi luogo places place mondo world kiosk gradimento nota note preferiti", ns_page_minerva_places, NULL, NULL,
-    ns_minerva_available, TRUE },
   { NULL },
   { "view-grid-symbolic", "blue", "Apps", "Default apps • App settings",
     "permissions storage", ns_page_apps },
@@ -528,7 +525,6 @@ static const struct {
   { "minerva-network", ns_page_minerva_network }, { "rete", ns_page_minerva_network },
   { "minerva-kiosk", ns_page_minerva_kiosk }, { "kiosk", ns_page_minerva_kiosk },
   { "events", ns_page_events }, { "eventi", ns_page_events },
-  { "places", ns_page_minerva_places }, { "luoghi", ns_page_minerva_places }, { "minerva-places", ns_page_minerva_places },
   { "messaging", ns_page_messaging }, { "messaggi", ns_page_messaging },
   { "chat", ns_page_messaging }, { "chats", ns_page_messaging },
   { "permissions", ns_page_permissions }, { "agent-permissions", ns_page_permissions },

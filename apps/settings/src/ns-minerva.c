@@ -1097,7 +1097,6 @@ static const struct {
   { "brain", ns_page_minerva_brain },
   { "voice", ns_page_minerva_voice },
   { "prompt", ns_page_prompt },
-  { "places", ns_page_minerva_places },
   { "events", ns_page_events },
   { "messaging", ns_page_messaging },
   { "budget", ns_page_minerva_budget },
