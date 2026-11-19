@@ -158,6 +158,14 @@ msg_swipe_measure (GtkWidget *widget, GtkOrientation orientation, int for_size, 
   gtk_widget_measure (MSG_SWIPE (widget)->row, orientation, for_size, min, nat, NULL, NULL);
 }
 
+/* the row's: its wrapping snippet is as tall as the width it gets (height-for-width); a constant size would be
+ * measured once, at the natural width, and the row's last line cut */
+static GtkSizeRequestMode
+msg_swipe_get_request_mode (GtkWidget *widget)
+{
+  return gtk_widget_get_request_mode (MSG_SWIPE (widget)->row);
+}
+
 static void
 msg_swipe_size_allocate (GtkWidget *widget, int width, int height, int baseline)
 {
@@ -186,6 +194,7 @@ msg_swipe_class_init (MsgSwipeClass *klass)
 
   G_OBJECT_CLASS (klass)->dispose = msg_swipe_dispose;
   widget_class->measure = msg_swipe_measure;
+  widget_class->get_request_mode = msg_swipe_get_request_mode;
   widget_class->size_allocate = msg_swipe_size_allocate;
   gtk_widget_class_set_css_name (widget_class, "msg-swipe");
   signals[SWIPED] = g_signal_new ("swiped", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
