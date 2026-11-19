@@ -19,6 +19,7 @@ typedef struct {
   guint32 tint;                 /* the card title's colour */
   JsonObject *person;           /* `people by-contact` (a ref), NULL when nobody is linked */
   JsonObject *voice;            /* `people voice-status` (a ref), NULL until it answered */
+  JsonObject *role;             /* the "role" of `people by-contact` (a ref): the contact's role for Minerva, NULL when none came */
   char *text;                   /* the notebook */
   gint64 max_samples;           /* the rule of `people known`, 0 until it answered */
   char *synced;                 /* the contact name already handed to the archive: no second try on the same one */
@@ -816,6 +817,28 @@ channel_rows (M *m)
 
 /* ---- the body ---- */
 
+/* The contact's role for Minerva (docs/contacts-roles.md): the line minerva-config wrote, and how it is changed. */
+static void
+role_rows (M *m)
+{
+  GtkWidget *label;
+
+  if (!m->role || !*ns_json_str (m->role, "text"))
+    return;
+  label = text_label (ns_json_str (m->role, "text"), json_object_get_boolean_member_with_default (m->role, "warning", FALSE)
+                      ? "ct-qc-entry-header" : "ct-qc-entry-sub", CT_QC_SUB_SP);
+  pad (label);
+  gtk_widget_set_margin_top (label, (int) CT_QC_ENTRY_PAD_TOP_DP);
+  gtk_box_append (GTK_BOX (m->body), label);
+  if (*ns_json_str (m->role, "note"))
+    {
+      label = text_label (ns_json_str (m->role, "note"), "ct-qc-entry-sub", CT_QC_SUB_SP);
+      pad (label);
+      gtk_widget_set_margin_bottom (label, (int) CT_QC_ENTRY_PAD_BOTTOM_DP);
+      gtk_box_append (GTK_BOX (m->body), label);
+    }
+}
+
 static void
 notebook_rows (M *m)
 {
@@ -960,15 +983,15 @@ render (M *m)
 {
   EContact *contact = contact_of (m);
   JsonArray *channels = ct_mnv_list ("channel_list");
-  g_autofree char *person = object_text (m->person), *voice = object_text (m->voice);
+  g_autofree char *person = object_text (m->person), *voice = object_text (m->voice), *role = object_text (m->role);
   g_autoptr (GString) now = g_string_new (NULL);
   GtkWidget *child;
 
   if (!ct_mnv_ui_ready ())
     return;
   /* what the card shows depends on all of this: the same again is not built again (the scroll would be lost) */
-  g_string_append_printf (now, "%s\n%s\n%s\n%s\n%" G_GINT64_FORMAT "\n%d", person, voice, m->text ? m->text : "",
-                          m->name ? m->name : "", m->max_samples, contact != NULL);
+  g_string_append_printf (now, "%s\n%s\n%s\n%s\n%" G_GINT64_FORMAT "\n%d\n%s", person, voice, m->text ? m->text : "",
+                          m->name ? m->name : "", m->max_samples, contact != NULL, role);
   for (guint i = 0; contact && channels && i < json_array_get_length (channels); i++)
     {
       g_autofree char *value = ct_contact_get_channel (contact, ns_json_str (json_array_get_object_element (channels, i), "id"),
@@ -986,6 +1009,7 @@ render (M *m)
   while ((child = gtk_widget_get_first_child (m->body)))
     gtk_box_remove (GTK_BOX (m->body), child);
   set_title (m, ct_mnv_text ("title"));
+  role_rows (m);
   if (m->person)
     notebook_rows (m);
   else
@@ -1087,6 +1111,9 @@ person_found (JsonObject *root, const char *err, gpointer data)
       return;
     }
   who = ns_json_obj (root, "person");
+  g_clear_pointer (&m->role, json_object_unref);
+  if (ns_json_obj (root, "role"))
+    m->role = json_object_ref (ns_json_obj (root, "role"));
   g_clear_pointer (&m->person, json_object_unref);
   if (!who || !*ns_json_str (who, "id"))
     {
@@ -1174,6 +1201,7 @@ m_free (gpointer data)
   g_clear_handle_id (&m->poll, g_source_remove);
   g_clear_pointer (&m->person, json_object_unref);
   g_clear_pointer (&m->voice, json_object_unref);
+  g_clear_pointer (&m->role, json_object_unref);
   g_free (m->uid);
   g_free (m->name);
   g_free (m->text);
