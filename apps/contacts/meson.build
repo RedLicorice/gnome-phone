@@ -21,7 +21,7 @@ settings = include_directories('../settings/src')
 # the contacts, their vCards and the list's rows: no GTK, so the tests and the seeder link them alone
 json = dependency('json-glib-1.0')
 core = static_library('contacts-core', 'src/ct-contact.c', 'src/ct-vcard.c', 'src/ct-store.c', 'src/ct-rows.c',
-                      'src/ct-mnv-core.c', 'src/ct-proof.c', dependencies: [gio, ebook, m, json])
+                      'src/ct-mnv-core.c', dependencies: [gio, ebook, m, json])
 
 gtk = dependency('gtk4', version: '>= 4.14')
 resources = gnome.compile_resources('contacts-resources', 'src/contacts.gresource.xml', source_dir: ['src', 'data'])
@@ -32,7 +32,7 @@ executable('neo-contacts', 'src/ct-main.c', 'src/ct-window.c', 'src/ct-page.c', 
            '../settings/src/ns-mc.c', resources,
            include_directories: [dialer, settings], link_with: core, install: true,
            dependencies: [gio, ebook, m, gtk, json, dependency('neo-1'),
-                          dependency('spongy-gtk-1'), dependency('libsoup-3.0')])
+                          dependency('spongy-gtk-1')])
 
 unit = configuration_data({'bindir': bindir})
 configure_file(input: 'data/de.yesman.Contacts.service.in', output: 'de.yesman.Contacts.service',

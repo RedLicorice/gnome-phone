@@ -1,5 +1,4 @@
 #include "ct-mnv-core.h"
-#include "ct-proof.h"
 
 #include <stdlib.h>
 
@@ -127,42 +126,6 @@ test_owner_and_kinds (void)
   g_assert_cmpstr (json_object_get_string_member (loose->pdata[0], "id"), ==, "sconosciuto-1");
 }
 
-static void
-proof_done (gboolean ok, const char *why, gpointer data)
-{
-  *(int *) data = ok ? 1 : 2;
-}
-
-static void
-test_proof (void)
-{
-  g_autofree char *del = ct_proof_action (CT_PROOF_DELETE, "pas-id-1", NULL);
-  g_autofree char *merge = ct_proof_action (CT_PROOF_MERGE, "a", "b");
-  g_autofree char *json = ct_proof_json ("giuseppe", merge);
-  g_autoptr(JsonParser) parser = json_parser_new ();
-  JsonObject *o = parse (parser, json);
-  CtProofRequest request = { CT_PROOF_FINGER, "Confermi?", 30, 0, NULL };
-  int answer = 0;
-
-  /* the sentences the memory service compares the proof with */
-  g_assert_cmpstr (del, ==, "delete contact pas-id-1");
-  g_assert_cmpstr (merge, ==, "merge contact a into b");
-  g_assert_cmpstr (json_object_get_string_member (o, "approver"), ==, "giuseppe");
-  g_assert_cmpstr (json_object_get_string_member (o, "action"), ==, "merge contact a into b");
-  g_assert_true (g_regex_match_simple ("^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\dZ$",
-                                       json_object_get_string_member (o, "at"), 0, 0));
-  /* the development provider answers at once, and remembers what the sheet would have said */
-  ct_proof_set_provider (ct_proof_dev_provider ());
-  ct_proof_ask (NULL, &request, proof_done, &answer);
-  g_assert_cmpint (answer, ==, 1);
-  g_assert_cmpstr (ct_proof_dev_last ()->reason, ==, "Confermi?");
-  ct_proof_dev_refuse (TRUE);
-  ct_proof_ask (NULL, &request, proof_done, &answer);
-  g_assert_cmpint (answer, ==, 2);
-  ct_proof_dev_refuse (FALSE);
-  ct_proof_set_provider (NULL);
-}
-
 int
 main (int argc, char **argv)
 {
@@ -172,7 +135,6 @@ main (int argc, char **argv)
   g_test_add_func ("/mnv/name-stale", test_name_stale);
   g_test_add_func ("/mnv/date", test_date);
   g_test_add_func ("/mnv/owner-and-kinds", test_owner_and_kinds);
-  g_test_add_func ("/mnv/proof", test_proof);
   g_test_add_func ("/mnv/rule-value", test_rule_value);
   return g_test_run ();
 }

@@ -4,7 +4,6 @@
 
 #include "ns-mc.h"
 
-#include <libsoup/soup.h>
 #include <string.h>
 
 static JsonObject *ui;          /* `people ui` once per process: the texts do not change under a running app */
@@ -284,150 +283,32 @@ ct_mnv_rename (GObject *owner, const char *pid, const char *name, CtMnvDone done
   people (owner, NULL, done, data, "rename", pid, name, NULL);
 }
 
-/* ---- the memory service ---- */
-
-static GKeyFile *memory_conf;
-static SoupSession *memory_session;
-
-static GKeyFile *
-conf (void)
-{
-  if (!memory_conf)
-    {
-      const char *named = g_getenv ("MINERVA_CONTACTS_CONF");
-      g_autofree char *path = named && *named ? g_strdup (named)
-                                              : g_build_filename (g_get_user_config_dir (), "minerva", "contacts.conf",
-                                                                  NULL);
-
-      memory_conf = g_key_file_new ();
-      g_key_file_load_from_file (memory_conf, path, G_KEY_FILE_NONE, NULL);   /* none: not configured */
-    }
-  return memory_conf;
-}
-
-static char *
-memory_token (void)
-{
-  return g_key_file_get_string (conf (), "memory", "token", NULL);
-}
+/* ---- the memory service: through minerva-config, which asks the platform's approval (ct-mnv.h) ---- */
 
 gboolean
 ct_mnv_memory_configured (void)
 {
-  g_autofree char *token = memory_token ();
+  JsonObject *part = contacts_part ();
 
-  return token && *token;
-}
-
-typedef struct {
-  CtMnvDone done;
-  gpointer data;
-  GObject *owner;
-  SoupMessage *message;
-} Memory;
-
-static void
-memory_finished (GObject *session, GAsyncResult *res, gpointer data)
-{
-  Memory *memory = data;
-  g_autoptr (GError) error = NULL;
-  g_autoptr (GBytes) body = soup_session_send_and_read_finish (SOUP_SESSION (session), res, &error);
-  guint status = soup_message_get_status (memory->message);
-  g_autofree char *why = NULL;
-
-  if (error)
-    why = g_strdup (error->message);
-  else if (status < 200 || status > 299)
-    {
-      /* {"error": …, "message": …} as the service answers a refusal */
-      g_autoptr (JsonParser) parser = json_parser_new ();
-      gsize size = 0;
-      const char *text = g_bytes_get_data (body, &size);
-
-      if (text && json_parser_load_from_data (parser, text, (gssize) size, NULL)
-          && JSON_NODE_HOLDS_OBJECT (json_parser_get_root (parser)))
-        {
-          JsonObject *o = json_node_get_object (json_parser_get_root (parser));
-          const char *message = ns_json_str (o, "message");
-
-          why = g_strdup_printf ("%s %s", ns_json_str (o, "error"), message);
-        }
-      if (!why || !*g_strstrip (why))
-        {
-          g_free (why);
-          why = g_strdup_printf ("HTTP %u", status);
-        }
-    }
-  memory->done (NULL, why, memory->data);
-  g_object_unref (memory->message);
-  g_clear_object (&memory->owner);
-  g_free (memory);
-}
-
-/* POST @path with @body (JSON) and the bearer token; the service answers 2xx with nothing to read */
-static void
-memory_post (GObject *owner, const char *path, const char *body, CtMnvDone done, gpointer data)
-{
-  g_autofree char *token = memory_token ();
-  g_autofree char *base = g_key_file_get_string (conf (), "memory", "url", NULL);
-  g_autofree char *url = NULL, *bearer = NULL;
-  Memory *memory;
-  g_autoptr (GBytes) bytes = NULL;
-  g_autoptr (GError) error = NULL;
-
-  if (!token || !*token)
-    {
-      done (NULL, ct_mnv_text ("memory_off"), data);
-      return;
-    }
-  if (!base || !*base)
-    base = g_strdup (ct_mnv_text ("memory_url"));
-  url = g_strconcat (base, path, NULL);
-  if (!memory_session)
-    {
-      int seconds = g_key_file_get_integer (conf (), "memory", "timeout_s", NULL);
-
-      memory_session = soup_session_new ();
-      soup_session_set_timeout (memory_session, (guint) (seconds > 0 ? seconds : ct_mnv_int ("memory_timeout_s")));
-    }
-  memory = g_new0 (Memory, 1);
-  memory->done = done;
-  memory->data = data;
-  memory->owner = owner ? g_object_ref (owner) : NULL;
-  memory->message = soup_message_new ("POST", url);
-  if (!memory->message)
-    {
-      done (NULL, url, data);
-      g_clear_object (&memory->owner);
-      g_free (memory);
-      return;
-    }
-  bearer = g_strconcat ("Bearer ", token, NULL);
-  soup_message_headers_append (soup_message_get_request_headers (memory->message), "Authorization", bearer);
-  bytes = g_bytes_new (body, strlen (body));
-  soup_message_set_request_body_from_bytes (memory->message, "application/json", bytes);
-  soup_session_send_and_read_async (memory_session, memory->message, G_PRIORITY_DEFAULT, NULL, memory_finished, memory);
+  return part && json_object_get_boolean_member_with_default (part, "memory_ops", FALSE);
 }
 
 void
-ct_mnv_memory_contact_deleted (GObject *owner, const char *id, const char *proof_json, CtMnvDone done, gpointer data)
+ct_mnv_contact_approve_delete (GObject *owner, const char *uid, CtMnvDone done, gpointer data)
 {
-  g_autofree char *escaped = g_uri_escape_string (id, NULL, FALSE);
-  g_autofree char *path = g_strdup_printf ("/v1/contacts/%s/deleted", escaped);
-  g_autofree char *body = g_strdup_printf ("{\"immediate\":true,\"proof\":%s}", proof_json);
-
-  memory_post (owner, path, body, done, data);
+  people (owner, NULL, done, data, "contact-approve", "delete", uid, NULL);
 }
 
 void
-ct_mnv_memory_contact_merged (GObject *owner, const char *from, const char *to, const char *proof_json,
-                              CtMnvDone done, gpointer data)
+ct_mnv_contact_approve_merge (GObject *owner, const char *from, const char *to, CtMnvDone done, gpointer data)
 {
-  g_autofree char *a = g_uri_escape_string (from, NULL, FALSE), *b = g_uri_escape_string (to, NULL, FALSE);
-  g_autofree char *path = g_strdup_printf ("/v1/contacts/%s/merged-into/%s", a, b);
-  g_autofree char *body = g_strdup_printf ("{\"proof\":%s}", proof_json);
+  people (owner, NULL, done, data, "contact-approve", "merge", from, to, NULL);
+}
 
-  memory_post (owner, path, body, done, data);
+void
+ct_mnv_contact_commit (GObject *owner, const char *intent, CtMnvDone done, gpointer data)
+{
+  people (owner, NULL, done, data, "contact-commit", intent, NULL);
 }
 
 /* ---- the people archive follows the contact ---- */

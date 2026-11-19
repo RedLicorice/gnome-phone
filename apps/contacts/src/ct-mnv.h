@@ -69,16 +69,16 @@ void ct_mnv_known       (GObject *owner, CtMnvDone done, gpointer data);
 /* one rule of `known` (people.conf): {rules: {…}} */
 void ct_mnv_rule_set    (GObject *owner, const char *key, const char *value, CtMnvDone done, gpointer data);
 
-/* The memory service's two calls the Contacts app makes about a whole contact (docs/superpowers/specs/
- * 2026-11-17-minerva-memory-service-design.md): `contact_deleted` (the cascade now, no bin) and `contact_merged`,
- * each with the human proof's JSON (ct-proof.h). Configured by ~/.config/minerva/contacts.conf (MINERVA_CONTACTS_CONF
- * names another file), [memory] token (the bearer token of the Contacts app's client), url (the data's memory_url
- * by default), timeout_s. Without a token there is no service to call: ct_mnv_memory_configured says so. */
+/* The memory service's side of deleting or merging a whole contact. No app asks the shell's sheets: minerva-config
+ * asks the memory service for the intent and the owner's approval of its sentence through the token service (the
+ * platform's gate sheet, finger then PIN, whose method, timing and texts are the token service's data), keeps the
+ * approval, and answers {"intent": id} once the owner said yes (a no: the refusal's text). After the address book
+ * did its part, the commit presents it. ct_mnv_memory_configured: whether this phone has the Contacts app's identity
+ * (`people ui` contacts.memory_ops); without it there is no memory service to tell. */
 gboolean ct_mnv_memory_configured (void);
-void ct_mnv_memory_contact_deleted (GObject *owner, const char *id, const char *proof_json, CtMnvDone done,
-                                    gpointer data);
-void ct_mnv_memory_contact_merged  (GObject *owner, const char *from, const char *to, const char *proof_json,
-                                    CtMnvDone done, gpointer data);
+void ct_mnv_contact_approve_delete (GObject *owner, const char *uid, CtMnvDone done, gpointer data);
+void ct_mnv_contact_approve_merge  (GObject *owner, const char *from, const char *to, CtMnvDone done, gpointer data);
+void ct_mnv_contact_commit         (GObject *owner, const char *intent, CtMnvDone done, gpointer data);
 
 /* What the people archive (this file's other calls) does when the contact goes: @uid's person is forgotten and every
  * animal and object that was hers has no owner; or, for a merge, @from's person joins @to's (or becomes it when

@@ -5,7 +5,6 @@
 #include "ct-mnv-core.h"
 #include "ct-mnv.h"
 #include "ct-picker.h"
-#include "ct-proof.h"
 #include "ct-store.h"
 #include "ct-ui.h"
 #include "ct-window.h"
@@ -47,20 +46,13 @@ fail (GtkWidget *window, const char *key, const char *why)
   toast (window, text);
 }
 
-static CtProofMethod
-method_of (const char *key)
+/* the intent of an approved operation (`contact-approve` answered {"intent": id}); NULL for a refusal */
+static char *
+intent_of (JsonObject *root)
 {
-  return !g_strcmp0 (ct_mnv_text (key), "pin") ? CT_PROOF_PIN : CT_PROOF_FINGER;
-}
+  const char *id = ns_json_str (root, "intent");
 
-/* the proof, asked on the shell's sheet with @reason (the user's language) and the data's method and timing */
-static void
-ask_proof (GtkWidget *window, const char *method_key, const char *reason, CtProofDone done, gpointer data)
-{
-  CtProofRequest request = { method_of (method_key), reason, ct_mnv_int ("proof_seconds"), ct_mnv_int ("proof_tries"),
-                             ct_mnv_text ("proof_wrong") };
-
-  ct_proof_ask (G_OBJECT (window), &request, done, data);
+  return *id ? g_strdup (id) : NULL;
 }
 
 /* the owner's name typed, for the owner's contact: the second, stronger confirmation */
@@ -85,8 +77,8 @@ typedef struct {
   guint next, deleted;
   JsonObject *known;
   const char *owner_uid;        /* borrowed from known */
-  char *approver;
   gboolean memory;
+  char *intent;                 /* the approved intent of the contact being deleted, committed after the book */
   Typed typed;
   CtRemovalDone done;
   gpointer data;
@@ -113,12 +105,25 @@ del_finish (Del *del)
   g_object_unref (del->window);
   g_ptr_array_unref (del->uids);
   g_clear_pointer (&del->known, json_object_unref);
-  g_free (del->approver);
+  g_free (del->intent);
   g_free (del->typed.name);
   g_free (del);
 }
 
 static void del_next (Del *del);
+
+/* the memory service told (or it failed: the contact is gone from the book all the same, the intent expires) */
+static void
+del_committed (JsonObject *root, const char *err, gpointer data)
+{
+  Del *del = data;
+
+  if (err)
+    fail (del->window, "memory_failed", err);
+  g_clear_pointer (&del->intent, g_free);
+  del->deleted++;
+  del_next (del);
+}
 
 static void
 del_stored (const char *uid, const GError *error, gpointer data)
@@ -129,6 +134,11 @@ del_stored (const char *uid, const GError *error, gpointer data)
     {
       fail (del->window, "delete_failed", error->message);
       del_finish (del);
+      return;
+    }
+  if (del->intent)
+    {
+      ct_mnv_contact_commit (G_OBJECT (del->window), del->intent, del_committed, del);
       return;
     }
   del->deleted++;
@@ -158,44 +168,27 @@ del_archive (Del *del)
                                   del);
 }
 
+/* the owner's answer on the platform's sheet: only a yes goes on */
 static void
-del_memory_done (JsonObject *root, const char *err, gpointer data)
+del_approved (JsonObject *root, const char *err, gpointer data)
 {
   Del *del = data;
 
-  if (err)
+  del->intent = err ? NULL : intent_of (root);
+  if (!del->intent)
     {
-      fail (del->window, "memory_failed", err);
-      del_finish (del);
-      return;
-    }
-  del_archive (del);
-}
-
-static void
-del_proved (gboolean ok, const char *why, gpointer data)
-{
-  Del *del = data;
-  const char *uid = del->uids->pdata[del->next - 1];
-  g_autofree char *action = ct_proof_action (CT_PROOF_DELETE, uid, NULL);
-  g_autofree char *proof = ct_proof_json (del->approver, action);
-
-  if (!ok)
-    {
-      fail (del->window, "proof_failed", why);
+      fail (del->window, "proof_failed", err ? err : ct_mnv_text ("error"));
       del_finish (del);
       return;
     }
   ct_window_toast_hold (del->window, ct_mnv_text ("busy_contact_delete"));
-  ct_mnv_memory_contact_deleted (G_OBJECT (del->window), uid, proof, del_memory_done, del);
+  del_archive (del);
 }
 
 static void
 del_next (Del *del)
 {
   const char *uid;
-  g_autofree char *name = NULL, *reason = NULL;
-  gboolean is_owner;
 
   if (del->next >= del->uids->len)
     {
@@ -208,10 +201,7 @@ del_next (Del *del)
       del_archive (del);
       return;
     }
-  name = name_of (del->window, uid);
-  is_owner = !g_strcmp0 (uid, del->owner_uid);
-  reason = ct_mnv_textf ("proof_delete_reason", (const char *const[]) { "name", name, NULL });
-  ask_proof (del->window, is_owner ? "proof_method_owner" : "proof_method", reason, del_proved, del);
+  ct_mnv_contact_approve_delete (G_OBJECT (del->window), uid, del_approved, del);
 }
 
 static void
@@ -265,7 +255,6 @@ del_known (JsonObject *root, const char *err, gpointer data)
     }
   del->known = json_object_ref (root);
   del->owner_uid = ct_mnv_owner_contact (root);
-  del->approver = g_strdup (ns_json_str (root, "owner"));
   del->memory = ct_mnv_memory_configured ();
   first = name_of (del->window, del->uids->pdata[0]);
   /* the owner's contact among the ones going: her name is to be typed */
@@ -304,7 +293,7 @@ typedef struct {
   char *to_name, *from_name;
   JsonObject *known;
   gboolean memory;
-  char *approver;
+  char *intent;                 /* the approved intent, committed once the book merged */
   Typed typed;
   CtMergeDone done;
   gpointer data;
@@ -320,10 +309,22 @@ mrg_finish (Mrg *mrg, gboolean merged)
   g_free (mrg->from);
   g_free (mrg->to_name);
   g_free (mrg->from_name);
-  g_free (mrg->approver);
+  g_free (mrg->intent);
   g_free (mrg->typed.name);
   g_clear_pointer (&mrg->known, json_object_unref);
   g_free (mrg);
+}
+
+static void
+mrg_committed (JsonObject *root, const char *err, gpointer data)
+{
+  Mrg *mrg = data;
+
+  if (err)
+    fail (mrg->window, "memory_failed", err);
+  else
+    toast (mrg->window, ct_mnv_text ("contact_merged_done"));
+  mrg_finish (mrg, TRUE);
 }
 
 static void
@@ -337,8 +338,12 @@ mrg_removed (const char *uid, const GError *error, gpointer data)
       mrg_finish (mrg, FALSE);
       return;
     }
-  toast (mrg->window, ct_mnv_text ("contact_merged_done"));
-  mrg_finish (mrg, TRUE);
+  if (mrg->intent)
+    {
+      ct_mnv_contact_commit (G_OBJECT (mrg->window), mrg->intent, mrg_committed, mrg);
+      return;
+    }
+  mrg_committed (NULL, NULL, mrg);
 }
 
 static void
@@ -358,20 +363,6 @@ mrg_archived (JsonObject *root, const char *err, gpointer data)
 }
 
 static void
-mrg_memory_done (JsonObject *root, const char *err, gpointer data)
-{
-  Mrg *mrg = data;
-
-  if (err)
-    {
-      fail (mrg->window, "memory_failed", err);
-      mrg_finish (mrg, FALSE);
-      return;
-    }
-  ct_mnv_archive_contact_merged (G_OBJECT (mrg->window), mrg->from, mrg->to, mrg->known, mrg_archived, mrg);
-}
-
-static void
 mrg_written (const char *uid, const GError *error, gpointer data)
 {
   Mrg *mrg = data;
@@ -382,35 +373,18 @@ mrg_written (const char *uid, const GError *error, gpointer data)
       mrg_finish (mrg, FALSE);
       return;
     }
-  if (!mrg->memory)
-    {
-      mrg_memory_done (NULL, NULL, mrg);
-      return;
-    }
-  {
-    g_autofree char *action = ct_proof_action (CT_PROOF_MERGE, mrg->from, mrg->to);
-    g_autofree char *proof = ct_proof_json (mrg->approver, action);
-
-    ct_mnv_memory_contact_merged (G_OBJECT (mrg->window), mrg->from, mrg->to, proof, mrg_memory_done, mrg);
-  }
+  ct_mnv_archive_contact_merged (G_OBJECT (mrg->window), mrg->from, mrg->to, mrg->known, mrg_archived, mrg);
 }
 
-/* the proof is given: the merged card is written into the contact that stays */
+/* approved (or no memory service to tell): the merged card is written into the contact that stays */
 static void
-mrg_proved (gboolean ok, const char *why, gpointer data)
+mrg_write (Mrg *mrg)
 {
-  Mrg *mrg = data;
   CtStore *store = ct_window_get_store (mrg->window);
   CtEntry *to = ct_store_lookup (store, mrg->to), *from = ct_store_lookup (store, mrg->from);
   g_autoptr (EContact) merged = NULL;
   g_autoptr (GPtrArray) changed = NULL;
 
-  if (!ok)
-    {
-      fail (mrg->window, "proof_failed", why);
-      mrg_finish (mrg, FALSE);
-      return;
-    }
   if (!to || !from)
     {
       fail (mrg->window, "merge_failed", "?");
@@ -425,20 +399,31 @@ mrg_proved (gboolean ok, const char *why, gpointer data)
   ct_store_modify (store, changed, mrg_written, mrg);
 }
 
+/* the owner's answer on the platform's sheet: only a yes goes on */
 static void
-mrg_ask_proof (Mrg *mrg)
+mrg_approved (JsonObject *root, const char *err, gpointer data)
 {
-  g_autofree char *reason = NULL;
+  Mrg *mrg = data;
 
-  if (!mrg->memory)
+  mrg->intent = err ? NULL : intent_of (root);
+  if (!mrg->intent)
     {
-      mrg_proved (TRUE, NULL, mrg);
+      fail (mrg->window, "proof_failed", err ? err : ct_mnv_text ("error"));
+      mrg_finish (mrg, FALSE);
       return;
     }
-  reason = ct_mnv_textf ("proof_merge_reason", (const char *const[]) { "from", mrg->from_name, "to", mrg->to_name, NULL });
-  ask_proof (mrg->window, !g_strcmp0 (mrg->from, ct_mnv_owner_contact (mrg->known)) ? "proof_method_owner"
-                                                                                     : "proof_method",
-             reason, mrg_proved, mrg);
+  mrg_write (mrg);
+}
+
+static void
+mrg_approve (Mrg *mrg)
+{
+  if (!mrg->memory)
+    {
+      mrg_write (mrg);
+      return;
+    }
+  ct_mnv_contact_approve_merge (G_OBJECT (mrg->window), mrg->from, mrg->to, mrg_approved, mrg);
 }
 
 static void
@@ -451,7 +436,7 @@ mrg_typed (const char *text, gpointer data)
       mrg_finish (mrg, FALSE);
       return;
     }
-  mrg_ask_proof (mrg);
+  mrg_approve (mrg);
 }
 
 static void
@@ -473,7 +458,7 @@ mrg_confirmed (int response, gpointer data)
                       mrg_typed, &mrg->typed);
       return;
     }
-  mrg_ask_proof (mrg);
+  mrg_approve (mrg);
 }
 
 /* the dialog's text: what happens, the rule for the merged card, where the two differ, and what Minerva does */
@@ -523,7 +508,6 @@ mrg_known (JsonObject *root, const char *err, gpointer data)
     }
   mrg->known = json_object_ref (root);
   mrg->memory = ct_mnv_memory_configured ();
-  mrg->approver = g_strdup (ns_json_str (root, "owner"));
   if (!g_strcmp0 (mrg->from, ct_mnv_owner_contact (root)))
     mrg->typed.name = g_strdup (mrg->from_name);
   /* the rule is run on a copy first, to say where the two differ before anything is written */
