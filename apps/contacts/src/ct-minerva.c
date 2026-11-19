@@ -1010,6 +1010,13 @@ render (M *m)
     gtk_box_remove (GTK_BOX (m->body), child);
   set_title (m, ct_mnv_text ("title"));
   role_rows (m);
+  if (m->role && g_strcmp0 (ns_json_str (m->role, "state"), "self") == 0)
+    {
+      /* Minerva's own contact: hers, not one of the people; no notebook to make, nothing to link, her channels only */
+      channel_rows (m);
+      gtk_widget_set_visible (m->card, TRUE);
+      return;
+    }
   if (m->person)
     notebook_rows (m);
   else
