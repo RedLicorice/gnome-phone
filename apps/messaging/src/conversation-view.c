@@ -62,6 +62,11 @@ struct _ConversationView {
   gboolean at_bottom;
   gboolean loading;
   guint refresh_id;
+  GSettings *settings;
+  guint shown;                  /* how many of the newest messages are shown */
+  gboolean has_older;           /* the conversation has messages above the ones shown */
+  guint older_id;               /* the idle that shows more of them */
+  double anchor_upper;          /* > 0: the list's height before older ones came in, to keep what was in sight */
 };
 
 G_DEFINE_FINAL_TYPE (ConversationView, conversation_view, GTK_TYPE_WIDGET)
@@ -471,15 +476,51 @@ scroll_to_bottom (ConversationView *self)
   gtk_adjustment_set_value (adj, gtk_adjustment_get_upper (adj) - gtk_adjustment_get_page_size (adj));
 }
 
+static gboolean
+show_older (gpointer data)
+{
+  ConversationView *self = data;
+  GtkAdjustment *adj = spongy_scroll_view_get_vadjustment (SPONGY_SCROLL_VIEW (self->scroll));
+
+  self->older_id = 0;
+  /* asked for in a layout pass that was not the last: the list is no longer at its top */
+  if (gtk_adjustment_get_value (adj) > 0)
+    return G_SOURCE_REMOVE;
+  self->anchor_upper = gtk_adjustment_get_upper (adj);
+  self->shown += g_settings_get_uint (self->settings, "conversation-page");
+  g_debug ("conversation %" G_GINT64_FORMAT ": showing its newest %u messages", self->id, self->shown);
+  reload (self);
+  return G_SOURCE_REMOVE;
+}
+
+/* at the top, or all of it in sight: the older ones, after this layout */
+static void
+maybe_show_older (ConversationView *self, GtkAdjustment *adj)
+{
+  if (self->has_older && !self->older_id && gtk_adjustment_get_value (adj) <= 0)
+    self->older_id = g_idle_add (show_older, self);
+}
+
 /* a new size (a message came, the keyboard opened): one at the bottom stays there */
 static void
 on_adjustment_changed (GtkAdjustment *adj, gpointer data)
 {
   ConversationView *self = data;
 
+  if (self->anchor_upper > 0 && gtk_adjustment_get_upper (adj) != self->anchor_upper)
+    {
+      /* older messages came in above: the ones in sight stay where they were */
+      double grown = gtk_adjustment_get_upper (adj) - self->anchor_upper;
+
+      self->anchor_upper = 0;
+      if (!self->at_bottom)
+        gtk_adjustment_set_value (adj, gtk_adjustment_get_value (adj) + grown);
+    }
   if (self->at_bottom)
     scroll_to_bottom (self);
+  maybe_show_older (self, adj);
 }
+
 
 static void
 on_adjustment_value (GtkAdjustment *adj, gpointer data)
@@ -487,6 +528,7 @@ on_adjustment_value (GtkAdjustment *adj, gpointer data)
   ConversationView *self = data;
 
   self->at_bottom = is_at_bottom (self);
+  maybe_show_older (self, adj);
   /* the shadow above the compose bar shows while the newest message is out of sight */
   gtk_widget_set_opacity (self->shadow, self->at_bottom ? 0 : 1);
 }
@@ -535,10 +577,12 @@ reload (ConversationView *self)
                                  country (self));
   update_title (self);
 
-  messages = sms_store_list_messages (store, self->id);
+  /* the newest ones shown, and one more: whether there are older ones, and whether the first shown clusters with it */
+  messages = sms_store_list_last_messages (store, self->id, self->shown + 1);
+  self->has_older = messages->len > self->shown;
   while ((child = gtk_widget_get_first_child (self->messages)))
     gtk_box_remove (GTK_BOX (self->messages), child);
-  for (guint i = 0; i < messages->len; i++)
+  for (guint i = self->has_older ? 1 : 0; i < messages->len; i++)
     {
       SmsMessage *message = messages->pdata[i];
 
@@ -839,6 +883,12 @@ conversation_view_dispose (GObject *object)
   if (self->refresh_id)
     g_source_remove (self->refresh_id);
   self->refresh_id = 0;
+  /* taking the list down moves its adjustment: nothing may ask for older messages from here on */
+  if (self->scroll)
+    g_signal_handlers_disconnect_by_data (spongy_scroll_view_get_vadjustment (SPONGY_SCROLL_VIEW (self->scroll)), self);
+  self->scroll = NULL;
+  g_clear_handle_id (&self->older_id, g_source_remove);
+  g_clear_object (&self->settings);
   if (self->client)
     g_signal_handlers_disconnect_by_data (self->client, self);
   if (self->contacts)
@@ -890,6 +940,8 @@ conversation_view_new (SmsClient *client, Contacts *contacts, gint64 conversatio
   self->contacts = g_object_ref (contacts);
   self->id = conversation;
   self->people = g_ptr_array_new ();
+  self->settings = g_settings_new ("de.yesman.Messaging");
+  self->shown = g_settings_get_uint (self->settings, "conversation-page");
   self->box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
   gtk_widget_set_parent (self->box, GTK_WIDGET (self));
   gtk_widget_add_css_class (self->box, "msg-page");

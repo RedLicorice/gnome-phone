@@ -42,7 +42,10 @@ msg_bubble_measure (GtkWidget *widget, GtkOrientation orientation, int for_size,
     {
       int child_min, child_nat;
 
-      gtk_widget_measure (self->child, orientation, for_size, &child_min, &child_nat, NULL, NULL);
+      /* Height-for-width only: the width does not depend on a height. A box that allocates the bubble asks for its
+       * width at the row's height; passing that height on makes every wrapping label search the narrowest width
+       * that fits it (GtkLabel's width-for-height, a full Pango relayout per step), about 30 relayouts per message */
+      gtk_widget_measure (self->child, orientation, -1, &child_min, &child_nat, NULL, NULL);
       /* MessageBubbleBackground.onMeasure: the width rounded up to the snap, within the most it may take */
       child_nat = (int) ceil (child_nat / (double) SNAP) * SNAP;
       if (self->max_width > 0)

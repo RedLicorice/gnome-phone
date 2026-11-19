@@ -70,6 +70,11 @@ test_incoming (void)
   g_assert_cmpint (message->sent, ==, 900);
   g_assert_cmpstr (message->sms_uri, ==, "/mm/Sms/1");
   g_assert_false (message->seen);
+  /* only the newest one, still oldest first */
+  g_clear_pointer (&messages, g_ptr_array_unref);
+  messages = sms_store_list_last_messages (store, first->id, 1);
+  g_assert_cmpuint (messages->len, ==, 1);
+  g_assert_cmpstr (((SmsMessage *) messages->pdata[0])->text, ==, "Are you there?");
 
   /* unseen: the notification's three; seen for one conversation, then read for the other */
   g_assert_cmpuint (count (sms_store_list_unseen (store)), ==, 3);

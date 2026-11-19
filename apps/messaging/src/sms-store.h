@@ -99,6 +99,8 @@ GPtrArray      *sms_store_list_conversations (SmsStore *store, gboolean archived
 SmsConversation *sms_store_get (SmsStore *store, gint64 conversation_id);
 /* a conversation's messages, oldest first: SmsMessage */
 GPtrArray      *sms_store_list_messages (SmsStore *store, gint64 conversation_id);
+/* only its newest limit messages, still oldest first: SmsMessage */
+GPtrArray      *sms_store_list_last_messages (SmsStore *store, gint64 conversation_id, guint limit);
 SmsMessage     *sms_store_get_message (SmsStore *store, gint64 message_id);
 /* the incoming messages not yet seen, oldest first (the notification's): SmsMessage */
 GPtrArray      *sms_store_list_unseen (SmsStore *store);

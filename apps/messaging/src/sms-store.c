@@ -638,18 +638,23 @@ sms_store_get (SmsStore *self, gint64 conversation_id)
   " m.sent_timestamp, m.received_timestamp, m.message_status, m.read, m.seen, m.sms_message_uri, m.raw_status" \
   " FROM messages m LEFT JOIN participants p ON p._id = m.sender_id"
 
+/* oldest first; with a limit, only the newest that many (columns 6 and 1: received_timestamp and _id) */
 static GPtrArray *
-list_messages (SmsStore *self, const char *where, gint64 value)
+list_messages (SmsStore *self, const char *where, gint64 value, guint limit)
 {
   GPtrArray *messages = g_ptr_array_new_with_free_func ((GDestroyNotify) sms_message_free);
-  g_autofree char *sql = g_strconcat (MESSAGE_COLUMNS " WHERE ", where,
-                                      " ORDER BY m.received_timestamp, m._id", NULL);
+  g_autofree char *sql = limit
+    ? g_strconcat ("SELECT * FROM (" MESSAGE_COLUMNS " WHERE ", where,
+                   " ORDER BY m.received_timestamp DESC, m._id DESC LIMIT ?2) ORDER BY 6, 1", NULL)
+    : g_strconcat (MESSAGE_COLUMNS " WHERE ", where, " ORDER BY m.received_timestamp, m._id", NULL);
   sqlite3_stmt *select = prepare (self, sql);
 
   if (!select)
     return messages;
   if (sqlite3_bind_parameter_count (select))
     sqlite3_bind_int64 (select, 1, value);
+  if (limit)
+    sqlite3_bind_int64 (select, 2, limit);
   while (sqlite3_step (select) == SQLITE_ROW)
     {
       SmsMessage *message = g_new0 (SmsMessage, 1);
@@ -675,13 +680,19 @@ list_messages (SmsStore *self, const char *where, gint64 value)
 GPtrArray *
 sms_store_list_messages (SmsStore *self, gint64 conversation_id)
 {
-  return list_messages (self, "m.conversation_id = ?", conversation_id);
+  return list_messages (self, "m.conversation_id = ?", conversation_id, 0);
+}
+
+GPtrArray *
+sms_store_list_last_messages (SmsStore *self, gint64 conversation_id, guint limit)
+{
+  return list_messages (self, "m.conversation_id = ?", conversation_id, MAX (limit, 1));
 }
 
 SmsMessage *
 sms_store_get_message (SmsStore *self, gint64 message_id)
 {
-  g_autoptr(GPtrArray) messages = list_messages (self, "m._id = ?", message_id);
+  g_autoptr(GPtrArray) messages = list_messages (self, "m._id = ?", message_id, 0);
 
   return messages->len ? g_ptr_array_steal_index (messages, 0) : NULL;
 }
@@ -689,13 +700,13 @@ sms_store_get_message (SmsStore *self, gint64 message_id)
 GPtrArray *
 sms_store_list_unseen (SmsStore *self)
 {
-  return list_messages (self, "m.message_status >= 100 AND m.seen = 0", 0);
+  return list_messages (self, "m.message_status >= 100 AND m.seen = 0", 0, 0);
 }
 
 GPtrArray *
 sms_store_list_unsent (SmsStore *self)
 {
-  return list_messages (self, "m.message_status IN (4, 5, 6, 7)", 0);
+  return list_messages (self, "m.message_status IN (4, 5, 6, 7)", 0, 0);
 }
 
 GStrv
