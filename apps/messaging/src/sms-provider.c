@@ -187,6 +187,23 @@ sms_provider_label (const char *provider_id)
   return g_key_file_get_string (file, provider_id, "label", NULL);
 }
 
+char *
+sms_provider_value (const char *provider_id, const char *key)
+{
+  GKeyFile *file = conf ();
+  g_autofree char *value = NULL;
+
+  if (!file || !provider_id || !key || !(value = g_key_file_get_string (file, provider_id, key, NULL)))
+    return NULL;
+  return g_strdup (g_strstrip (value));
+}
+
+char *
+sms_provider_address (const char *provider_id)
+{
+  return sms_provider_value (provider_id, "address");
+}
+
 gboolean
 sms_provider_flag (const char *provider_id, const char *key)
 {

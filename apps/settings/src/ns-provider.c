@@ -714,6 +714,10 @@ wl_texts (Prov *p, JsonObject *o, char **title, char **sub)
     g_ptr_array_add (parts, g_strdup (str_of (labels, "kind_group")));
   if (*name && push)
     g_ptr_array_add (parts, g_strdup_printf (str_of (labels, "chat_push"), name));
+  /* two contacts hold this number: the number is the title, and nobody is guessed
+   * TODO(X-MINERVA-CHAT-<provider>): offer the choice here; it is written to the chosen contact's vCard */
+  if (json_object_get_boolean_member_with_default (o, "ambiguous", FALSE))
+    g_ptr_array_add (parts, g_strdup (str_of (labels, "chat_ambiguous")));
   /* a contact's number says which of two with one name it is; a group's id says nothing */
   if (*name && !push && g_strcmp0 (name, chat) && g_strcmp0 (str_of (o, "kind"), "group"))
     g_ptr_array_add (parts, g_strdup (chat));

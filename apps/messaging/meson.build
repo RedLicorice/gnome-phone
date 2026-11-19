@@ -28,7 +28,7 @@ gnome = import('gnome')
 gtk = dependency('gtk4', version: '>= 4.14')
 resources = gnome.compile_resources('messaging-resources', 'src/messaging.gresource.xml', source_dir: ['src', 'data'])
 executable('neo-messaging', 'src/messaging-main.c', 'src/messaging-window.c', 'src/msg-navigator.c',
-           'src/blocked-contacts.c', 'src/people-options.c', 'src/msg-settings.c', 'src/msg-sound.c',
+           'src/blocked-contacts.c', 'src/people-options.c', 'src/msg-settings.c', 'src/msg-directory.c', 'src/msg-sound.c',
            'src/conversation-list.c', 'src/conversation-view.c', 'src/contact-picker.c', 'src/msg-action-bar.c',
            'src/msg-add-contact.c', 'src/msg-avatar.c', 'src/msg-bubble.c', 'src/msg-dates.c', 'src/msg-image.c',
            'src/msg-people.c', 'src/sms-provider.c', 'src/msg-swipe.c', 'src/sms-client.c', 'src/sms-segments.c',
@@ -36,7 +36,7 @@ executable('neo-messaging', 'src/messaging-main.c', 'src/messaging-window.c', 's
            link_with: [store, phone],
            include_directories: dialer, install: true,
            c_args: ['-DSOUNDS_DIR="@0@"'.format(datadir / 'neo-messaging/sounds')],
-           dependencies: [gio, ebook, gtk, dependency('neo-1'), dependency('spongy-gtk-1'),
+           dependencies: [gio, ebook, gtk, dependency('json-glib-1.0'), dependency('neo-1'), dependency('spongy-gtk-1'),
                           dependency('gstreamer-1.0'), meson.get_compiler('c').find_library('m')])
 
 unit = configuration_data({'bindir': bindir})

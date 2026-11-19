@@ -6,6 +6,7 @@
 #include "msg-avatar.h"
 #include "msg-dialog.h"
 #include "msg-people.h"
+#include "msg-directory.h"
 #include "phone-number.h"
 
 #include <glib/gi18n.h>
@@ -330,6 +331,8 @@ people_options_new (SmsClient *client, Contacts *contacts, gint64 conversation)
   g_signal_connect (client, "changed", G_CALLBACK (on_changed), self);
   g_signal_connect_swapped (client, "notify::country", G_CALLBACK (reload), self);
   g_signal_connect_swapped (contacts, "changed", G_CALLBACK (reload), self);
+  /* a provider names a chat later, or renames a group: the titles read again */
+  g_signal_connect_object (msg_directory_get_default (), "changed", G_CALLBACK (reload), self, G_CONNECT_SWAPPED);
   /* blocked or unblocked here, in the list, or in the Phone: the row says which it is now */
   g_signal_connect_swapped (blocked_numbers_get_default (), "changed", G_CALLBACK (reload), self);
   reload (self);

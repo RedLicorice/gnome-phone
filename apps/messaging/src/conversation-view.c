@@ -9,6 +9,7 @@
 #include "msg-dialog.h"
 #include "msg-image.h"
 #include "msg-people.h"
+#include "msg-directory.h"
 #include "msg-sound.h"
 #include "phone-number.h"
 #include "popup-menu.h"
@@ -1008,6 +1009,8 @@ conversation_view_new (SmsClient *client, Contacts *contacts, gint64 conversatio
   /* the network's country and the address book can come in after the conversation opens (a notification's tap) */
   g_signal_connect_swapped (client, "notify::country", G_CALLBACK (reload), self);
   g_signal_connect_swapped (self->contacts, "changed", G_CALLBACK (reload), self);
+  /* a provider names a chat later, or renames a group: the titles read again */
+  g_signal_connect_object (msg_directory_get_default (), "changed", G_CALLBACK (reload), self, G_CONNECT_SWAPPED);
   self->refresh_id = g_timeout_add (REFRESH_MS, on_refresh, self);
   self->loading = TRUE;
   reload (self);

@@ -13,6 +13,7 @@ struct _Contacts {
   GPtrArray *views;             /* EBookClientView, one per address book */
   guint pending;                /* views not yet complete */
   GHashTable *by_uid;           /* uid -> Contact */
+  GHashTable *matches;          /* "handle\nnumber\ncountry" -> Match, emptied on every change */
   GPtrArray *sorted;            /* the same contacts by name; NULL until asked for after a change */
   guint changed_id;             /* "changed" waits for a burst of changes to end */
   gboolean loaded;
@@ -43,6 +44,7 @@ contact_free (Contact *contact)
   g_free (contact->sort_key_primary);
   g_free (contact->sort_key_alternative);
   g_ptr_array_unref (contact->numbers);
+  g_strfreev (contact->handles);
   g_clear_pointer (&contact->photo, g_bytes_unref);
   g_free (contact);
 }
@@ -164,6 +166,19 @@ contact_from_econtact (Contacts *self, EContact *econtact)
       number->label = number_label (l->data);
       g_ptr_array_add (contact->numbers, number);
     }
+  {
+    g_autoptr(GStrvBuilder) handles = g_strv_builder_new ();
+
+    for (GList *l = e_vcard_get_attributes (E_VCARD (econtact)); l; l = l->next)
+      if (!g_ascii_strcasecmp (e_vcard_attribute_get_name (l->data), "IMPP"))
+        {
+          g_autofree char *value = e_vcard_attribute_get_value (l->data);
+
+          if (value && *value)
+            g_strv_builder_add (handles, g_strstrip (value));
+        }
+    contact->handles = g_strv_builder_end (handles);
+  }
   if (photo && photo->type == E_CONTACT_PHOTO_TYPE_INLINED && photo->data.inlined.length)
     contact->photo = g_bytes_new (photo->data.inlined.data, photo->data.inlined.length);
   e_contact_photo_free (photo);
@@ -186,6 +201,7 @@ static void
 changed (Contacts *self)
 {
   g_clear_pointer (&self->sorted, g_ptr_array_unref);
+  g_hash_table_remove_all (self->matches);
   /* an address book comes in pieces: one "changed" for all of them */
   if (!self->changed_id)
     self->changed_id = g_timeout_add (100, emit_changed, self);
@@ -281,8 +297,14 @@ on_client (GObject *source, GAsyncResult *result, gpointer data)
       return;
     }
   self = data;
-  /* the contacts with a phone number: the only ones a dialler has any use for (HAS_PHONE_NUMBER) */
-  query = e_book_query_to_string (e_book_query_field_exists (E_CONTACT_TEL));
+  /* the contacts with a phone number (HAS_PHONE_NUMBER) or a chat handle (IMPP: Messages' providers) */
+  {
+    EBookQuery *either[] = { e_book_query_field_exists (E_CONTACT_TEL), e_book_query_vcard_field_exists ("IMPP") };
+    EBookQuery *q = e_book_query_or (G_N_ELEMENTS (either), either, TRUE);
+
+    query = e_book_query_to_string (q);
+    e_book_query_unref (q);
+  }
   e_book_client_get_view (E_BOOK_CLIENT (client), query, self->cancellable, on_view, self);
 }
 
@@ -361,7 +383,8 @@ contacts_get_all (Contacts *self)
       self->sorted = g_ptr_array_new ();
       g_hash_table_iter_init (&iter, self->by_uid);
       while (g_hash_table_iter_next (&iter, NULL, &value))
-        g_ptr_array_add (self->sorted, value);
+        if (((Contact *) value)->numbers->len)
+          g_ptr_array_add (self->sorted, value);
       g_ptr_array_sort (self->sorted, by_name);
     }
   return self->sorted;
@@ -386,6 +409,52 @@ contacts_lookup (Contacts *self, const char *number, const char *country)
     if (contact_number_label (value, number, country))
       return value;
   return NULL;
+}
+
+typedef struct {
+  guint count;
+  char *uid;                    /* the one contact, when count is 1 */
+} Match;
+
+static void
+match_free (Match *m)
+{
+  g_free (m->uid);
+  g_free (m);
+}
+
+guint
+contacts_match (Contacts *self, const char *handle, const char *number, const char *country,
+                const Contact **contact)
+{
+  g_autofree char *key = g_strjoin ("\n", handle ? handle : "", number ? number : "", country ? country : "", NULL);
+  Match *m = g_hash_table_lookup (self->matches, key);
+
+  if (!m)
+    {
+      GHashTableIter iter;
+      gpointer value;
+
+      m = g_new0 (Match, 1);
+      g_hash_table_iter_init (&iter, self->by_uid);
+      while (g_hash_table_iter_next (&iter, NULL, &value))
+        {
+          Contact *c = value;
+
+          if ((handle && *handle && c->handles && g_strv_contains ((const char * const *) c->handles, handle))
+              || (number && *number && contact_number_label (c, number, country)))
+            {
+              if (!m->count++)
+                m->uid = g_strdup (c->uid);
+            }
+        }
+      if (m->count != 1)
+        g_clear_pointer (&m->uid, g_free);
+      g_hash_table_insert (self->matches, g_steal_pointer (&key), m);
+    }
+  if (contact)
+    *contact = m->uid ? g_hash_table_lookup (self->by_uid, m->uid) : NULL;
+  return m->count;
 }
 
 const char *
@@ -435,6 +504,7 @@ contacts_finalize (GObject *object)
 
   g_clear_pointer (&self->sorted, g_ptr_array_unref);
   g_hash_table_unref (self->by_uid);
+  g_hash_table_unref (self->matches);
   G_OBJECT_CLASS (contacts_parent_class)->finalize (object);
 }
 
@@ -459,6 +529,7 @@ contacts_init (Contacts *self)
   self->cancellable = g_cancellable_new ();
   self->views = g_ptr_array_new_with_free_func (g_object_unref);
   self->by_uid = g_hash_table_new_full (g_str_hash, g_str_equal, NULL, (GDestroyNotify) contact_free);
+  self->matches = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) match_free);
   /* the app and the service (a missed call's name) alike */
   if (schema)
     {

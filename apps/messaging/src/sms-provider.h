@@ -31,6 +31,9 @@ char *sms_provider_group (const char * const *destinations);
 /* a provider's keys, from its section: the label to show, and how to treat a name it sends */
 char *sms_provider_label (const char *provider_id);
 gboolean sms_provider_flag (const char *provider_id, const char *key);
+/* any key of a provider's section, trimmed, or NULL; its address */
+char *sms_provider_value (const char *provider_id, const char *key);
+char *sms_provider_address (const char *provider_id);
 
 /* every section of the file that declares an address, as provider ids (the caller frees) */
 GStrv sms_provider_ids (void);
