@@ -337,7 +337,9 @@ agents_done (JsonObject *root, const char *err, gpointer data)
     {
       JsonObject *r = json_array_get_object_element (a, i);
       g_autofree char *count = g_strdup_printf ("%" G_GINT64_FORMAT, json_object_get_int_member_with_default (r, "count", 0));
-      g_autofree char *times = fill (ui (ag, "count"), "n", count);
+      /* one request, or {n} of them: both forms are data ("count_one", "count") */
+      g_autofree char *times = json_object_get_int_member_with_default (r, "count", 0) == 1
+                               ? g_strdup (ui (ag, "count_one")) : fill (ui (ag, "count"), "n", count);
       g_autofree char *sub = g_strdup_printf ("%s • %s • %s", direction_of (ag, r),
                                               str_of (obj_of (obj_of (root, "ui"), "answers"), str_of (r, "answer")), times);
       add_row (ag, r, "dialog-question-symbolic", "orange", sub, request_tapped);
