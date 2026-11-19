@@ -763,6 +763,8 @@ ns_page_permissions (GtkWidget *row, gpointer data)
   ak->screen_note = ns_note (c, "");
   gtk_widget_set_visible (ak->screen_note, FALSE);
 
+  ns_agents_card (page, c);  /* agents of other machines in the chats (ns-agents.c) */
+
   g = ns_group (c, "Mode");
   GtkWidget *r = ns_row (g, NULL, NULL, "Ask every time", "Every action asks you before it runs");
   ak->ask_mark = mark_suffix (r);

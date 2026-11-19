@@ -111,3 +111,5 @@ void     ns_charge_limit_add (AdwNavigationPage *page, GtkWidget *content);
  * page's first card, filled from `status --json` */
 void ns_perm_add_row (GtkWidget *group);
 void ns_page_permissions (GtkWidget *row, gpointer data);
+/* Permissions > Agenti nei canali: agents of other machines in the chats (ns-agents.c) */
+void ns_agents_card (AdwNavigationPage *page, GtkWidget *content);
