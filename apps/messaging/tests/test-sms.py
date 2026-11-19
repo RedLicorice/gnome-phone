@@ -447,6 +447,8 @@ def run_agents(t):
     t.wait('Changed names its conversation', lambda: minerva in t.changed)
     t.wait('UnreadChanged counts it', lambda: (minerva, 1) in t.unread)
     check('GetUnread says the same', t.service('GetUnread', (minerva,), '(x)')[0] == 1)
+    check('GetMessages: only a program of the root-owned callers file may read the history',
+          t.error('GetMessages', (minerva, 10), '(xu)') == 'org.freedesktop.DBus.Error.AccessDenied')
     n = t.wait('and notified, by the agent\'s name', lambda: t.notification('Minerva'))
     if n:
         check('its text', n[1]['body'] == 'Ciao, sono Minerva', n)

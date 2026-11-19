@@ -22,6 +22,7 @@ phone = static_library('phone', '../dialer/src/phone-number.c', '../dialer/src/c
 # the service: the messages with the app closed, taking them off the modem, sending, the notifications
 md4c = dependency('md4c')
 executable('neo-messaging-sms', 'src/sms-service.c', 'src/sms-modem.c', 'src/sms-provider.c', 'src/msg-markdown.c',
+           'src/msg-callers.c', c_args: ['-DCALLERS_FILE="@0@"'.format(get_option('callers-file'))],
            link_with: [store, phone], include_directories: dialer, dependencies: [gio, ebook, md4c], install: true)
 
 # the app: the conversation list, a conversation, the contact picker

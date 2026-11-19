@@ -15,6 +15,7 @@
 #include "sms-store.h"
 #include "blocked-numbers.h"
 #include "contacts.h"
+#include "msg-callers.h"
 #include "msg-markdown.h"
 #include "notifier.h"
 #include "phone.h"
@@ -71,6 +72,11 @@ static const char introspection[] =
   "    <signal name='Changed'><arg name='conversation' type='x'/></signal>"
   /* a conversation's unread messages are now this many (0: all read); GetUnread for the count before any change */
   "    <signal name='UnreadChanged'><arg name='conversation' type='x'/><arg name='count' type='u'/></signal>"
+  /* a conversation's newest @limit messages, oldest first: (id, written by the owner, text, Unix ms when it came or
+   * was written), for a view that opens on it (the chat overlay); only the programs of the callers file's group
+   * de.yesman.Messaging.Sms.GetMessages may ask (msg-callers.h) */
+  "    <method name='GetMessages'><arg name='conversation' type='x' direction='in'/>"
+  "      <arg name='limit' type='u' direction='in'/><arg name='messages' type='a(xbsx)' direction='out'/></method>"
   "    <method name='GetUnread'><arg name='conversation' type='x' direction='in'/>"
   "      <arg name='count' type='u' direction='out'/></method>"
   /* a message written into an agent's conversation (Send, Resend), for the bridge to take; kept as sending until
@@ -1138,6 +1144,41 @@ on_method_call (GDBusConnection *bus, const char *sender, const char *path, cons
   gint64 id = 0;
   gboolean flag;
   const char *text;
+
+  if (g_str_equal (method, "GetMessages"))
+    {
+      g_autoptr(GError) denied = NULL;
+      g_autoptr(SmsConversation) conversation = NULL;
+      g_autoptr(GPtrArray) messages = NULL;
+      GVariantBuilder out;
+      guint limit;
+
+      g_variant_get (parameters, "(xu)", &id, &limit);
+      if (!msg_callers_check (bus, sender, CALLERS_FILE, SMS_INTERFACE ".GetMessages", &denied))
+        {
+          g_message ("sms: GetMessages refused: %s", denied->message);
+          g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR, G_DBUS_ERROR_ACCESS_DENIED,
+                                                 "Not a caller of GetMessages");
+          return;
+        }
+      if (!(conversation = sms_store_get (self->store, id)))
+        {
+          g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                                                 "No conversation %" G_GINT64_FORMAT, id);
+          return;
+        }
+      messages = limit ? sms_store_list_last_messages (self->store, id, limit) : NULL;
+      g_variant_builder_init (&out, G_VARIANT_TYPE ("a(xbsx)"));
+      for (guint i = 0; messages && i < messages->len; i++)
+        {
+          SmsMessage *m = messages->pdata[i];
+
+          g_variant_builder_add (&out, "(xbsx)", m->id, !MESSAGE_STATUS_IS_INCOMING (m->status) && !m->origin,
+                                 m->text ? m->text : "", m->received);
+        }
+      g_dbus_method_invocation_return_value (invocation, g_variant_new ("(a(xbsx))", &out));
+      return;
+    }
 
   if (g_str_equal (method, "GetUnread"))
     {
