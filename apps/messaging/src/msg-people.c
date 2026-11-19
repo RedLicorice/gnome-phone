@@ -5,6 +5,8 @@
 #include "sms-agent.h"
 #include "sms-provider.h"
 
+#include <json-glib/json-glib.h>
+
 /* @chat starts with the provider's @key prefix (``lid-prefix``, ``group-prefix``) */
 static gboolean
 has_prefix_of (const char *owner, const char *chat, const char *key)
@@ -35,6 +37,78 @@ directory_name (const char *owner, const char *destination)
   return parts[1] ? g_strconcat (parts[0], name, parts[1], NULL) : g_strconcat (parts[0], name, NULL);
 }
 
+/* Minerva's own contact (docs/contacts-roles.md), the name and the photo of the conversation of the agent the
+ * messaging.conf [agent] ``self`` key names: asked of the one contacts resolver (``self_command``, then
+ * ``photo_command <id>``), kept for ``self_refresh_s``. A resolver that cannot answer leaves the agent's name. */
+typedef struct {
+  gint64 at;                    /* g_get_monotonic_time () of the last ask, 0 never */
+  char *name;
+  GBytes *photo;
+} SelfCard;
+
+static JsonObject *
+resolver_ask (const char *key, const char *extra, JsonParser *parser)
+{
+  g_autofree char *line = sms_provider_value ("agent", key);
+  g_auto(GStrv) argv = NULL;
+  g_autoptr(GPtrArray) args = g_ptr_array_new ();
+  g_autofree char *out = NULL;
+  int status = 0;
+
+  if (!line || !*line || !g_shell_parse_argv (line, NULL, &argv, NULL))
+    return NULL;
+  for (guint i = 0; argv[i]; i++)
+    g_ptr_array_add (args, argv[i]);
+  if (extra)
+    g_ptr_array_add (args, (gpointer) extra);
+  g_ptr_array_add (args, NULL);
+  if (!g_spawn_sync (NULL, (char **) args->pdata, NULL, G_SPAWN_SEARCH_PATH | G_SPAWN_STDERR_TO_DEV_NULL, NULL, NULL,
+                     &out, NULL, &status, NULL) || !g_spawn_check_wait_status (status, NULL))
+    return NULL;
+  if (!out || !json_parser_load_from_data (parser, out, -1, NULL) || !JSON_NODE_HOLDS_OBJECT (json_parser_get_root (parser)))
+    return NULL;
+  return json_node_get_object (json_parser_get_root (parser));
+}
+
+static const SelfCard *
+self_card (void)
+{
+  static SelfCard card;
+  g_autofree char *refresh = sms_provider_value ("agent", "self_refresh_s");
+  gint64 every = (refresh ? g_ascii_strtoll (refresh, NULL, 10) : 0) * G_USEC_PER_SEC;
+  g_autoptr(JsonParser) p1 = json_parser_new (), p2 = json_parser_new ();
+  JsonObject *me, *photo;
+
+  if (card.at && g_get_monotonic_time () - card.at < every)
+    return card.name ? &card : NULL;
+  card.at = g_get_monotonic_time ();
+  g_clear_pointer (&card.name, g_free);
+  g_clear_pointer (&card.photo, g_bytes_unref);
+  if (!(me = resolver_ask ("self_command", NULL, p1)) || !json_object_get_string_member_with_default (me, "id", NULL))
+    return NULL;
+  card.name = g_strdup (json_object_get_string_member_with_default (me, "name", ""));
+  if ((photo = resolver_ask ("photo_command", json_object_get_string_member (me, "id"), p2)))
+    {
+      gsize len = 0;
+      guchar *bytes = g_base64_decode (json_object_get_string_member_with_default (photo, "data", ""), &len);
+
+      if (len)
+        card.photo = g_bytes_new_take (bytes, len);
+      else
+        g_free (bytes);
+    }
+  return *card.name ? &card : NULL;
+}
+
+/* @destination is the conversation of Minerva's own agent ([agent] self) */
+static gboolean
+is_self_agent (const char *destination)
+{
+  g_autofree char *self = sms_provider_value ("agent", "self");
+
+  return self && *self && g_strcmp0 (sms_agent_name (destination), self) == 0;
+}
+
 MsgPerson *
 msg_person_new (Contacts *contacts, const char *destination, const char *country)
 {
@@ -53,7 +127,14 @@ msg_person_new (Contacts *contacts, const char *destination, const char *country
                   ? contacts_match (contacts, owner ? destination : NULL, number, country, &contact) : 0;
 
   person->destination = g_strdup (destination);
-  if (sms_agent_name (destination))
+  if (is_self_agent (destination) && self_card ())
+    {
+      const SelfCard *me = self_card ();
+
+      person->name = g_strdup (me->name);
+      person->photo = me->photo ? g_bytes_ref (me->photo) : NULL;
+    }
+  else if (sms_agent_name (destination))
     person->name = g_strdup (sms_agent_name (destination));
   else if (contact)
     {
