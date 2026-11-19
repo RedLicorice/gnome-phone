@@ -87,6 +87,10 @@ static const char introspection[] =
   "      <arg name='text' type='s' direction='in'/><arg name='sent' type='x' direction='in'/>"
   "      <arg name='ext' type='s' direction='in'/><arg name='name' type='s' direction='in'/>"
   "      <arg name='message' type='x' direction='out'/></method>"
+  /* what the owner said to an agent ('agent:<name>') in another way (by voice), kept as sent in its conversation
+   * (made if new) without Outgoing: it reached the agent already, nothing is delivered */
+  "    <method name='Record'><arg name='destination' type='s' direction='in'/>"
+  "      <arg name='text' type='s' direction='in'/><arg name='message' type='x' direction='out'/></method>"
   /* a message from an agent ('agent:<name>'), kept as one that came into its conversation (made if new) */
   "    <method name='Inject'><arg name='destination' type='s' direction='in'/>"
   "      <arg name='text' type='s' direction='in'/><arg name='message' type='x' direction='out'/></method>"
@@ -1163,6 +1167,28 @@ on_method_call (GDBusConnection *bus, const char *sender, const char *path, cons
         g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR, G_DBUS_ERROR_FAILED, "Not kept");
       else
         g_dbus_method_invocation_return_value (invocation, g_variant_new ("(x)", message));
+      return;
+    }
+  if (g_str_equal (method, "Record"))
+    {
+      const char *destination;
+      gint64 now = g_get_real_time () / 1000, message = 0;
+      g_autoptr(SmsMessage) row = NULL;
+
+      g_variant_get (parameters, "(&s&s)", &destination, &text);
+      const char *const one[] = { destination, NULL };
+      if (!sms_agent_name (destination) || !*text)
+        g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                                               "Not an agent's destination, or no text");
+      else if (!(id = sms_store_get_conversation (self->store, one))
+               || !(message = sms_store_add_outgoing (self->store, id, text, now, NULL))
+               || !(row = sms_store_get_message (self->store, message)))
+        g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR, G_DBUS_ERROR_FAILED, "Not kept");
+      else
+        {
+          set_status (self, row, MESSAGE_STATUS_OUTGOING_COMPLETE, 0, now);
+          g_dbus_method_invocation_return_value (invocation, g_variant_new ("(x)", message));
+        }
       return;
     }
   if (g_str_equal (method, "Receive"))

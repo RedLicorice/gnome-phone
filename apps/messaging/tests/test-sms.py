@@ -458,6 +458,16 @@ def run_agents(t):
     check('and not notified', t.notification('Minerva') is None, t.report()['notifications'])
     t.service('SetVisible', (-1,), '(x)')
 
+    # what the owner said by voice: kept as sent, no Outgoing (the agent heard it already)
+    t.outgoing.clear()
+    said = t.service('Record', (AGENT, 'Che ore sono?'), '(ss)')[0]
+    t.wait('Record: kept as sent in the agent\'s conversation', lambda: t.messages(minerva)[-1][0] == said
+           and t.status(said) == COMPLETE)
+    t.settle()
+    check('and no Outgoing', not t.outgoing, t.outgoing)
+    check('Record for a destination that is no agent\'s: InvalidArgs',
+          t.error('Record', (ANNA, 'Hello'), '(ss)') == invalid)
+
     # sending, with no modem
     message = t.service('Send', (minerva, 'Come stai?'), '(xs)')[0]
     t.wait('Send with no modem: Outgoing, with its ids', lambda: (message, minerva, AGENT, 'Come stai?', 'owner') in t.outgoing)
