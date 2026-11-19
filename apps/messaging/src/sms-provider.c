@@ -8,7 +8,8 @@
 #include "sms-agent.h"
 
 /* the sections of the file that are not providers */
-static const char *NOT_A_PROVIDER[] = { "providers", "scopes", "limits", "defaults", "events", NULL };
+static const char *NOT_A_PROVIDER[] = { "providers", "scopes", "limits", "defaults", "events", "agents", "agent-refusals",
+                                        "agent-levels", NULL };
 
 const char *
 sms_provider_conf_path (void)
@@ -196,6 +197,18 @@ sms_provider_value (const char *provider_id, const char *key)
   if (!file || !provider_id || !key || !(value = g_key_file_get_string (file, provider_id, key, NULL)))
     return NULL;
   return g_strdup (g_strstrip (value));
+}
+
+char *
+sms_provider_text (const char *section, const char *key)
+{
+  g_autofree char *value = sms_provider_value (section, key);
+  gsize len = value ? strlen (value) : 0;
+
+  /* a value written in quotes keeps its spaces; the quotes are not part of it (the Go and Python readers agree) */
+  if (len >= 2 && value[0] == value[len - 1] && (value[0] == '"' || value[0] == '\''))
+    return g_strndup (value + 1, len - 2);
+  return g_steal_pointer (&value);
 }
 
 char *

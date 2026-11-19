@@ -15,9 +15,11 @@
 #include "phone-number.h"
 #include "popup-menu.h"
 #include "sms-agent.h"
+#include "sms-provider.h"
 #include "sms-segments.h"
 
 #include <glib/gi18n.h>
+#include <json-glib/json-glib.h>
 #include <neo.h>
 #include <spongy-gtk.h>
 
@@ -54,7 +56,7 @@ struct _ConversationView {
   GPtrArray *people;            /* MsgPerson */
 
   GtkWidget *box, *bar, *select_bar, *call_action;
-  GtkWidget *forward_action, *copy_action, *resend_action;
+  GtkWidget *forward_action, *copy_action, *resend_action, *withdraw_action;
   GtkWidget *scroll, *messages, *shadow;
   GtkWidget *field, *hint, *send, *self_avatar, *counter;
   NeoAnim *reveal;
@@ -191,6 +193,37 @@ on_avatar_clicked (GtkWidget *pressable, gpointer data)
   msg_contact_show_or_add (pressable, person, self->snackbar);
 }
 
+/* --- an external agent's message (docs/external-agents-channels.md): its origin is messaging.conf [agents] origin,
+ * then the agent's identity; the thread says who sent it, and the owner may withdraw it within the network's window */
+
+/* the agent's identity of an outgoing message, or NULL for the owner's and Minerva's */
+static char *
+agent_of (const SmsMessage *message)
+{
+  g_autofree char *prefix = sms_provider_text ("agents", "origin");
+
+  if (!message->origin || !prefix || !*prefix || !g_str_has_prefix (message->origin, prefix))
+    return NULL;
+  return g_strdup (message->origin + strlen (prefix));
+}
+
+/* may the owner still withdraw it: an agent's, sent, and within the provider's revoke_window_s */
+static gboolean
+withdrawable (ConversationView *self, const SmsMessage *message)
+{
+  g_autofree char *agent = agent_of (message);
+  g_autofree char *provider = NULL, *window = NULL;
+  gint64 seconds;
+
+  if (!agent || !self->conversation || !self->conversation->destinations || !self->conversation->destinations[0]
+      || (message->status != MESSAGE_STATUS_OUTGOING_COMPLETE && message->status != MESSAGE_STATUS_OUTGOING_DELIVERED))
+    return FALSE;
+  provider = sms_provider_owner (self->conversation->destinations[0]);
+  window = provider ? sms_provider_value (provider, "revoke_window_s") : NULL;
+  seconds = window ? g_ascii_strtoll (window, NULL, 10) : 0;
+  return seconds > 0 && g_get_real_time () / 1000 - message->sent <= seconds * 1000;
+}
+
 static GtkWidget *
 make_message (ConversationView *self, const SmsMessage *message, gboolean clustered_above,
               gboolean clustered_below)
@@ -241,6 +274,24 @@ make_message (ConversationView *self, const SmsMessage *message, gboolean cluste
   gtk_label_set_selectable (GTK_LABEL (text), FALSE);
   gtk_widget_add_css_class (text, "msg-message-text");
   gtk_box_append (GTK_BOX (content), text);
+  {
+    g_autofree char *agent = agent_of (message);
+    g_autofree char *template = agent ? sms_provider_text ("agents", "bubble_label") : NULL;
+
+    if (template)
+      {
+        g_autoptr(GString) said = g_string_new (template);
+        GtkWidget *who;
+
+        g_string_replace (said, "{agent}", agent, 0);
+        who = gtk_label_new (said->str);
+        gtk_label_set_wrap (GTK_LABEL (who), TRUE);
+        gtk_label_set_xalign (GTK_LABEL (who), 0);
+        gtk_widget_add_css_class (who, "msg-message-status");
+        gtk_widget_add_css_class (who, "msg-message-agent");
+        gtk_box_append (GTK_BOX (content), who);
+      }
+  }
   if (status || delivered)
     {
       GtkWidget *meta = NULL;
@@ -363,6 +414,7 @@ select_message (ConversationView *self, gint64 id)
                                                  && (!MESSAGE_STATUS_IS_INCOMING (message->status)
                                                      || message->status == MESSAGE_STATUS_INCOMING_COMPLETE));
       gtk_widget_set_visible (self->resend_action, message->status == MESSAGE_STATUS_OUTGOING_FAILED);
+      gtk_widget_set_visible (self->withdraw_action, withdrawable (self, message));
     }
   reload (self);
 }
@@ -405,6 +457,51 @@ on_resend (ConversationView *self)
 
   select_message (self, 0);
   sms_client_resend (self->client, id);
+}
+
+static void
+on_withdrawn (GObject *source, GAsyncResult *res, gpointer data)
+{
+  ConversationView *self = data;
+  g_autoptr(GError) error = NULL;
+  g_autoptr(GVariant) reply = g_dbus_connection_call_finish (G_DBUS_CONNECTION (source), res, &error);
+  gint64 id = GPOINTER_TO_SIZE (g_object_get_data (G_OBJECT (self), "withdrawing"));
+  const char *json = NULL;
+  gboolean ok = FALSE;
+
+  if (reply)
+    {
+      g_autoptr(JsonParser) parser = json_parser_new ();
+      JsonNode *root;
+
+      g_variant_get (reply, "(&s)", &json);
+      if (json && json_parser_load_from_data (parser, json, -1, NULL) && (root = json_parser_get_root (parser))
+          && JSON_NODE_HOLDS_OBJECT (root))
+        ok = json_object_get_boolean_member_with_default (json_node_get_object (root), "ok", FALSE);
+    }
+  if (ok)
+    sms_client_delete_message (self->client, id);
+  else
+    msg_snackbar_show (self->snackbar, _("Could not withdraw the message"), NULL, NULL, NULL);
+  g_object_unref (self);
+}
+
+/* «Ritira»: the provider deletes it on the network (Revoke), then it goes from the thread */
+static void
+on_withdraw (ConversationView *self)
+{
+  g_autoptr(SmsMessage) message = selected_message (self);
+  g_autofree char *provider = NULL, *name = NULL, *path = NULL;
+  g_autoptr(GDBusConnection) bus = g_bus_get_sync (G_BUS_TYPE_SESSION, NULL, NULL);
+
+  select_message (self, 0);
+  if (!message || !bus || !self->conversation || !(provider = sms_provider_owner (self->conversation->destinations[0])))
+    return;
+  name = g_strconcat (MSG_PROVIDER_NAME_PREFIX, provider, NULL);
+  path = g_strconcat (MSG_PROVIDER_PATH_PREFIX, provider, NULL);
+  g_object_set_data (G_OBJECT (self), "withdrawing", GSIZE_TO_POINTER (message->id));
+  g_dbus_connection_call (bus, name, path, name, "Revoke", g_variant_new ("(x)", message->id), G_VARIANT_TYPE ("(s)"),
+                          G_DBUS_CALL_FLAGS_NONE, -1, NULL, on_withdrawn, g_object_ref (self));
 }
 
 static void
@@ -983,6 +1080,14 @@ conversation_view_new (SmsClient *client, Contacts *contacts, gint64 conversatio
   g_signal_connect_swapped (self->copy_action, "clicked", G_CALLBACK (on_copy), self);
   g_signal_connect_swapped (msg_action_bar_add_action (self->select_bar, "messaging-info-symbolic",
                                                        _("View details")), "clicked", G_CALLBACK (on_details), self);
+  {
+    g_autofree char *withdraw = sms_provider_text ("agents", "withdraw_label");
+
+    self->withdraw_action = msg_action_bar_add_action (self->select_bar, "messaging-cancel-symbolic",
+                                                       withdraw ? withdraw : _("Withdraw"));
+    g_signal_connect_swapped (self->withdraw_action, "clicked", G_CALLBACK (on_withdraw), self);
+    gtk_widget_set_visible (self->withdraw_action, FALSE);
+  }
   self->resend_action = msg_action_bar_add_action (self->select_bar, "messaging-send-symbolic", _("Send"));
   g_signal_connect_swapped (self->resend_action, "clicked", G_CALLBACK (on_resend), self);
   g_signal_connect_swapped (msg_action_bar_add_action (self->select_bar, "messaging-delete-symbolic", _("Delete")),

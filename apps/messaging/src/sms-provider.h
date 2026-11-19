@@ -34,6 +34,8 @@ gboolean sms_provider_flag (const char *provider_id, const char *key);
 /* any key of a provider's section, trimmed, or NULL; its address */
 char *sms_provider_value (const char *provider_id, const char *key);
 char *sms_provider_address (const char *provider_id);
+/* a key of any section without the quotes that keep its spaces ([agents] bubble_label, say), or NULL */
+char *sms_provider_text (const char *section, const char *key);
 
 /* every section of the file that declares an address, as provider ids (the caller frees) */
 GStrv sms_provider_ids (void);

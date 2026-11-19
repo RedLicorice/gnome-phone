@@ -1129,7 +1129,9 @@ on_method_call (GDBusConnection *bus, const char *sender, const char *path, cons
           g_dbus_method_invocation_return_gerror (invocation, error);
           return;
         }
-      if (!*text || !(message = sms_store_add_outgoing (self->store, id, text, g_get_real_time () / 1000)))
+      /* the origin is kept on the row (an agent's message is marked as such in the thread); the owner's is NULL */
+      if (!*text || !(message = sms_store_add_outgoing (self->store, id, text, g_get_real_time () / 1000,
+                                                        g_strcmp0 (origin, "owner") ? origin : NULL)))
         {
           g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR, G_DBUS_ERROR_FAILED, "Not kept");
           return;

@@ -5,10 +5,8 @@
 
 #include "sms-provider.h"
 
-/* the provider daemons' bus protocol (messaging/internal/dbus/names.go): org.minerva.Provider.<id> at
- * /org/minerva/Provider/<id>, every method answering one JSON string */
-#define PROVIDER_NAME_PREFIX "org.minerva.Provider."
-#define PROVIDER_PATH_PREFIX "/org/minerva/Provider/"
+#define PROVIDER_NAME_PREFIX MSG_PROVIDER_NAME_PREFIX
+#define PROVIDER_PATH_PREFIX MSG_PROVIDER_PATH_PREFIX
 #define CHATS_CHANGED "ChatsChanged"
 
 typedef struct {

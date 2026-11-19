@@ -60,6 +60,8 @@ typedef struct
   gboolean read, seen;          /* read: the conversation was looked at; seen: its notification was */
   char *sms_uri;                /* the ModemManager SMS object it was, or NULL */
   int raw_status;               /* ModemManager's error for a failed send, else 0 */
+  char *origin;                 /* who wrote an outgoing one: NULL for the owner, else SendAs's origin ("minerva",
+                                 * "agent:<identity>": docs/external-agents-channels.md) */
 } SmsMessage;
 
 typedef struct _SmsStore SmsStore;
@@ -78,7 +80,8 @@ gint64    sms_store_add_incoming (SmsStore *store, const char *sender, const cha
 /* the message whose provider/modem id is @sms_uri (a provider's message id is kept there): its id, or 0 */
 gint64    sms_store_find_by_uri (SmsStore *store, const char *sms_uri);
 /* a message to send, as written now: OUTGOING_YET_TO_SEND, read; the conversation's draft goes. Its id, or 0 */
-gint64    sms_store_add_outgoing (SmsStore *store, gint64 conversation_id, const char *text, gint64 now);
+gint64    sms_store_add_outgoing (SmsStore *store, gint64 conversation_id, const char *text, gint64 now,
+                                  const char *origin);
 void      sms_store_set_status (SmsStore *store, gint64 message_id, MessageStatus status, int raw_status,
                                 gint64 sent);
 void      sms_store_set_sms_uri (SmsStore *store, gint64 message_id, const char *sms_uri);

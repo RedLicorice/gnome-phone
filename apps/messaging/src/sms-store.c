@@ -55,7 +55,8 @@ static const char schema[] =
   "  read INT DEFAULT 0,"
   "  sms_message_uri TEXT,"
   "  raw_status INT DEFAULT 0,"
-  "  retry_start_timestamp INT DEFAULT 0"
+  "  retry_start_timestamp INT DEFAULT 0,"
+  "  origin TEXT"
   ");"
   "CREATE INDEX IF NOT EXISTS index_messages_sort ON messages (conversation_id, received_timestamp);"
   "CREATE INDEX IF NOT EXISTS index_messages_status_seen ON messages (message_status, seen);"
@@ -89,6 +90,7 @@ sms_message_free (SmsMessage *message)
   g_free (message->sender);
   g_free (message->text);
   g_free (message->sms_uri);
+  g_free (message->origin);
   g_free (message);
 }
 
@@ -177,6 +179,9 @@ sms_store_open (const char *path, gboolean read_only, GError **error)
       sms_store_free (self);
       return NULL;
     }
+  /* a store made before the origin column: the column added, every older row the owner's */
+  if (query_int (self, prepare (self, "SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'origin'"), 1) == 0)
+    exec (self, "ALTER TABLE messages ADD COLUMN origin TEXT", NULL);
   if (user_version == 0)
     {
       g_autofree char *set = g_strdup_printf ("PRAGMA user_version=%d", SCHEMA_VERSION);
@@ -338,11 +343,11 @@ refresh_conversation (SmsStore *self, gint64 conversation_id)
 
 static gint64
 add_message (SmsStore *self, gint64 conversation_id, gint64 sender_id, const char *text, gint64 sent,
-             gint64 received, MessageStatus status, gboolean read, const char *sms_uri)
+             gint64 received, MessageStatus status, gboolean read, const char *sms_uri, const char *origin)
 {
   sqlite3_stmt *insert = prepare (self, "INSERT INTO messages (conversation_id, sender_id, sent_timestamp,"
                                         " received_timestamp, message_protocol, message_status, seen, read,"
-                                        " sms_message_uri) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)");
+                                        " sms_message_uri, origin) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)");
   sqlite3_stmt *part;
   gint64 id;
 
@@ -360,6 +365,8 @@ add_message (SmsStore *self, gint64 conversation_id, gint64 sender_id, const cha
   sqlite3_bind_int (insert, 7, read);
   if (sms_uri)
     sqlite3_bind_text (insert, 8, sms_uri, -1, SQLITE_TRANSIENT);
+  if (origin)
+    sqlite3_bind_text (insert, 9, origin, -1, SQLITE_TRANSIENT);
   if (!run (self, insert))
     return 0;
   id = sqlite3_last_insert_rowid (self->db);
@@ -388,7 +395,7 @@ sms_store_add_incoming (SmsStore *self, const char *sender, const char *text, gi
   exec (self, "BEGIN", NULL);
   if ((conversation_id = get_conversation (self, destinations)) && (sender_id = participant_id (self, sender)))
     id = add_message (self, conversation_id, sender_id, text, sent, received, MESSAGE_STATUS_INCOMING_COMPLETE,
-                      FALSE, sms_uri);
+                      FALSE, sms_uri, NULL);
   /* ReceiveSmsMessageAction: a new message brings an archived conversation back */
   if (id && (unarchive = prepare (self, "UPDATE conversations SET archive_status = 0 WHERE _id = ?")))
     {
@@ -400,7 +407,7 @@ sms_store_add_incoming (SmsStore *self, const char *sender, const char *text, gi
 }
 
 gint64
-sms_store_add_outgoing (SmsStore *self, gint64 conversation_id, const char *text, gint64 now)
+sms_store_add_outgoing (SmsStore *self, gint64 conversation_id, const char *text, gint64 now, const char *origin)
 {
   sqlite3_stmt *draft;
   gint64 id;
@@ -412,7 +419,7 @@ sms_store_add_outgoing (SmsStore *self, gint64 conversation_id, const char *text
       sqlite3_bind_int64 (draft, 1, conversation_id);
       run (self, draft);
     }
-  id = add_message (self, conversation_id, 0, text, now, now, MESSAGE_STATUS_OUTGOING_YET_TO_SEND, TRUE, NULL);
+  id = add_message (self, conversation_id, 0, text, now, now, MESSAGE_STATUS_OUTGOING_YET_TO_SEND, TRUE, NULL, origin);
   exec (self, id ? "COMMIT" : "ROLLBACK", NULL);
   return id;
 }
@@ -635,7 +642,8 @@ sms_store_get (SmsStore *self, gint64 conversation_id)
 #define MESSAGE_COLUMNS \
   "SELECT m._id, m.conversation_id, p.normalized_destination," \
   " (SELECT group_concat(text, '') FROM parts WHERE message_id = m._id)," \
-  " m.sent_timestamp, m.received_timestamp, m.message_status, m.read, m.seen, m.sms_message_uri, m.raw_status" \
+  " m.sent_timestamp, m.received_timestamp, m.message_status, m.read, m.seen, m.sms_message_uri, m.raw_status," \
+  " m.origin" \
   " FROM messages m LEFT JOIN participants p ON p._id = m.sender_id"
 
 /* oldest first; with a limit, only the newest that many (columns 6 and 1: received_timestamp and _id) */
@@ -671,6 +679,7 @@ list_messages (SmsStore *self, const char *where, gint64 value, guint limit)
       message->seen = sqlite3_column_int (select, 8);
       message->sms_uri = column_text (select, 9);
       message->raw_status = sqlite3_column_int (select, 10);
+      message->origin = column_text (select, 11);
       g_ptr_array_add (messages, message);
     }
   sqlite3_finalize (select);

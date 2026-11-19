@@ -113,7 +113,7 @@ test_outgoing (void)
   g_assert_cmpuint (count (sms_store_list_conversations (store, FALSE)), ==, 1);
   g_clear_pointer (&conversation, sms_conversation_free);
 
-  sent = sms_store_add_outgoing (store, id, "Meet at 8?", 5000);
+  sent = sms_store_add_outgoing (store, id, "Meet at 8?", 5000, NULL);
   g_assert_cmpint (sent, >, 0);
   conversation = sms_store_get (store, id);
   g_assert_false (conversation->show_draft);
@@ -126,6 +126,7 @@ test_outgoing (void)
   sms_store_set_status (store, sent, MESSAGE_STATUS_OUTGOING_FAILED, 42, 0);
   message = sms_store_get_message (store, sent);
   g_assert_null (message->sender);
+  g_assert_null (message->origin);  /* the owner's own message */
   g_assert_cmpint (message->status, ==, MESSAGE_STATUS_OUTGOING_FAILED);
   g_assert_cmpint (message->raw_status, ==, 42);
   g_assert_cmpint (message->sent, ==, 5000);
@@ -192,6 +193,29 @@ test_read_only (void)
   sms_store_free (store);
 }
 
+/* an agent's message keeps who wrote it (SendAs's origin), also in a store made before the origin column */
+static void
+test_origin (void)
+{
+  g_autofree char *path = NULL;
+  SmsStore *store = open_store (&path);
+  const char *to[] = { "whatsapp:+390001", NULL };
+  gint64 conversation = sms_store_get_conversation (store, to);
+  gint64 id = sms_store_add_outgoing (store, conversation, "Arrivo alle 8", 1000, "agent:agent/pc-test");
+  g_autoptr(GError) error = NULL;
+  SmsMessage *message = sms_store_get_message (store, id);
+
+  g_assert_cmpstr (message->origin, ==, "agent:agent/pc-test");
+  sms_message_free (message);
+  sms_store_free (store);
+  store = sms_store_open (path, FALSE, &error);  /* opened again: the migration leaves a store that has the column */
+  g_assert_no_error (error);
+  message = sms_store_get_message (store, id);
+  g_assert_cmpstr (message->origin, ==, "agent:agent/pc-test");
+  sms_message_free (message);
+  sms_store_free (store);
+}
+
 /* a provider's message id is kept in the message's uri: the same id is found again, another is not */
 static void
 test_find_by_uri (void)
@@ -217,5 +241,6 @@ main (int argc, char **argv)
   g_test_add_func ("/sms-store/outgoing", test_outgoing);
   g_test_add_func ("/sms-store/archive-and-delete", test_archive_and_delete);
   g_test_add_func ("/sms-store/read-only", test_read_only);
+  g_test_add_func ("/sms-store/origin", test_origin);
   return g_test_run ();
 }
