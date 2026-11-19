@@ -445,6 +445,14 @@ def run_agents(t):
     n = t.wait('and notified, by the agent\'s name', lambda: t.notification('Minerva'))
     if n:
         check('its text', n[1]['body'] == 'Ciao, sono Minerva', n)
+    # a long reply in Markdown: one line of plain words in the notification, cut at the schema's 160 characters
+    t.service('Inject', (AGENT, '**Fatto**:\n\n- ' + 'parola ' * 40), '(ss)')
+    n = t.wait('a long reply is notified', lambda: (lambda n: n if n and '\n' in n[1]['body'] else None)
+               (t.notification('Minerva')))
+    if n:
+        last = n[1]['body'].split('\n')[-1]
+        check('as one plain line, cut with an ellipsis', last.startswith('Fatto: • parola') and last.endswith('…')
+              and len(last) <= 161, n)
     check('the same conversation for GetConversation',
           t.service('GetConversation', ([AGENT],), '(as)')[0] == minerva)
     check('Inject for a destination that is no agent\'s: InvalidArgs',

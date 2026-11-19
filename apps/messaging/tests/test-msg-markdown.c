@@ -1,4 +1,4 @@
-/* msg_markdown_to_pango: what an agent's messages use comes out as Pango markup, and nothing typed can break it */
+/* msg_markdown_to_pango and msg_markdown_preview: what an agent's messages use comes out as Pango markup, and nothing typed can break it */
 
 #include "msg-markdown.h"
 
@@ -39,6 +39,19 @@ test_rest_is_text (void)
   assert_markup ("<b>hi</b> &amp; ![cat](c.png) 2 * 3 <", "&lt;b&gt;hi&lt;/b&gt; &amp;amp; cat 2 * 3 &lt;");
 }
 
+/* a notification's preview: plain text, one line, whole words, the ellipsis where it is cut */
+static void
+test_preview (void)
+{
+  g_autofree char *whole = msg_markdown_preview ("- **Fatto**:\n\n`a & b`", 0);
+  g_autofree char *cut = msg_markdown_preview ("**uno** due tre", 8);
+  g_autofree char *long_word = msg_markdown_preview ("abcdefghij", 4);
+
+  g_assert_cmpstr (whole, ==, "• Fatto: a & b");
+  g_assert_cmpstr (cut, ==, "uno due…");
+  g_assert_cmpstr (long_word, ==, "abcd…");
+}
+
 int
 main (int argc, char **argv)
 {
@@ -46,5 +59,6 @@ main (int argc, char **argv)
   g_test_add_func ("/markdown/spans", test_spans);
   g_test_add_func ("/markdown/blocks", test_blocks);
   g_test_add_func ("/markdown/rest-is-text", test_rest_is_text);
+  g_test_add_func ("/markdown/preview", test_preview);
   return g_test_run ();
 }

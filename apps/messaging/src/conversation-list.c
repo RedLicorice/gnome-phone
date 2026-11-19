@@ -9,6 +9,7 @@
 #include "msg-dates.h"
 #include "msg-dialog.h"
 #include "msg-image.h"
+#include "msg-markdown.h"
 #include "msg-people.h"
 #include "msg-directory.h"
 #include "msg-swipe.h"
@@ -482,6 +483,7 @@ make_row (ConversationList *self, const SmsConversation *conversation, gint64 no
   GtkWidget *avatar = msg_avatar_new (AVATAR);
   GtkWidget *column = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
   GtkWidget *name_label, *snippet, *time_label, *pressable, *avatar_pressable;
+  g_autofree char *preview = NULL;
   Row *row = g_new0 (Row, 1);
 
   /* the avatar: the person's, or the group's (up to four) */
@@ -525,7 +527,9 @@ make_row (ConversationList *self, const SmsConversation *conversation, gint64 no
   gtk_box_append (GTK_BOX (content), avatar_pressable);
 
   name_label = text_label (name, "msg-row-name");
-  snippet = text_label (conversation->show_draft ? conversation->draft : conversation->snippet, "msg-row-snippet");
+  /* the text as one line of plain words: GtkLabel's line limit counts per paragraph, and an agent's reply has dozens */
+  preview = msg_markdown_preview (conversation->show_draft ? conversation->draft : conversation->snippet, 0);
+  snippet = text_label (preview, "msg-row-snippet");
   time_label = text_label (time, "msg-row-time");
   /* unread: bold and light, the snippet up to 3 lines; read: 1 line */
   if (unread)
@@ -707,6 +711,41 @@ conversation_list_show_group_of (ConversationList *self, gint64 id)
       gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (chip), TRUE);
 }
 
+/* --- the agents: a list of agents only (their group) is in the order of "agents-order", the others after them by
+ * name, never by recency: Minerva is where she always is */
+
+static int
+agent_rank (char **order, const SmsConversation *conversation)
+{
+  for (int i = 0; order && order[i]; i++)
+    if (!g_strcmp0 (order[i], conversation->destinations[0]))
+      return i;
+  return G_MAXINT;
+}
+
+static int
+by_agents_order (gconstpointer a, gconstpointer b, gpointer order)
+{
+  const SmsConversation *x = *(SmsConversation **) a, *y = *(SmsConversation **) b;
+  int rx = agent_rank (order, x), ry = agent_rank (order, y);
+  g_autofree char *nx = g_utf8_casefold (sms_agent_name (x->destinations[0]), -1);
+  g_autofree char *ny = g_utf8_casefold (sms_agent_name (y->destinations[0]), -1);
+
+  return rx != ry ? (rx < ry ? -1 : 1) : g_utf8_collate (nx, ny);
+}
+
+static void
+sort_agents (ConversationList *self, GPtrArray *shown)
+{
+  g_auto(GStrv) order = NULL;
+
+  for (guint i = 0; i < shown->len; i++)
+    if (!sms_agent_is_conversation ((const char * const *) ((SmsConversation *) shown->pdata[i])->destinations))
+      return;
+  order = g_settings_get_strv (self->settings, "agents-order");
+  g_ptr_array_sort_with_data (shown, by_agents_order, order);
+}
+
 static void
 reload (ConversationList *self)
 {
@@ -717,6 +756,7 @@ reload (ConversationList *self)
   GHashTableIter iter;
   gpointer key;
   g_autoptr(GHashTable) unread = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+  g_autoptr(GPtrArray) shown = g_ptr_array_new ();
 
   if (self->chips)
     sync_chips (self);
@@ -731,8 +771,12 @@ reload (ConversationList *self)
       if (group && !conversation->read)
         g_hash_table_add (unread, g_strdup (group));
       if (!group || !g_strcmp0 (group, self->group))
-        gtk_box_append (GTK_BOX (self->list), make_row (self, conversation, now));
+        g_ptr_array_add (shown, conversation);
     }
+  if (self->chips)
+    sort_agents (self, shown);
+  for (guint i = 0; i < shown->len; i++)
+    gtk_box_append (GTK_BOX (self->list), make_row (self, shown->pdata[i], now));
   if (self->chips)
     sync_dots (self, unread);
   /* what was selected and is gone stays unselected */
@@ -965,6 +1009,7 @@ build (SmsClient *client, Contacts *contacts, gboolean archived, gboolean forwar
   self->client = g_object_ref (client);
   self->contacts = g_object_ref (contacts);
   self->settings = g_settings_new ("de.yesman.Messaging");
+  g_signal_connect_swapped (self->settings, "changed::agents-order", G_CALLBACK (reload), self);
   self->archived = archived;
   self->forward = forward;
   self->box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);

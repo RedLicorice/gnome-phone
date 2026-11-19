@@ -15,6 +15,7 @@
 #include "sms-store.h"
 #include "blocked-numbers.h"
 #include "contacts.h"
+#include "msg-markdown.h"
 #include "notifier.h"
 #include "phone.h"
 #include "phone-number.h"
@@ -33,9 +34,8 @@
 #define RETRY_INITIAL_MS 5000
 #define RETRY_MAX_MS (2 * 60 * 60 * 1000)
 #define RETRY_TIMEOUT_MS (20 * 60 * 1000)
-/* MessageNotificationState: a conversation's notification shows its last 7 messages; a group's name, in the
- * notification for several conversations, its first 30 characters */
-#define NOTIFICATION_LINES 7
+/* MessageNotificationState: a group's name, in the notification for several conversations, its first 30 characters
+ * (how many messages and how much of each the notification shows: "notification-lines", "notification-chars") */
 #define GROUP_NAME_CHARS 30
 /* a message to an agent that the bridge has not taken within 60 s fails (NEO_MESSAGING_AGENT_TIMEOUT_MS for the
  * tests) */
@@ -226,6 +226,18 @@ first_chars (const char *text, glong chars)
 
 /* --- the notifications (spec §5) */
 
+/* an unsigned key of the app's settings; 0 (no limit) without them or without the key (an older schema) */
+static guint
+setting_uint (Service *self, const char *key)
+{
+  g_autoptr(GSettingsSchema) schema = NULL;
+
+  if (!self->settings)
+    return 0;
+  g_object_get (self->settings, "settings-schema", &schema, NULL);
+  return g_settings_schema_has_key (schema, key) ? g_settings_get_uint (self->settings, key) : 0;
+}
+
 /* the new messages' notification, from the messages not yet seen: one conversation's (its last messages), or one
  * for several (a line for each, newest first). @alert: a message came; otherwise it is updated without a heads-up */
 static void
@@ -236,6 +248,10 @@ update_notification (Service *self, gboolean alert)
   g_autoptr(GArray) conversations = g_array_new (FALSE, FALSE, sizeof (gint64));
   g_autoptr(GString) body = g_string_new (NULL);
   g_autofree char *title = NULL;
+  /* a message is one line of its text as plain words, cut to the characters a line may have: a long agent reply
+   * does not fill the screen; the conversation shows it whole */
+  guint lines = setting_uint (self, "notification-lines");
+  guint chars = setting_uint (self, "notification-chars");
 
   /* the conversations, newest first */
   for (guint i = unseen->len; i > 0; i--)
@@ -261,13 +277,14 @@ update_notification (Service *self, gboolean alert)
       gint64 id = g_array_index (conversations, gint64, 0);
       g_autoptr(SmsConversation) conversation = sms_store_get (self->store, id);
       gboolean group = conversation && conversation->destinations && g_strv_length (conversation->destinations) > 1;
-      guint first = unseen->len > NOTIFICATION_LINES ? unseen->len - NOTIFICATION_LINES : 0;
+      guint first = lines && unseen->len > lines ? unseen->len - lines : 0;
 
       title = conversation ? conversation_name (self, conversation) : g_strdup ("");
       /* oldest first; in a group each line says who: "Anna  See you" */
       for (guint i = first; i < unseen->len; i++)
         {
           SmsMessage *message = unseen->pdata[i];
+          g_autofree char *preview = msg_markdown_preview (message->text ? message->text : "", chars);
 
           if (body->len)
             g_string_append_c (body, '\n');
@@ -277,19 +294,20 @@ update_notification (Service *self, gboolean alert)
 
               g_string_append_printf (body, "%s  ", sender);
             }
-          g_string_append (body, message->text ? message->text : "");
+          g_string_append (body, preview);
         }
       self->notification_conversation = id;
     }
   else
     {
       title = g_strdup_printf (ngettext ("New message", "%d new messages", unseen->len), unseen->len);
-      for (guint i = 0; i < conversations->len; i++)
+      for (guint i = 0; i < conversations->len && (!lines || i < lines); i++)
         {
           gint64 id = g_array_index (conversations, gint64, i);
           g_autoptr(SmsConversation) conversation = sms_store_get (self->store, id);
           g_autofree char *name = conversation ? conversation_name (self, conversation) : g_strdup ("");
           g_autofree char *shown = first_chars (name, GROUP_NAME_CHARS);
+          g_autofree char *preview = NULL;
           const char *text = "";
 
           for (guint j = unseen->len; j > 0 && !*text; j--)
@@ -297,7 +315,8 @@ update_notification (Service *self, gboolean alert)
               text = ((SmsMessage *) unseen->pdata[j - 1])->text ? ((SmsMessage *) unseen->pdata[j - 1])->text : "";
           if (body->len)
             g_string_append_c (body, '\n');
-          g_string_append_printf (body, "%s  %s", shown, text);
+          preview = msg_markdown_preview (text, chars);
+          g_string_append_printf (body, "%s  %s", shown, preview);
         }
       self->notification_conversation = 0;
     }

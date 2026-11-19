@@ -20,13 +20,13 @@ phone = static_library('phone', '../dialer/src/phone-number.c', '../dialer/src/c
                        c_args: ['-DNOTIFIER_APP_ID="de.yesman.Messaging"', '-DNOTIFIER_APP_NAME="Messaging"'])
 
 # the service: the messages with the app closed, taking them off the modem, sending, the notifications
-executable('neo-messaging-sms', 'src/sms-service.c', 'src/sms-modem.c', 'src/sms-provider.c', link_with: [store, phone],
-           include_directories: dialer, dependencies: [gio, ebook], install: true)
+md4c = dependency('md4c')
+executable('neo-messaging-sms', 'src/sms-service.c', 'src/sms-modem.c', 'src/sms-provider.c', 'src/msg-markdown.c',
+           link_with: [store, phone], include_directories: dialer, dependencies: [gio, ebook, md4c], install: true)
 
 # the app: the conversation list, a conversation, the contact picker
 gnome = import('gnome')
 gtk = dependency('gtk4', version: '>= 4.14')
-md4c = dependency('md4c')
 resources = gnome.compile_resources('messaging-resources', 'src/messaging.gresource.xml', source_dir: ['src', 'data'])
 executable('neo-messaging', 'src/messaging-main.c', 'src/messaging-window.c', 'src/msg-navigator.c',
            'src/blocked-contacts.c', 'src/people-options.c', 'src/msg-settings.c', 'src/msg-directory.c', 'src/msg-sound.c',

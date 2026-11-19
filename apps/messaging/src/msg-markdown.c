@@ -14,6 +14,7 @@
 
 typedef struct {
   GString *out;
+  gboolean plain;     /* text only: no tags, nothing escaped (a notification's preview) */
   const char *strong; /* the opening tag of strong text */
   guint breaks;     /* the line breaks owed before the next block */
   GArray *numbers;  /* per open list: the next item's number, 0 for a bullet list */
@@ -40,9 +41,23 @@ pay (Render *render)
 static void
 escaped (Render *render, const char *text, gsize size)
 {
-  g_autofree char *safe = g_markup_escape_text (text, size);
+  g_autofree char *safe = NULL;
 
+  if (render->plain)
+    {
+      g_string_append_len (render->out, text, size);
+      return;
+    }
+  safe = g_markup_escape_text (text, size);
   g_string_append (render->out, safe);
+}
+
+/* a tag, unless the text is plain */
+static void
+tag (Render *render, const char *markup)
+{
+  if (!render->plain)
+    g_string_append (render->out, markup);
 }
 
 static int
@@ -84,11 +99,11 @@ enter_block (MD_BLOCKTYPE type, void *detail, void *data)
       break;
     case MD_BLOCK_H:
       pay (render);
-      g_string_append (render->out, render->strong);
+      tag (render, render->strong);
       break;
     case MD_BLOCK_CODE:
       pay (render);
-      g_string_append (render->out, "<tt>");
+      tag (render, "<tt>");
       break;
     case MD_BLOCK_P:
       /* an item's first paragraph follows its bullet */
@@ -115,14 +130,14 @@ leave_block (MD_BLOCKTYPE type, void *detail, void *data)
       owe (render, render->numbers->len ? 1 : 2);
       break;
     case MD_BLOCK_H:
-      g_string_append (render->out, "</span>");
+      tag (render, "</span>");
       owe (render, 2);
       break;
     case MD_BLOCK_CODE:
       /* md4c ends each of its lines with \n: the last one is the block's end */
       if (render->out->len && render->out->str[render->out->len - 1] == '\n')
         g_string_truncate (render->out, render->out->len - 1);
-      g_string_append (render->out, "</tt>");
+      tag (render, "</tt>");
       owe (render, 2);
       break;
     case MD_BLOCK_P:
@@ -142,21 +157,23 @@ enter_span (MD_SPANTYPE type, void *detail, void *data)
   switch (type)
     {
     case MD_SPAN_EM:
-      g_string_append (render->out, "<i>");
+      tag (render, "<i>");
       break;
     case MD_SPAN_STRONG:
-      g_string_append (render->out, render->strong);
+      tag (render, render->strong);
       break;
     case MD_SPAN_CODE:
-      g_string_append (render->out, "<tt>");
+      tag (render, "<tt>");
       break;
     case MD_SPAN_DEL:
-      g_string_append (render->out, "<s>");
+      tag (render, "<s>");
       break;
     case MD_SPAN_A:
       {
         MD_SPAN_A_DETAIL *link = detail;
 
+        if (render->plain)
+          break;
         g_string_append (render->out, "<a href=\"");
         escaped (render, link->href.text, link->href.size);
         g_string_append (render->out, "\">");
@@ -178,7 +195,7 @@ leave_span (MD_SPANTYPE type, void *detail, void *data)
   Render *render = data;
 
   if ((gsize) type < G_N_ELEMENTS (closing) && closing[type])
-    g_string_append (render->out, closing[type]);
+    tag (render, closing[type]);
   return 0;
 }
 
@@ -205,16 +222,14 @@ text (MD_TEXTTYPE type, const MD_CHAR *text, MD_SIZE size, void *data)
   return 0;
 }
 
-char *
-msg_markdown_to_pango (const char *markdown, const char *strong_weight)
+static char *
+render_text (const char *markdown, const char *strong, gboolean plain)
 {
-  g_autofree char *weight = g_markup_escape_text (strong_weight, -1);
-  g_autofree char *strong = g_strdup_printf ("<span weight=\"%s\">", weight);
   const MD_PARSER parser = {
     .flags = DIALECT, .enter_block = enter_block, .leave_block = leave_block, .enter_span = enter_span,
     .leave_span = leave_span, .text = text,
   };
-  Render render = { g_string_new (NULL), strong, 0, g_array_new (FALSE, FALSE, sizeof (guint)), FALSE };
+  Render render = { g_string_new (NULL), plain, strong, 0, g_array_new (FALSE, FALSE, sizeof (guint)), FALSE };
   int failed = md_parse (markdown, strlen (markdown), &parser, &render);
 
   g_array_unref (render.numbers);
@@ -224,4 +239,47 @@ msg_markdown_to_pango (const char *markdown, const char *strong_weight)
       return NULL;
     }
   return g_string_free (render.out, FALSE);
+}
+
+char *
+msg_markdown_to_pango (const char *markdown, const char *strong_weight)
+{
+  g_autofree char *weight = g_markup_escape_text (strong_weight, -1);
+  g_autofree char *strong = g_strdup_printf ("<span weight=\"%s\">", weight);
+
+  return render_text (markdown, strong, FALSE);
+}
+
+char *
+msg_markdown_preview (const char *markdown, guint chars)
+{
+  g_autofree char *plain = render_text (markdown ? markdown : "", "", TRUE);
+  g_auto(GStrv) words = g_strsplit_set (plain ? plain : markdown ? markdown : "", " \t\r\n", -1);
+  GString *line = g_string_new (NULL);
+  glong length = 0;
+
+  /* one line of whole words; the first word alone is cut if it is longer than the line */
+  for (guint i = 0; words[i]; i++)
+    {
+      glong size = g_utf8_strlen (words[i], -1);
+
+      if (!size)
+        continue;
+      if (chars && length + (length ? 1 : 0) + size > (glong) chars)
+        {
+          if (!length)
+            {
+              g_autofree char *cut = g_utf8_substring (words[i], 0, chars);
+
+              g_string_append (line, cut);
+            }
+          g_string_append (line, "…");
+          break;
+        }
+      if (length)
+        g_string_append_c (line, ' ');
+      g_string_append (line, words[i]);
+      length += (length ? 1 : 0) + size;
+    }
+  return g_string_free (line, FALSE);
 }
