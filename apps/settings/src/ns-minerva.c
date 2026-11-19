@@ -34,6 +34,8 @@ struct Mn {
   GtkWidget *vp_info;                   /* the voiceprint's state row (a group's "voiceprint" data) */
   char      *vp_text[3];                /* its texts: enrolled, none, enrolling ({got}, {need}) */
   GPtrArray *vp_actions;                /* the voiceprint buttons: "mn-when" says in which state each shows */
+  GtkWidget *ph_info;                   /* the owner's secret phrase: its row (a group's "phrase" data) */
+  char      *ph_help, *ph_remote;       /* its subtitle: the help, or the remote recogniser's warning ({engines}) */
   guint      poll_id;                   /* refreshes while an enrollment runs */
   guint      poll_s;
   GPtrArray *srows;                     /* their rows: "mn-key", "mn-kind" (and "mn-ids" for a picker) */
@@ -696,6 +698,122 @@ build_voiceprint (Mn *m, GtkWidget *grp, JsonObject *vp)
   }
 }
 
+/* ---- the owner's secret phrase (Minerva's docs/secret-phrase.md): a row and two buttons, every text from the data.
+ * The phrase is typed once in a password dialog and goes to `minerva-config people phrase set` on stdin; the page
+ * never keeps or shows it, and never says whether one is set. minerva-config asks the owner's finger or PIN on the
+ * gate sheet before the memory service takes it. ---- */
+
+typedef struct {
+  Mn       *m;
+  char     *heading, *body, *ok, *done;
+  gboolean  entry, destructive;   /* set: a password entry first; remove: a confirmation */
+  GStrv     args;
+} PhAction;
+
+static void
+ph_action_free (PhAction *a)
+{
+  g_free (a->heading);
+  g_free (a->body);
+  g_free (a->ok);
+  g_free (a->done);
+  g_strfreev (a->args);
+  g_free (a);
+}
+
+static void
+ph_done (Mn *m, JsonObject *root, const char *err, gpointer data)
+{
+  PhAction *a = data;
+  if (err)
+    say (m, err, TRUE);
+  else if (root && json_object_has_member (root, "ok") && !json_object_get_boolean_member (root, "ok"))
+    say (m, str_of (root, "error"), TRUE);
+  else
+    say (m, a->done, FALSE);
+}
+
+static void
+ph_entered (const char *text, gpointer data)
+{
+  PhAction *a = data;
+  if (text && *text)
+    mn_run_in (a->m, (const char *const *) a->args, text, ph_done, a);
+}
+
+static void
+ph_answered (gboolean yes, gpointer data)
+{
+  PhAction *a = data;
+  if (yes)
+    mn_run (a->m, (const char *const *) a->args, ph_done, a);
+}
+
+static void
+ph_action_run (GtkWidget *row, gpointer data)
+{
+  PhAction *a = data;
+  if (a->entry)
+    ns_ask (row, a->heading, a->body, NULL, TRUE, a->ok, ph_entered, a);
+  else
+    ns_confirm (row, a->heading, a->body, a->ok, a->destructive, ph_answered, a);
+}
+
+static void
+ph_button (Mn *m, GtkWidget *grp, JsonObject *o, gboolean entry)
+{
+  if (!o)
+    return;
+  PhAction *a = g_new0 (PhAction, 1);
+  a->m = m;
+  a->heading = g_strdup (str_of (o, "heading"));
+  a->body = g_strdup (str_of (o, "body"));
+  a->ok = g_strdup (str_of (o, "ok"));
+  a->done = g_strdup (str_of (o, "done"));
+  a->entry = entry;
+  a->destructive = json_object_get_boolean_member_with_default (o, "destructive", FALSE);
+  JsonArray *av = arr_of (o, "args");
+  g_autoptr (GPtrArray) v = g_ptr_array_new ();
+  for (guint k = 0; av && k < json_array_get_length (av); k++)
+    g_ptr_array_add (v, g_strdup (json_array_get_string_element (av, k)));
+  g_ptr_array_add (v, NULL);
+  a->args = g_strdupv ((char **) v->pdata);
+  GtkWidget *row = ns_row_button (grp, str_of (o, "label"), a->destructive, ph_action_run, a);
+  g_object_set_data_full (G_OBJECT (row), "mn-ph-action", a, (GDestroyNotify) ph_action_free);
+}
+
+static void
+build_phrase (Mn *m, GtkWidget *grp, JsonObject *ph)
+{
+  g_free (m->ph_help);
+  g_free (m->ph_remote);
+  m->ph_help = g_strdup (str_of (ph, "help"));
+  m->ph_remote = g_strdup (str_of (ph, "remote"));
+  m->ph_info = ns_row_info (grp, str_of (ph, "label"), m->ph_help);
+  ph_button (m, grp, obj_of (ph, "set"), TRUE);
+  ph_button (m, grp, obj_of (ph, "remove"), FALSE);
+}
+
+/* the status's "phrase": {local, remote: [engines]}; a remote recogniser in the chain gives the phrase no weight */
+static void
+fill_phrase (Mn *m)
+{
+  JsonObject *ph = obj_of (m->st, "phrase");
+  if (!ph || !m->ph_info || !json_object_has_member (ph, "local"))
+    return;
+  if (json_object_get_boolean_member_with_default (ph, "local", FALSE)) {
+    ns_row_set_subtitle (m->ph_info, m->ph_help);
+    return;
+  }
+  JsonArray *remote = arr_of (ph, "remote");
+  g_autoptr (GString) names = g_string_new (NULL);
+  for (guint i = 0; remote && i < json_array_get_length (remote); i++)
+    g_string_append_printf (names, "%s%s", i ? ", " : "", json_array_get_string_element (remote, i));
+  g_autoptr (GString) t = g_string_new (m->ph_remote);
+  g_string_replace (t, "{engines}", names->str, 0);
+  ns_row_set_subtitle (m->ph_info, t->str);
+}
+
 static gboolean
 poll_tick (gpointer data)
 {
@@ -793,6 +911,9 @@ build_groups (Mn *m, const char *page)
     JsonObject *vp = obj_of (g, "voiceprint");
     if (vp)
       build_voiceprint (m, grp, vp);
+    JsonObject *ph = obj_of (g, "phrase");
+    if (ph)
+      build_phrase (m, grp, ph);
     const char *nt = str_of (g, "note");
     if (*nt)
       ns_note (m->sg_box, nt);
@@ -918,6 +1039,7 @@ status_done (Mn *m, JsonObject *root, const char *err, gpointer data)
   update_fields (m);
   fill_groups (m);
   fill_voiceprint (m);
+  fill_phrase (m);
 }
 
 static void
@@ -948,6 +1070,8 @@ mn_free (Mn *m)
   g_strfreev (m->chain_ids);
   g_strfreev (m->stt_ids);
   g_free (m->claude_hint);
+  g_free (m->ph_help);
+  g_free (m->ph_remote);
   g_free (m);
 }
 
