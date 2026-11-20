@@ -193,6 +193,7 @@ set_done (Av *a, JsonNode *reply, const char *err)
   }
   JsonObject *o = json_node_get_object (reply);
   show_value (a, json_object_get_string_member (o, "key"), json_object_get_member (o, "value"));
+  av_load (a);   /* a value can move others: a preset sets its keys, an edited key turns the preset to custom */
 }
 
 static void
