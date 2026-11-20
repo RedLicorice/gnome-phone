@@ -4,6 +4,8 @@
  * a switch for a flag, a drop-down for a choice; a "restore defaults" row per group and a global one. A change goes to
  * the kiosk at once (SettingsSet), which checks it against the same schema and shows it on the face live; the page
  * keeps no list of settings of its own (docs/avatar-settings.md in Minerva's repository). */
+#include <math.h>
+
 #include <adwaita.h>
 #include <json-glib/json-glib.h>
 
@@ -16,6 +18,42 @@
 #define KIOSK_IFACE "org.minerva.Kiosk1"
 /* a slider's changes are sent once the finger rests this long: the kiosk rewrites its file on each set */
 #define SLIDER_SETTLE_MS 250
+/* the smallest touch target of the HIG: a slider's own row is at least this tall */
+#define TOUCH_PX 44
+
+/* what a slider may send: the schema's bounds and step; an int setting sends integers */
+typedef struct {
+  double   lo, hi, step;
+  gboolean integer;
+  int      digits;
+  char    *unit;
+} Grid;
+
+static void
+grid_free (Grid *g)
+{
+  g_free (g->unit);
+  g_free (g);
+}
+
+/* the slider's value on the schema's grid: the kiosk refuses 337.4 for an integer setting of step 10 */
+static double
+grid_snap (const Grid *g, double v)
+{
+  double snapped = g->step > 0 ? g->lo + round ((v - g->lo) / g->step) * g->step : v;
+  snapped = CLAMP (snapped, g->lo, g->hi);
+  return g->integer ? round (snapped) : snapped;
+}
+
+static char *
+grid_text (const Grid *g, double v)
+{
+  char buf[G_ASCII_DTOSTR_BUF_SIZE];
+  if (g->integer)
+    return g_strdup_printf ("%" G_GINT64_FORMAT, (gint64) grid_snap (g, v));
+  g_autofree char *format = g_strdup_printf ("%%.%df", g->digits);
+  return g_strdup (g_ascii_formatd (buf, sizeof buf, format, grid_snap (g, v)));
+}
 
 typedef struct {
   AdwNavigationPage *page;
@@ -176,10 +214,11 @@ slider_settled (gpointer data)
 {
   GtkRange *r = data;
   Av *a = g_object_get_data (G_OBJECT (r), "av");
-  char buf[G_ASCII_DTOSTR_BUF_SIZE];
+  Grid *g = g_object_get_data (G_OBJECT (r), "av-grid");
+  g_autofree char *value = grid_text (g, gtk_range_get_value (r));
 
   g_object_set_data (G_OBJECT (r), "av-timer", NULL);
-  av_set (a, g_object_get_data (G_OBJECT (r), "av-key"), g_ascii_dtostr (buf, sizeof buf, gtk_range_get_value (r)));
+  av_set (a, g_object_get_data (G_OBJECT (r), "av-key"), value);
   return G_SOURCE_REMOVE;
 }
 
@@ -187,9 +226,9 @@ static void
 slider_changed (GtkRange *r, Av *a)
 {
   GtkWidget *label = g_object_get_data (G_OBJECT (r), "av-label");
-  const char *unit = g_object_get_data (G_OBJECT (r), "av-unit");
-  int digits = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (r), "av-digits"));
-  g_autofree char *shown = g_strdup_printf ("%.*f%s%s", digits, gtk_range_get_value (r), *unit ? " " : "", unit);
+  Grid *g = g_object_get_data (G_OBJECT (r), "av-grid");
+  g_autofree char *value = grid_text (g, gtk_range_get_value (r));
+  g_autofree char *shown = g_strdup_printf ("%s%s%s", value, *g->unit ? " " : "", g->unit);
   guint timer = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (r), "av-timer"));
 
   gtk_label_set_text (GTK_LABEL (label), shown);
@@ -228,14 +267,20 @@ setting_row (Av *a, JsonObject *s)
   const char *key = json_object_get_string_member (s, "key");
   const char *type = json_object_get_string_member (s, "type");
   JsonObject *help = json_object_has_member (s, "help") ? json_object_get_object_member (s, "help") : NULL;
-  GtkWidget *row = adw_action_row_new ();
+  gboolean slider = g_strcmp0 (type, "bool") && g_strcmp0 (type, "choice");
+  GtkWidget *row = NULL;
   GtkWidget *control = NULL;
   g_autoptr (GString) sub = g_string_new (text_of (help, a->lang));
 
-  adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), text_of (json_object_get_object_member (s, "label"), a->lang));
   if (!g_strcmp0 (json_object_get_string_member_with_default (s, "apply", ""), "new"))
     g_string_append_printf (sub, "%s%s", sub->len ? " • " : "", av_text (a, "applies_new"));
-  adw_action_row_set_subtitle (ADW_ACTION_ROW (row), sub->str);
+  if (!slider) {   /* a switch or a drop-down: one row, its title and subtitle wrap */
+    row = adw_action_row_new ();
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), text_of (json_object_get_object_member (s, "label"), a->lang));
+    adw_action_row_set_subtitle (ADW_ACTION_ROW (row), sub->str);
+    adw_action_row_set_title_lines (ADW_ACTION_ROW (row), 0);
+    adw_action_row_set_subtitle_lines (ADW_ACTION_ROW (row), 0);
+  }
 
   if (!g_strcmp0 (type, "bool")) {
     control = gtk_switch_new ();
@@ -260,26 +305,52 @@ setting_row (Av *a, JsonObject *s)
     gtk_widget_set_valign (control, GTK_ALIGN_CENTER);
     g_signal_connect (control, "notify::selected", G_CALLBACK (drop_changed), a);
     adw_action_row_add_suffix (ADW_ACTION_ROW (row), control);
-  } else {   /* int, float: a slider with its value */
-    double lo = json_object_get_double_member (s, "min"), hi = json_object_get_double_member (s, "max");
-    double step = json_object_get_double_member_with_default (s, "step", !g_strcmp0 (type, "int") ? 1 : 0.01);
-    GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+  } else {   /* int, float: the label and its value on one line, the slider on the whole width under them */
+    Grid *g = g_new0 (Grid, 1);
+    GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
+    GtkWidget *head = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget *title = gtk_label_new (text_of (json_object_get_object_member (s, "label"), a->lang));
     GtkWidget *label = gtk_label_new ("");
-    control = gtk_scale_new_with_range (GTK_ORIENTATION_HORIZONTAL, lo, hi, step);
-    gtk_scale_set_draw_value (GTK_SCALE (control), FALSE);
-    gtk_widget_set_size_request (control, 150, -1);
+    g->lo = json_object_get_double_member (s, "min");
+    g->hi = json_object_get_double_member (s, "max");
+    g->integer = !g_strcmp0 (type, "int");
+    g->step = json_object_get_double_member_with_default (s, "step", g->integer ? 1 : 0.01);
+    g->digits = digits_of (g->step);
+    g->unit = g_strdup (json_object_get_string_member_with_default (s, "unit", ""));
+    gtk_label_set_wrap (GTK_LABEL (title), TRUE);
+    gtk_label_set_xalign (GTK_LABEL (title), 0);
+    gtk_widget_set_hexpand (title, TRUE);
     gtk_label_set_xalign (GTK_LABEL (label), 1);
     gtk_widget_add_css_class (label, "dim-label");
-    gtk_box_append (GTK_BOX (box), label);
+    gtk_box_append (GTK_BOX (head), title);
+    gtk_box_append (GTK_BOX (head), label);
+    gtk_box_append (GTK_BOX (box), head);
+    if (sub->len) {
+      GtkWidget *help_label = gtk_label_new (sub->str);
+      gtk_label_set_wrap (GTK_LABEL (help_label), TRUE);
+      gtk_label_set_xalign (GTK_LABEL (help_label), 0);
+      gtk_widget_add_css_class (help_label, "dim-label");
+      gtk_widget_add_css_class (help_label, "caption");
+      gtk_box_append (GTK_BOX (box), help_label);
+    }
+    control = gtk_scale_new_with_range (GTK_ORIENTATION_HORIZONTAL, g->lo, g->hi, g->step);
+    gtk_scale_set_draw_value (GTK_SCALE (control), FALSE);
+    gtk_range_set_round_digits (GTK_RANGE (control), g->integer ? 0 : g->digits);
+    gtk_widget_set_hexpand (control, TRUE);
+    gtk_widget_set_size_request (control, -1, TOUCH_PX);
     gtk_box_append (GTK_BOX (box), control);
-    gtk_widget_set_valign (box, GTK_ALIGN_CENTER);
+    gtk_widget_set_margin_start (box, 12);
+    gtk_widget_set_margin_end (box, 12);
+    gtk_widget_set_margin_top (box, 8);
+    gtk_widget_set_margin_bottom (box, 4);
     g_object_set_data (G_OBJECT (control), "av", a);
     g_object_set_data (G_OBJECT (control), "av-label", label);
-    g_object_set_data_full (G_OBJECT (control), "av-unit", g_strdup (json_object_get_string_member_with_default (s, "unit", "")), g_free);
-    g_object_set_data (G_OBJECT (control), "av-digits", GINT_TO_POINTER (digits_of (step)));
+    g_object_set_data_full (G_OBJECT (control), "av-grid", g, (GDestroyNotify) grid_free);
     g_signal_connect (control, "value-changed", G_CALLBACK (slider_changed), a);
     g_object_weak_ref (G_OBJECT (control), slider_gone, NULL);
-    adw_action_row_add_suffix (ADW_ACTION_ROW (row), box);
+    row = gtk_list_box_row_new ();   /* not an action row: its suffix would squeeze the slider on a phone */
+    gtk_list_box_row_set_activatable (GTK_LIST_BOX_ROW (row), FALSE);
+    gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), box);
   }
   g_object_set_data_full (G_OBJECT (control), "av-key", g_strdup (key), g_free);
   g_hash_table_insert (a->controls, g_strdup (key), control);
