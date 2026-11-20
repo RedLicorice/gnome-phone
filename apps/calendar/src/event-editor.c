@@ -1,5 +1,7 @@
 /* The event editor (event-editor.h; spec/calendar.md §7). */
 #include "event-editor.h"
+#include "cal-minerva.h"
+#include "ns-mc.h"
 #include "cal-material-switch.h"
 #include "cal-outlined-field.h"
 #include "cal-colors.h"
@@ -43,7 +45,8 @@ typedef struct {
   GtkWidget *color_button, *tz_row, *tz_button, *guests;
   GtkWidget *location, *description, *url, *repeat_row, *repeat, *reminders, *add_reminder;
   GtkWidget *availability, *access;
-  GtkWidget *scroll;
+  GtkWidget *scroll, *content;
+  GtkWidget *kind;              /* the Minerva calendar's: what the task is (minerva-config schedule ui kinds) */
   gboolean saving;
 } Editor;
 
@@ -177,6 +180,50 @@ show_repeat (Editor *editor)
                                             || (text && cal_recurrence_picker_can_handle (editor->rrule)));
 }
 
+/* the row of @widget: its ancestor that is a child of the editor's content */
+static GtkWidget *
+top_row (Editor *editor, GtkWidget *widget)
+{
+  while (widget && gtk_widget_get_parent (widget) != editor->content)
+    widget = gtk_widget_get_parent (widget);
+  return widget;
+}
+
+static void
+show_row (Editor *editor, GtkWidget *widget, gboolean shown)
+{
+  GtkWidget *line = top_row (editor, widget);
+  GtkWidget *next = line ? gtk_widget_get_next_sibling (line) : NULL;
+
+  if (!line)
+    return;
+  gtk_widget_set_visible (line, shown);
+  if (next && gtk_widget_has_css_class (next, "cal-edit-separator"))
+    gtk_widget_set_visible (next, shown);
+}
+
+/* The Minerva calendar takes what the scheduler does: a text, when, a repeat, and what kind of task it is; the
+ * place, the guests, the zone, the reminders, the colour, availability and privacy are an EDS event's only */
+static void
+show_minerva (Editor *editor)
+{
+  gboolean minerva = g_strcmp0 (editor->calendar, CAL_MINERVA_CALENDAR) == 0;
+  JsonObject *ui = cal_store_minerva_ui (editor->store);
+  GtkWidget *eds_only[] = { editor->location, editor->url, editor->guests, editor->tz_row, editor->reminders,
+                            editor->add_reminder, editor->availability, editor->access, editor->description };
+
+  if (!editor->content)
+    return;
+  for (guint i = 0; i < G_N_ELEMENTS (eds_only); i++)
+    if (eds_only[i])
+      show_row (editor, eds_only[i], !minerva);
+  gtk_widget_set_visible (editor->color_button, !minerva);
+  if (editor->kind)
+    show_row (editor, editor->kind, minerva);
+  gtk_entry_set_placeholder_text (GTK_ENTRY (editor->title), minerva && ui ? ns_json_str (ui, "text_hint_prompt")
+                                                                          : _("Event name"));
+}
+
 static void
 show_calendar (Editor *editor)
 {
@@ -190,6 +237,7 @@ show_calendar (Editor *editor)
   color = cal_argb (0xff000000 | (editor->own_color ? editor->color : calendar ? calendar->color : 0x3f51b5));
   g_object_set_data_full (G_OBJECT (editor->calendar_color), "cal-color", g_memdup2 (&color, sizeof color), g_free);
   gtk_widget_queue_draw (editor->calendar_color);
+  show_minerva (editor);
 }
 
 /* --- the values the user changed (EditEventFragment.isModelChanged) */
@@ -276,6 +324,19 @@ edited_event (Editor *editor)
     {
       event->organizer = g_strdup (source->organizer);
       event->self_status = source->self_status;
+    }
+  if (g_strcmp0 (editor->calendar, CAL_MINERVA_CALENDAR) == 0)
+    {
+      JsonArray *kinds = ns_json_arr (cal_store_minerva_ui (editor->store), "kinds");
+      int k = editor->kind ? cal_spinner_get_selected (CAL_SPINNER (editor->kind)) : 0;
+
+      event->minerva = source && source->minerva ? cal_minerva_info_copy (source->minerva)
+                                                 : g_new0 (CalMinervaInfo, 1);
+      if (kinds && k >= 0 && k < (int) json_array_get_length (kinds))
+        {
+          g_free (event->minerva->kind);
+          event->minerva->kind = g_strdup (json_array_get_string_element (kinds, (guint) k));
+        }
     }
   /* the guests: the organizer and the owner as they were, those still typed as they were (their answers kept),
    * the new ones not answered yet */
@@ -831,6 +892,35 @@ build (Editor *editor)
   gtk_widget_add_css_class (editor->title, "cal-edit-title");
   gtk_box_append (GTK_BOX (content), editor->title);
   gtk_box_append (GTK_BOX (content), separator ());
+  editor->content = content;
+
+  /* the Minerva calendar's kind of task: a prompt to Minerva or a reminder (its texts from minerva-config) */
+  {
+    JsonObject *ui = cal_store_minerva_ui (editor->store);
+    JsonArray *kinds = ui ? ns_json_arr (ui, "kinds") : NULL;
+    g_autoptr(GPtrArray) labels = g_ptr_array_new_with_free_func (g_free);
+    int selected = 0;
+
+    for (guint i = 0; kinds && i < json_array_get_length (kinds); i++)
+      {
+        const char *kind = json_array_get_string_element (kinds, i);
+        g_autofree char *key = g_strdup_printf ("kind_%s", kind);
+
+        g_ptr_array_add (labels, g_strdup (ns_json_str (ui, key)));
+        if (source && source->minerva && g_strcmp0 (source->minerva->kind, kind) == 0)
+          selected = (int) i;
+      }
+    if (labels->len)
+      {
+        editor->kind = cal_spinner_new ();
+        cal_spinner_set_items (CAL_SPINNER (editor->kind), (const char *const *) labels->pdata, (int) labels->len);
+        cal_spinner_set_selected (CAL_SPINNER (editor->kind), selected);
+        line = row ("cal-notify-symbolic", editor->kind);
+        gtk_widget_add_css_class (line, "cal-edit-spinner-row");
+        gtk_box_append (GTK_BOX (content), line);
+        gtk_box_append (GTK_BOX (content), separator ());
+      }
+  }
 
   /* the calendar: chosen for a new event; an existing one stays in its calendar (Etar shows it as text) */
   calendar_text = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
@@ -1229,7 +1319,8 @@ event_editor_new (GtkWidget *window, CalEvent *event, gint64 start, gboolean all
     return editor_page (window, NULL, NULL, start, all_day, CAL_SCOPE_ALL);
   if (duplicate)
     return editor_page (window, NULL, event, event->start, event->all_day, CAL_SCOPE_ALL);
-  if (event->recurring)
+  /* a Minerva task is one task, whatever due time was opened: no "this or all" */
+  if (event->recurring && !event->minerva)
     return ask_which (window, event);
   return editor_page (window, event, event, event->start, event->all_day, CAL_SCOPE_ALL);
 }

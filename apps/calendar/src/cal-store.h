@@ -13,6 +13,7 @@
 
 #include <gio/gio.h>
 #include <libecal/libecal.h>
+#include <json-glib/json-glib.h>
 
 G_BEGIN_DECLS
 
@@ -80,6 +81,14 @@ gboolean cal_store_delete_finish (CalStore *self, GAsyncResult *result, GError *
 
 /* the event as an iCalendar file (Export, Share): VCALENDAR with the series and its time zones */
 char *cal_store_export_sync (CalStore *self, CalEvent *event, GError **error);
+
+/* --- Minerva's scheduler (cal-minerva.h): one more calendar, "Minerva", whose events come from and go to the
+ * harness scheduler through minerva-config. The app turns it on; the reminder service does not. */
+void        cal_store_enable_minerva  (CalStore *self);
+/* `schedule ui`'s texts and colour, NULL until minerva-config answered (or when it is not installed) */
+JsonObject *cal_store_minerva_ui      (CalStore *self);
+/* the oldest time the scheduler's run log covers, from the last answer (0: unknown) */
+gint64      cal_store_minerva_history (CalStore *self);
 
 /* --- for the reminder service and the tests */
 

@@ -92,6 +92,7 @@ on_startup (GApplication *app, gpointer data)
   g_signal_connect (settings, "changed::pure-black", G_CALLBACK (on_look_changed), app);
   apply_look (app);
   store = cal_store_new (FALSE);
+  cal_store_enable_minerva (store);   /* the harness scheduler as the "Minerva" calendar, when minerva-config is here */
 }
 
 static void

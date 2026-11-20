@@ -14,8 +14,12 @@ gettext_args = ['-DGETTEXT_PACKAGE="neo-calendar"',
 
 # the events and their rules (cal-model), their text (cal-format) and evolution-data-server (cal-store): shared by
 # the app, the reminder service and the tests
+json = dependency('json-glib-1.0')
+# Neo Settings' door to `minerva-config` (ns-mc.c, GIO and json-glib only), for the Minerva calendar (cal-minerva.c)
+settings = include_directories('../settings/src')
 core = static_library('calcore', 'src/cal-model.c', 'src/cal-format.c', 'src/cal-store.c', 'src/cal-alerts.c',
-                      c_args: gettext_args, dependencies: [gio, ecal, m])
+                      'src/cal-minerva.c', '../settings/src/ns-mc.c', include_directories: settings,
+                      c_args: gettext_args, dependencies: [gio, ecal, m, json])
 
 # the app
 resources = gnome.compile_resources('calendar-resources', 'src/calendar.gresource.xml', source_dir: ['src', 'data'])
@@ -26,13 +30,13 @@ executable('neo-calendar', 'src/cal-main.c', 'src/cal-window.c', 'src/cal-text.c
            'src/cal-prefs.c', 'src/cal-tz-picker.c', 'src/cal-search.c', 'src/cal-accounts.c',
            'src/cal-color-picker.c', 'src/cal-material-switch.c', 'src/cal-recurrence-picker.c',
            'src/cal-alert-page.c', 'src/cal-outlined-field.c', resources,
-           link_with: core, install: true, c_args: gettext_args,
-           dependencies: [gio, ecal, m, dependency('gtk4', version: '>= 4.14'), dependency('neo-1'),
+           link_with: core, install: true, c_args: gettext_args, include_directories: settings,
+           dependencies: [gio, ecal, m, json, dependency('gtk4', version: '>= 4.14'), dependency('neo-1'),
                           dependency('spongy-gtk-1'), dependency('icu-i18n'), dependency('icu-uc')])
 
 # the reminder service: notifies at each reminder, and wakes the phone for it, with the app closed
 executable('neo-calendar-reminders', 'src/reminders-main.c', link_with: core, install: true, c_args: gettext_args,
-           dependencies: [gio, ecal, m])
+           dependencies: [gio, ecal, m, json])
 
 unit = configuration_data({'bindir': bindir})
 configure_file(input: 'data/neo-calendar-reminders.service.in', output: 'neo-calendar-reminders.service',
@@ -49,9 +53,9 @@ gnome.post_install(glib_compile_schemas: true, gtk_update_icon_cache: true, upda
 # the test rig's events (tests/try-calendar.sh): refuses to run outside the rig
 executable('cal-seed', 'tests/cal-seed.c', dependencies: [gio, ecal])
 
-foreach name : ['cal-model', 'cal-format', 'cal-alerts']
+foreach name : ['cal-model', 'cal-format', 'cal-alerts', 'cal-minerva']
   test(name, executable('test-' + name, 'tests/test-' + name + '.c', link_with: core, c_args: gettext_args,
-                        dependencies: [gio, ecal, m]))
+                        dependencies: [gio, ecal, m, json]))
 endforeach
 # the repeat dialog's rules: cal-recurrence-picker.c without its dialog
 test('cal-recurrence', executable('test-cal-recurrence', 'tests/test-cal-recurrence.c', 'src/cal-recurrence-picker.c',

@@ -1,5 +1,7 @@
 /* CalStore: the phone's calendars from evolution-data-server (cal-store.h). */
 #include "cal-store.h"
+#include "cal-minerva.h"
+#include "ns-mc.h"
 
 #include <glib/gi18n.h>
 #include <libedataserver/libedataserver.h>
@@ -29,6 +31,13 @@ struct _CalStore {
   GHashTable *connections;              /* uid -> Connection */
   guint rebuild_id, changed_id;
   gboolean registry_done;
+  /* Minerva's scheduler as one more calendar (cal-minerva.h): on once the app asked for it and minerva-config is
+   * installed; its texts and colour from `schedule ui`; TasksChanged of minerva-events says it changed */
+  gboolean minerva_wanted, minerva_visible;
+  JsonObject *minerva_ui;
+  GDBusConnection *session;
+  guint minerva_signal;
+  gint64 minerva_history;
 };
 
 G_DEFINE_FINAL_TYPE (CalStore, cal_store, G_TYPE_OBJECT)
@@ -492,6 +501,20 @@ do_rebuild (gpointer data)
         }
     }
   g_list_free_full (sources, g_object_unref);
+  if (self->minerva_ui)
+    {
+      CalCalendar *minerva = g_new0 (CalCalendar, 1);
+      const char *color = ns_json_str (self->minerva_ui, "color");
+
+      minerva->uid = g_strdup (CAL_MINERVA_CALENDAR);
+      minerva->name = g_strdup (ns_json_str (self->minerva_ui, "calendar_name"));
+      minerva->account = g_strdup (minerva->name);
+      if (!parse_color (color, &minerva->color))
+        minerva->color = 0x3f51b5;
+      minerva->visible = self->minerva_visible;
+      minerva->readonly = FALSE;   /* its writes go to the scheduler, not to EDS */
+      g_ptr_array_add (self->calendars, minerva);
+    }
   g_ptr_array_sort (self->calendars, compare_calendars);
 
   /* the hidden and the removed ones: their events go from the views */
@@ -559,6 +582,11 @@ cal_store_dispose (GObject *object)
     g_signal_handlers_disconnect_by_data (self->registry, self);
   g_clear_pointer (&self->connections, g_hash_table_unref);
   g_clear_object (&self->registry);
+  if (self->session && self->minerva_signal)
+    g_dbus_connection_signal_unsubscribe (self->session, self->minerva_signal);
+  self->minerva_signal = 0;
+  g_clear_object (&self->session);
+  g_clear_pointer (&self->minerva_ui, json_object_unref);
   G_OBJECT_CLASS (cal_store_parent_class)->dispose (object);
 }
 
@@ -601,6 +629,83 @@ cal_store_new (gboolean hidden_too)
   return self;
 }
 
+/* --- Minerva's scheduler */
+
+static void
+on_tasks_changed (GDBusConnection *bus, const char *sender, const char *path, const char *iface, const char *signal,
+                  GVariant *params, gpointer data)
+{
+  schedule_changed (CAL_STORE (data));
+}
+
+static void
+on_minerva_ui (JsonObject *root, const char *err, gpointer data)
+{
+  CalStore *self = data;
+
+  if (err || !root || !json_object_get_boolean_member_with_default (root, "ok", FALSE))
+    {
+      g_warning ("the Minerva calendar is left out: %s", err ? err : ns_json_str (root, "error"));
+      return;
+    }
+  g_clear_pointer (&self->minerva_ui, json_object_unref);
+  self->minerva_ui = json_object_ref (root);
+  self->session = g_bus_get_sync (G_BUS_TYPE_SESSION, NULL, NULL);
+  if (self->session)
+    self->minerva_signal = g_dbus_connection_signal_subscribe (self->session, NULL,
+                                                               ns_json_str (root, "signal_interface"),
+                                                               ns_json_str (root, "signal_name"),
+                                                               ns_json_str (root, "signal_path"), NULL,
+                                                               G_DBUS_SIGNAL_FLAGS_NONE, on_tasks_changed, self, NULL);
+  rebuild (self);
+  schedule_changed (self);
+}
+
+void
+cal_store_enable_minerva (CalStore *self)
+{
+  static const char *const args[] = { "schedule", "ui", "--json", NULL };
+
+  if (self->minerva_wanted || !ns_minerva_available ())
+    return;
+  self->minerva_wanted = TRUE;
+  self->minerva_visible = TRUE;
+  ns_mc_run (G_OBJECT (self), args, NULL, on_minerva_ui, self);
+}
+
+JsonObject *
+cal_store_minerva_ui (CalStore *self)
+{
+  return self->minerva_ui;
+}
+
+gint64
+cal_store_minerva_history (CalStore *self)
+{
+  return self->minerva_history;
+}
+
+static char *
+iso_of (gint64 time)
+{
+  g_autoptr(GDateTime) utc = g_date_time_new_from_unix_utc (time);
+
+  return g_date_time_format (utc, "%Y-%m-%dT%H:%M:%SZ");
+}
+
+/* a minerva-config answer as a task's result: TRUE, or its error */
+static void
+on_minerva_written (JsonObject *root, const char *err, gpointer data)
+{
+  GTask *task = data;
+
+  if (!err && root && json_object_get_boolean_member_with_default (root, "ok", FALSE))
+    g_task_return_boolean (task, TRUE);
+  else
+    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED, "%s", err ? err : ns_json_str (root, "error"));
+  g_object_unref (task);
+}
+
 GPtrArray *
 cal_store_get_calendars (CalStore *self)
 {
@@ -631,11 +736,12 @@ cal_store_default_calendar (CalStore *self, const char *last_used)
 
   if (last && last->visible && !last->readonly)
     return last;
+  /* a new event is the owner's own unless he last chose Minerva's calendar */
   for (guint i = 0; i < self->calendars->len; i++)
     {
       const CalCalendar *calendar = self->calendars->pdata[i];
 
-      if (calendar->visible && !calendar->readonly)
+      if (calendar->visible && !calendar->readonly && g_strcmp0 (calendar->uid, CAL_MINERVA_CALENDAR) != 0)
         return calendar;
     }
   return NULL;
@@ -653,6 +759,13 @@ on_source_written (GObject *source, GAsyncResult *result, gpointer data)
 void
 cal_store_set_visible (CalStore *self, const char *uid, gboolean visible)
 {
+  if (g_strcmp0 (uid, CAL_MINERVA_CALENDAR) == 0)
+    {
+      self->minerva_visible = visible;
+      rebuild (self);
+      schedule_changed (self);
+      return;
+    }
   g_autoptr(ESource) source = self->registry ? e_source_registry_ref_source (self->registry, uid) : NULL;
   ESourceSelectable *selectable;
 
@@ -764,6 +877,33 @@ on_read (GObject *source, GAsyncResult *result, gpointer data)
     query_finish (query);
 }
 
+typedef struct {
+  CalStore *store;
+  Query *query;
+  guint32 color;
+} MinervaRead;
+
+/* the Minerva calendar's occurrences: what the scheduler answered, or nothing when it did not */
+static void
+on_minerva_read (JsonObject *root, const char *err, gpointer data)
+{
+  MinervaRead *read = data;
+  Query *query = read->query;
+
+  if (!err && root && json_object_get_boolean_member_with_default (root, "ok", FALSE))
+    {
+      g_autoptr(GPtrArray) events = cal_minerva_events_of (root, read->color, &read->store->minerva_history);
+
+      for (guint i = 0; i < events->len; i++)
+        g_ptr_array_add (query->events, cal_event_ref (events->pdata[i]));
+    }
+  else
+    g_warning ("the Minerva calendar: %s", err ? err : ns_json_str (root, "error"));
+  if (--query->pending == 0)
+    query_finish (query);
+  g_free (read);
+}
+
 static gboolean
 query_finish_idle (gpointer data)
 {
@@ -787,6 +927,19 @@ cal_store_query (CalStore *self, gint64 start, gint64 end, GCancellable *cancell
       g_autoptr(GTask) task = NULL;
       Reading *reading;
 
+      if (calendar->visible && g_strcmp0 (calendar->uid, CAL_MINERVA_CALENDAR) == 0)
+        {
+          g_autofree char *from = iso_of (start), *to = iso_of (end);
+          const char *args[] = { "schedule", "range", from, to, "--json", NULL };
+          MinervaRead *read = g_new0 (MinervaRead, 1);
+
+          read->store = self;
+          read->query = query;
+          read->color = calendar->color;
+          ns_mc_run (G_OBJECT (self), args, NULL, on_minerva_read, read);
+          query->pending++;
+          continue;
+        }
       if (!calendar->visible || !client)
         continue;
       reading = g_new0 (Reading, 1);
@@ -864,6 +1017,40 @@ find_thread (GTask *task, gpointer source, gpointer data, GCancellable *cancella
     g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_NOT_FOUND, "%s", _("Event not found."));
 }
 
+typedef struct {
+  GTask *task;
+  char *uid, *rid;
+  guint32 color;
+} MinervaFind;
+
+static void
+on_minerva_found (JsonObject *root, const char *err, gpointer data)
+{
+  MinervaFind *find = data;
+  CalEvent *found = NULL;
+
+  if (!err && root && json_object_get_boolean_member_with_default (root, "ok", FALSE))
+    {
+      g_autoptr(GPtrArray) events = cal_minerva_events_of (root, find->color, NULL);
+
+      for (guint i = 0; !found && i < events->len; i++)
+        {
+          CalEvent *e = events->pdata[i];
+
+          if (g_strcmp0 (e->uid, find->uid) == 0 && (!find->rid || g_strcmp0 (e->rid, find->rid) == 0))
+            found = cal_event_ref (e);
+        }
+    }
+  if (found)
+    g_task_return_pointer (find->task, found, (GDestroyNotify) cal_event_unref);
+  else
+    g_task_return_new_error (find->task, G_IO_ERROR, G_IO_ERROR_NOT_FOUND, "%s", _("Event not found."));
+  g_object_unref (find->task);
+  g_free (find->uid);
+  g_free (find->rid);
+  g_free (find);
+}
+
 void
 cal_store_find_event (CalStore *self, const char *calendar, const char *uid, const char *rid, gint64 near,
                       GCancellable *cancellable, GAsyncReadyCallback callback, gpointer data)
@@ -872,6 +1059,21 @@ cal_store_find_event (CalStore *self, const char *calendar, const char *uid, con
   ECalClient *client = cal_store_get_client (self, calendar);
   const CalCalendar *info = cal_store_find_calendar (self, calendar);
   Finding *finding;
+
+  if (g_strcmp0 (calendar, CAL_MINERVA_CALENDAR) == 0)
+    {
+      /* the scheduler again around @near: the same task and due time (or run) */
+      g_autofree char *from = iso_of (near - 86400), *to = iso_of (near + 86400 * 2);
+      const char *args[] = { "schedule", "range", from, to, "--json", NULL };
+      MinervaFind *find = g_new0 (MinervaFind, 1);
+
+      find->task = g_object_ref (task);
+      find->uid = g_strdup (uid);
+      find->rid = g_strdup (rid);
+      find->color = info ? info->color : 0;
+      ns_mc_run (G_OBJECT (self), args, NULL, on_minerva_found, find);
+      return;
+    }
 
   if (!client || !info)
     {
@@ -1298,6 +1500,25 @@ cal_store_save (CalStore *self, CalEvent *original, CalEvent *edited, CalScope s
   ECalClient *client = cal_store_get_client (self, edited->calendar);
   Writing *writing;
 
+  if (g_strcmp0 (edited->calendar, CAL_MINERVA_CALENDAR) == 0)
+    {
+      /* to the scheduler: a new task, or the same task changed (its id and history stay) */
+      const char *kind = edited->minerva && edited->minerva->kind ? edited->minerva->kind : "prompt";
+      g_autofree char *entry = cal_minerva_entry (edited, kind);
+      const char *task_id = original && original->minerva ? original->minerva->task : NULL;
+      const char *args[] = { "schedule", task_id ? "update" : "create", task_id, "--json", NULL };
+
+      if (!task_id)
+        args[2] = "--json", args[3] = NULL;
+      if (!entry)
+        {
+          g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "%s",
+                                   ns_json_str (self->minerva_ui, "bad_repeat"));
+          return;
+        }
+      ns_mc_run (G_OBJECT (self), args, entry, on_minerva_written, g_object_ref (task));
+      return;
+    }
   if (!client || e_client_is_readonly (E_CLIENT (client)))
     {
       g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED, "calendar %s cannot be written",
@@ -1348,6 +1569,14 @@ cal_store_delete (CalStore *self, CalEvent *event, CalScope scope, GAsyncReadyCa
   ECalClient *client = cal_store_get_client (self, event->calendar);
   Writing *writing;
 
+  if (g_strcmp0 (event->calendar, CAL_MINERVA_CALENDAR) == 0 && event->minerva)
+    {
+      /* a task is cancelled whole: the scheduler has no single due time to drop */
+      const char *args[] = { "schedule", "cancel", event->minerva->task, "--json", NULL };
+
+      ns_mc_run (G_OBJECT (self), args, NULL, on_minerva_written, g_object_ref (task));
+      return;
+    }
   if (!client || e_client_is_readonly (E_CLIENT (client)))
     {
       g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED, "calendar %s cannot be written",

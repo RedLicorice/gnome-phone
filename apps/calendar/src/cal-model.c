@@ -129,9 +129,38 @@ cal_event_copy (const CalEvent *event)
   copy->attendees = attendees;
   for (guint i = 0; i < event->attendees->len; i++)
     g_ptr_array_add (attendees, cal_attendee_copy (event->attendees->pdata[i]));
+  copy->minerva = event->minerva ? cal_minerva_info_copy (event->minerva) : NULL;
   copy->column = 0;
   copy->max_columns = 1;
   return copy;
+}
+
+CalMinervaInfo *
+cal_minerva_info_copy (const CalMinervaInfo *info)
+{
+  CalMinervaInfo *copy = g_memdup2 (info, sizeof *info);
+
+  copy->task = g_strdup (info->task);
+  copy->kind = g_strdup (info->kind);
+  copy->state = g_strdup (info->state);
+  copy->repeat = g_strdup (info->repeat);
+  copy->goal = g_strdup (info->goal);
+  copy->error = g_strdup (info->error);
+  return copy;
+}
+
+void
+cal_minerva_info_free (CalMinervaInfo *info)
+{
+  if (!info)
+    return;
+  g_free (info->task);
+  g_free (info->kind);
+  g_free (info->state);
+  g_free (info->repeat);
+  g_free (info->goal);
+  g_free (info->error);
+  g_free (info);
 }
 
 void
@@ -151,6 +180,7 @@ cal_event_unref (CalEvent *event)
   g_array_unref (event->reminders);
   g_ptr_array_unref (event->attendees);
   g_free (event->organizer);
+  cal_minerva_info_free (event->minerva);
   g_free (event);
 }
 

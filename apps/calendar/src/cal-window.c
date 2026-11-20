@@ -1,5 +1,7 @@
 /* The Calendar's window (cal-window.h): AllInOneActivity, its toolbar, views, FAB and drawer (spec/calendar.md §2). */
 #include "cal-window.h"
+#include "cal-minerva.h"
+#include "ns-mc.h"
 #include "agenda-view.h"
 #include "cal-colors.h"
 #include "cal-date-picker.h"
@@ -55,6 +57,8 @@ typedef struct {
   gboolean landscape;                   /* the window wider than tall: the Month view's landscape layout */
   int selected_day;
   GCancellable *query;
+  gint64 range_start;           /* the shown range's start, for the Minerva calendar's history line */
+  gint64 history_said;          /* the run log's start the owner was told about, once */
   guint midnight;
 } Shell;
 
@@ -145,6 +149,22 @@ on_events (GPtrArray *events, gpointer data)
     for (guint i = events->len; i-- > 0;)
       if (((CalEvent *) events->pdata[i])->self_status == CAL_STATUS_DECLINED)
         g_ptr_array_remove_index (events, i);
+  /* the scheduler's run log does not reach so far back: say it once, plainly */
+  {
+    gint64 history = cal_store_minerva_history (shell->store);
+    JsonObject *ui = cal_store_minerva_ui (shell->store);
+    const CalCalendar *minerva = cal_store_find_calendar (shell->store, CAL_MINERVA_CALENDAR);
+
+    if (ui && minerva && minerva->visible && history > 0 && shell->range_start < history
+        && history != shell->history_said)
+      {
+        g_autofree char *date = cal_format_full_date (cal_day_number (history));
+        g_autofree char *text = cal_minerva_fill (ns_json_str (ui, "history_gone"), "date", date);
+
+        shell->history_said = history;
+        cal_window_toast (shell->window, text);
+      }
+  }
   view = shell->view_widgets[shell->view];
   switch (shell->view)
     {
@@ -191,6 +211,7 @@ refresh (Shell *shell)
   g_cancellable_cancel (shell->query);
   g_clear_object (&shell->query);
   shell->query = g_cancellable_new ();
+  shell->range_start = cal_day_start (first);
   cal_store_query (shell->store, cal_day_start (first), cal_day_start (last + 1), shell->query, on_events, shell);
 }
 

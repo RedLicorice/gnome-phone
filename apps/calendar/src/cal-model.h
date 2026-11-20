@@ -67,6 +67,24 @@ typedef enum { CAL_AVAILABILITY_BUSY, CAL_AVAILABILITY_FREE } CalAvailability;
 /* Events.ACCESS_LEVEL: CLASS (none: the calendar's default) */
 typedef enum { CAL_ACCESS_DEFAULT, CAL_ACCESS_CONFIDENTIAL, CAL_ACCESS_PRIVATE, CAL_ACCESS_PUBLIC } CalAccess;
 
+/* --- Minerva's scheduler (docs/calendar-scheduler.md of Minerva's repository): what an occurrence of the Minerva
+ * calendar carries besides an event's fields. The scheduler is its one store; cal-minerva.c fills this. */
+
+typedef struct {
+  char *task;           /* the scheduler's task id */
+  char *kind;           /* what the app calls it: "prompt", "reminder", or "other" (made by Minerva, read-only) */
+  char *state;          /* the task's state (a future one) or the run's outcome (a past one) */
+  char *repeat;         /* "none", "daily", "weekdays", "weekly", "monthly", or "custom" (not editable here) */
+  char *goal;           /* the whole prompt or reminder text (shown to the owner only) */
+  char *error;          /* a failed run's error, or NULL */
+  gboolean past;        /* a run of the run log, not a time still to come */
+  gboolean approval;    /* the body is a call the owner is asked about when it runs */
+  int run;              /* a past run's number */
+} CalMinervaInfo;
+
+void            cal_minerva_info_free (CalMinervaInfo *info);
+CalMinervaInfo *cal_minerva_info_copy (const CalMinervaInfo *info);
+
 /* --- events (one occurrence) */
 
 typedef struct {
@@ -90,6 +108,7 @@ typedef struct {
   char *organizer;      /* ORGANIZER's address, or NULL */
   CalStatus self_status;  /* the calendar owner's PARTSTAT (Instances.SELF_ATTENDEE_STATUS) */
   gboolean cancelled;   /* STATUS:CANCELLED (Events.STATUS_CANCELED): the views strike its title through */
+  CalMinervaInfo *minerva;  /* an occurrence of the Minerva calendar (the scheduler's), NULL for an EDS event */
 
   /* the layout of the views, filled by cal_layout_events (Etar's Event.column, maxColumns, textOffsetMillis,
    * drawStaggered) */

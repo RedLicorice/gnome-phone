@@ -1,5 +1,7 @@
 /* The event's info screen (event-info.h; spec/calendar.md §6). */
 #include "event-info.h"
+#include "cal-minerva.h"
+#include "ns-mc.h"
 #include "cal-alert-page.h"
 #include "cal-colors.h"
 #include "cal-color-picker.h"
@@ -136,6 +138,31 @@ is_organizer (const CalEvent *event, const CalCalendar *calendar)
   return calendar && calendar->email && g_ascii_strcasecmp (calendar->email, event->organizer) == 0;
 }
 
+/* A Minerva task's lines under its title (minerva-config schedule ui texts): its state, or a run's outcome and error,
+ * whether its call will be put to the owner, a task Minerva made that is changed by asking her, and the whole text */
+static char *
+minerva_details (Info *info)
+{
+  CalMinervaInfo *m = info->event->minerva;
+  JsonObject *ui = cal_store_minerva_ui (info->store);
+  g_autofree char *state_key = g_strdup_printf ("state_%s", m->state);
+  GString *text = g_string_new (ns_json_str (ui, state_key));
+
+  if (m->error && *m->error)
+    {
+      g_autofree char *line = cal_minerva_fill (ns_json_str (ui, "run_error"), "error", m->error);
+
+      g_string_append_printf (text, "\n%s", line);
+    }
+  if (m->approval)
+    g_string_append_printf (text, "\n%s", ns_json_str (ui, "needs_approval"));
+  if (!m->past && info->event->readonly)
+    g_string_append_printf (text, "\n%s", ns_json_str (ui, "read_only"));
+  if (m->goal && *m->goal && g_strcmp0 (m->goal, info->event->title) != 0)
+    g_string_append_printf (text, "\n\n%s", m->goal);
+  return g_string_free (text, FALSE);
+}
+
 static void
 show_event (Info *info)
 {
@@ -165,7 +192,14 @@ show_event (Info *info)
   gtk_widget_set_visible (info->calendar_row, calendar != NULL);
   if (calendar)
     gtk_label_set_label (GTK_LABEL (info->calendar_name), calendar->name);
-  set_label (info->description, event->description);
+  if (event->minerva)
+    {
+      g_autofree char *details = minerva_details (info);
+
+      set_label (info->description, details);
+    }
+  else
+    set_label (info->description, event->description);
   set_label (info->url, event->url);
 
   /* "Organizer:" when someone else organizes it: their name (the organizer's ATTENDEE CN), else their address */
@@ -727,6 +761,16 @@ update_actions (Info *info)
   int n = 0, shown;
   GtkWidget *child;
 
+  if (info->event->minerva)
+    {
+      /* a task of the scheduler: changed or cancelled there, nothing else (no file, no colour of its own) */
+      if (writable)
+        {
+          all[n++] = (Action) { "cal-edit-symbolic", _("Edit"), on_edit };
+          all[n++] = (Action) { "cal-delete-symbolic", _("Delete"), on_delete };
+        }
+      goto minerva_actions;
+    }
   if (writable && is_organizer (info->event, calendar))
     all[n++] = (Action) { "cal-edit-symbolic", _("Edit"), on_edit };
   if (writable)
@@ -738,6 +782,7 @@ update_actions (Info *info)
   if (writable)
     all[n++] = (Action) { "cal-color-symbolic", _("Choose event color"), on_change_color };
 
+minerva_actions:
   shown = max_action_buttons (info);
   if (n > shown)
     shown--;
