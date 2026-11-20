@@ -1,3 +1,8 @@
 usr/bin/neo-launcher
 usr/share/glib-2.0/schemas/de.yesman.neo.gschema.xml
 usr/share/neo-launcher/layout.json
+usr/libexec/neo-launcher/neo-search-cli
+usr/share/neo-launcher/parallax/renaissance-forest
+usr/share/neo-launcher/parallax/renaissance-marble
+usr/share/neo-launcher/parallax/renaissance-plum
+usr/share/neo-launcher/parallax/renaissance-sea

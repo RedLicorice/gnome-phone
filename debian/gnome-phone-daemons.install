@@ -5,3 +5,6 @@ usr/sbin/neo-wakeup
 usr/lib/systemd/system/input-boost.service
 usr/lib/systemd/system/neo-wakeup.service
 usr/share/dbus-1/system.d/de.yesman.Wakeup.conf
+etc/pam.d/gnome-phone-fingerprint
+etc/pam.d/gnome-phone-voice
+usr/libexec/gp-voice-check
