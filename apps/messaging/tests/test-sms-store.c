@@ -44,12 +44,12 @@ test_incoming (void)
   SmsMessage *message;
   gint64 anna, bob;
 
-  anna = sms_store_add_incoming (store, "+491701234567", "Hi", 900, 1000, "/mm/Sms/1");
-  bob = sms_store_add_incoming (store, "+491709999999", "Hello", 1900, 2000, "/mm/Sms/2");
+  anna = sms_store_add_incoming (store, "+491701234567", "Hi", 900, 1000, "/mm/Sms/1", NULL);
+  bob = sms_store_add_incoming (store, "+491709999999", "Hello", 1900, 2000, "/mm/Sms/2", NULL);
   g_assert_cmpint (anna, >, 0);
   g_assert_cmpint (bob, >, anna);
   /* the same sender: the same conversation */
-  g_assert_cmpint (sms_store_add_incoming (store, "+491701234567", "Are you there?", 2900, 3000, NULL), >, 0);
+  g_assert_cmpint (sms_store_add_incoming (store, "+491701234567", "Are you there?", 2900, 3000, NULL, NULL), >, 0);
 
   conversations = sms_store_list_conversations (store, FALSE);
   g_assert_cmpuint (conversations->len, ==, 2);
@@ -151,7 +151,7 @@ test_archive_and_delete (void)
   g_autoptr(SmsMessage) message = NULL;
   gint64 id;
 
-  id = sms_store_add_incoming (store, "22000", "Your code is 1234", 0, 1000, NULL);
+  id = sms_store_add_incoming (store, "22000", "Your code is 1234", 0, 1000, NULL, NULL);
   message = sms_store_get_message (store, id);
   sms_store_set_archived (store, message->conversation_id, TRUE);
   g_assert_cmpuint (count (sms_store_list_conversations (store, FALSE)), ==, 0);
@@ -160,7 +160,7 @@ test_archive_and_delete (void)
   g_assert_true (((SmsConversation *) archived->pdata[0])->archived);
 
   /* a new message brings it back */
-  sms_store_add_incoming (store, "22000", "Your code is 5678", 0, 2000, NULL);
+  sms_store_add_incoming (store, "22000", "Your code is 5678", 0, 2000, NULL, NULL);
   g_assert_cmpuint (count (sms_store_list_conversations (store, FALSE)), ==, 1);
 
   /* deleting it takes its messages along */
@@ -181,12 +181,12 @@ test_read_only (void)
   SmsStore *reader;
   g_autoptr(GPtrArray) conversations = NULL;
 
-  sms_store_add_incoming (store, "+491701234567", "Hi", 0, 1000, NULL);
+  sms_store_add_incoming (store, "+491701234567", "Hi", 0, 1000, NULL, NULL);
   reader = sms_store_open (path, TRUE, &error);
   g_assert_no_error (error);
   conversations = sms_store_list_conversations (reader, FALSE);
   g_assert_cmpuint (conversations->len, ==, 1);
-  sms_store_add_incoming (store, "+491701234567", "Still there?", 0, 2000, NULL);
+  sms_store_add_incoming (store, "+491701234567", "Still there?", 0, 2000, NULL, NULL);
   g_assert_cmpuint (count (sms_store_list_messages (reader, ((SmsConversation *) conversations->pdata[0])->id)),
                     ==, 2);
   sms_store_free (reader);
@@ -222,13 +222,48 @@ test_find_by_uri (void)
 {
   g_autofree char *path = NULL;
   SmsStore *store = open_store (&path);
-  gint64 id = sms_store_add_incoming (store, "whatsapp:+491701111111", "Ciao", 1000, 2000, "WA-1");
+  gint64 id = sms_store_add_incoming (store, "whatsapp:+491701111111", "Ciao", 1000, 2000, "WA-1", NULL);
 
   g_assert_cmpint (id, >, 0);
   g_assert_cmpint (sms_store_find_by_uri (store, "WA-1"), ==, id);
   g_assert_cmpint (sms_store_find_by_uri (store, "WA-2"), ==, 0);
   g_assert_cmpint (sms_store_find_by_uri (store, ""), ==, 0);
   g_assert_cmpint (sms_store_find_by_uri (store, NULL), ==, 0);
+  sms_store_free (store);
+}
+
+/* a provider's voice note keeps its typed part (kind, duration, thumbnail) next to its label; a text message has none */
+static void
+test_typed_part (void)
+{
+  g_autofree char *path = NULL;
+  SmsStore *store = open_store (&path);
+  static const guint8 jpeg[] = { 0xff, 0xd8, 0xff };
+  g_autoptr(GVariantDict) dict = g_variant_dict_new (NULL);
+  g_autoptr(GVariant) part_dict = NULL;
+  g_autoptr(SmsPart) part = NULL;
+  g_autoptr(GPtrArray) messages = NULL;
+  const SmsMessage *voice;
+  gint64 id;
+
+  g_variant_dict_insert (dict, "kind", "s", "voice");
+  g_variant_dict_insert (dict, "mime", "s", "audio/ogg");
+  g_variant_dict_insert (dict, "duration", "u", 12000);
+  g_variant_dict_insert_value (dict, "thumbnail", g_variant_new_fixed_array (G_VARIANT_TYPE_BYTE, jpeg, sizeof jpeg, 1));
+  part_dict = g_variant_ref_sink (g_variant_dict_end (dict));
+  part = sms_part_new_from_dict (part_dict);
+  id = sms_store_add_incoming (store, "whatsapp:+491701111111", "vocale 0:12", 1000, 2000, "WA-1", part);
+  sms_store_add_incoming (store, "whatsapp:+491701111111", "Ciao", 1000, 3000, "WA-2", NULL);
+  g_autoptr(SmsMessage) first = sms_store_get_message (store, id);
+  messages = sms_store_list_last_messages (store, first->conversation_id, 2);
+  voice = messages->pdata[0];
+  g_assert_cmpstr (voice->text, ==, "vocale 0:12");
+  g_assert_nonnull (voice->part);
+  g_assert_cmpstr (voice->part->kind, ==, "voice");
+  g_assert_cmpstr (voice->part->mime, ==, "audio/ogg");
+  g_assert_cmpuint (voice->part->duration, ==, 12000);
+  g_assert_cmpuint (g_bytes_get_size (voice->part->thumbnail), ==, sizeof jpeg);
+  g_assert_null (((SmsMessage *) messages->pdata[1])->part);
   sms_store_free (store);
 }
 
@@ -242,5 +277,6 @@ main (int argc, char **argv)
   g_test_add_func ("/sms-store/archive-and-delete", test_archive_and_delete);
   g_test_add_func ("/sms-store/read-only", test_read_only);
   g_test_add_func ("/sms-store/origin", test_origin);
+  g_test_add_func ("/sms-store/typed-part", test_typed_part);
   return g_test_run ();
 }

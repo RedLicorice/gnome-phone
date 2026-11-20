@@ -48,6 +48,26 @@ typedef struct
   GStrv destinations;           /* the other participants, as stored */
 } SmsConversation;
 
+/* what a message that is not only text carries (a provider's: a photo, a voice note, a location...): its typed part.
+ * The part's text is its readable label ("vocale 0:12"), which the list, the notification and the agents show */
+typedef struct
+{
+  char *kind;                   /* "image", "video", "gif", "sticker", "voice", "audio", "document", "location", "contact",
+                                 * "poll" (the provider's word, never interpreted beyond showing it) */
+  char *mime;
+  char *caption;
+  char *name;                   /* a document's file name, a location's, a contact's or a poll's */
+  guint64 size;                 /* bytes, 0 unknown */
+  guint duration;               /* ms */
+  guint width, height;
+  GBytes *thumbnail;            /* the small preview the message carried (JPEG, a sticker's PNG), or NULL */
+  gboolean animated, view_once;
+  gboolean located;             /* latitude and longitude are set */
+  double latitude, longitude;
+  char *url;
+  char *uri;                    /* the media on this phone, once downloaded, or NULL */
+} SmsPart;
+
 typedef struct
 {
   gint64 id;
@@ -62,6 +82,7 @@ typedef struct
   int raw_status;               /* ModemManager's error for a failed send, else 0 */
   char *origin;                 /* who wrote an outgoing one: NULL for the owner, else SendAs's origin ("minerva",
                                  * "agent:<identity>": docs/external-agents-channels.md) */
+  SmsPart *part;                /* what it carries besides text, or NULL for a text message */
 } SmsMessage;
 
 typedef struct _SmsStore SmsStore;
@@ -76,11 +97,11 @@ void      sms_store_free (SmsStore *store);
 gint64    sms_store_get_conversation (SmsStore *store, const char * const *destinations);
 /* a message that came from @sender: into its conversation (made if new), unread and not seen. Its id, or 0 */
 gint64    sms_store_add_incoming (SmsStore *store, const char *sender, const char *text, gint64 sent,
-                                  gint64 received, const char *sms_uri);
+                                  gint64 received, const char *sms_uri, const SmsPart *part);
 /* a message the owner wrote to @destination elsewhere (a provider's own app on his phone): kept as sent, read and seen,
    by @origin, with the network's id @sms_uri; the conversation's draft stays. Its id, or 0 */
 gint64    sms_store_add_sent (SmsStore *store, const char *destination, const char *text, gint64 sent,
-                              const char *sms_uri, const char *origin);
+                              const char *sms_uri, const char *origin, const SmsPart *part);
 /* the message whose provider/modem id is @sms_uri (a provider's message id is kept there): its id, or 0 */
 gint64    sms_store_find_by_uri (SmsStore *store, const char *sms_uri);
 /* a message to send, as written now: OUTGOING_YET_TO_SEND, read; the conversation's draft goes. Its id, or 0 */
@@ -120,8 +141,13 @@ GHashTable     *sms_store_unread_counts (SmsStore *store);
 
 void sms_conversation_free (SmsConversation *conversation);
 void sms_message_free (SmsMessage *message);
+/* a part from ReceiveMedia's a{sv} (kind, mime, caption, name, size t, duration u ms, width u, height u, thumbnail ay,
+ * animated b, view-once b, latitude d, longitude d, url): NULL without a kind */
+SmsPart *sms_part_new_from_dict (GVariant *dict);
+void sms_part_free (SmsPart *part);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (SmsConversation, sms_conversation_free)
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (SmsMessage, sms_message_free)
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (SmsPart, sms_part_free)
 
 G_END_DECLS

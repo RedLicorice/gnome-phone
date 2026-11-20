@@ -32,6 +32,14 @@
       <description>A conversation opens with its newest this many messages; scrolling to the top shows as many more</description>
     </key>
 
+    <!-- a photo, video, sticker or location shows its preview in the bubble, fitted inside a square this big (px) -->
+    <key name="media-preview-size" type="u">
+      <range min="16" max="2048"/>
+      <default>220</default>
+      <summary>Size of a media preview</summary>
+      <description>The largest width or height, in pixels, of a photo, video, sticker or map preview in a conversation</description>
+    </key>
+
     <!-- agents write Markdown (**bold**, `code`, lists): a message's text is drawn formatted (msg-markdown.c), its
          copy stays the text as written -->
     <key name="markdown" type="b">

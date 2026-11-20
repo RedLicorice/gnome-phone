@@ -465,3 +465,9 @@
   font-weight: 700;
   color: rgba(255, 255, 255, 0.54);
 }
+
+/* a photo's, video's, sticker's or map's preview in its bubble (conversation-view.c, make_preview) */
+.msg-media-preview {
+  border-radius: 8px;
+  margin-bottom: 4px;
+}

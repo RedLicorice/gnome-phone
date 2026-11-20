@@ -104,6 +104,16 @@ static const char introspection[] =
   "      <arg name='text' type='s' direction='in'/><arg name='sent' type='x' direction='in'/>"
   "      <arg name='ext' type='s' direction='in'/><arg name='name' type='s' direction='in'/>"
   "      <arg name='message' type='x' direction='out'/></method>"
+  /* Sent and Receive of a message that is not only text: @text is its readable label ("vocale 0:12"), @part what it
+   * carries (sms_part_new_from_dict: kind, mime, caption, name, size, duration, thumbnail...), never its media */
+  "    <method name='SentMedia'><arg name='destination' type='s' direction='in'/>"
+  "      <arg name='text' type='s' direction='in'/><arg name='sent' type='x' direction='in'/>"
+  "      <arg name='ext' type='s' direction='in'/><arg name='origin' type='s' direction='in'/>"
+  "      <arg name='part' type='a{sv}' direction='in'/><arg name='message' type='x' direction='out'/></method>"
+  "    <method name='ReceiveMedia'><arg name='destination' type='s' direction='in'/>"
+  "      <arg name='text' type='s' direction='in'/><arg name='sent' type='x' direction='in'/>"
+  "      <arg name='ext' type='s' direction='in'/><arg name='name' type='s' direction='in'/>"
+  "      <arg name='part' type='a{sv}' direction='in'/><arg name='message' type='x' direction='out'/></method>"
   /* what the owner said to an agent ('agent:<name>') in another way (by voice), kept as sent in its conversation
    * (made if new) without Outgoing: it reached the agent already, nothing is delivered */
   "    <method name='Record'><arg name='destination' type='s' direction='in'/>"
@@ -861,7 +871,7 @@ on_received (const char *path, const char *number, const char *text, gint64 time
   g_autoptr(SmsMessage) message = NULL;
   gint64 id;
 
-  id = sms_store_add_incoming (self->store, sender, text, timestamp ? timestamp : now, now, path);
+  id = sms_store_add_incoming (self->store, sender, text, timestamp ? timestamp : now, now, path, NULL);
   if (!id)
     return;                     /* left on the modem: the next start hands it over again */
   sms_modem_delete (self->modem, path);
@@ -1074,7 +1084,8 @@ agent_send (Service *self, gint64 id, const char *origin)
  * network's time (0: now), @ext its id (the same id twice is kept once). @name, the provider's own name for the
  * chat, is not stored: the chat is named from the contacts by its number (msg-people.c). Its id, or 0 */
 static gint64
-provider_receive (Service *self, const char *destination, const char *text, gint64 sent, const char *ext)
+provider_receive (Service *self, const char *destination, const char *text, gint64 sent, const char *ext,
+                  const SmsPart *part)
 {
   gint64 now = g_get_real_time () / 1000;
   g_autoptr(SmsMessage) message = NULL;
@@ -1082,7 +1093,7 @@ provider_receive (Service *self, const char *destination, const char *text, gint
 
   if (ext && *ext && (id = sms_store_find_by_uri (self->store, ext)))
     return id;  /* the provider sent it again: it is already in the thread */
-  id = sms_store_add_incoming (self->store, destination, text, sent > 0 ? sent : now, now, ext);
+  id = sms_store_add_incoming (self->store, destination, text, sent > 0 ? sent : now, now, ext, part);
   if (!id || !(message = sms_store_get_message (self->store, id)))
     return 0;
   came_where_shown (self, message->conversation_id);
@@ -1095,7 +1106,7 @@ provider_receive (Service *self, const char *destination, const char *text, gint
 static gint64
 agent_inject (Service *self, const char *destination, const char *text)
 {
-  return provider_receive (self, destination, text, 0, NULL);
+  return provider_receive (self, destination, text, 0, NULL, NULL);
 }
 
 /* --- what the app shows */
@@ -1308,20 +1319,28 @@ on_method_call (GDBusConnection *bus, const char *sender, const char *path, cons
         }
       return;
     }
-  if (g_str_equal (method, "Sent"))
+  if (g_str_equal (method, "Sent") || g_str_equal (method, "SentMedia"))
     {
       const char *destination, *ext, *origin;
       gint64 sent, now = g_get_real_time () / 1000, message = 0;
       g_autoptr(SmsMessage) row = NULL;
+      g_autoptr(GVariant) dict = NULL;
+      g_autoptr(SmsPart) part = NULL;
 
-      g_variant_get (parameters, "(&s&sx&s&s)", &destination, &text, &sent, &ext, &origin);
+      if (g_str_equal (method, "SentMedia"))
+        {
+          g_variant_get (parameters, "(&s&sx&s&s@a{sv})", &destination, &text, &sent, &ext, &origin, &dict);
+          part = sms_part_new_from_dict (dict);
+        }
+      else
+        g_variant_get (parameters, "(&s&sx&s&s)", &destination, &text, &sent, &ext, &origin);
       if (!sms_provider_is (destination) || !*text || !*origin || !g_strcmp0 (origin, "owner"))
         g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
                                                "Not a provider\'s destination, no text or no origin");
       else if (*ext && (message = sms_store_find_by_uri (self->store, ext)))
         g_dbus_method_invocation_return_value (invocation, g_variant_new ("(x)", message));
       else if (!(message = sms_store_add_sent (self->store, destination, text, sent > 0 ? sent : now,
-                                               *ext ? ext : NULL, origin))
+                                               *ext ? ext : NULL, origin, part))
                || !(row = sms_store_get_message (self->store, message)))
         g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR, G_DBUS_ERROR_FAILED, "Not kept");
       else
@@ -1332,16 +1351,24 @@ on_method_call (GDBusConnection *bus, const char *sender, const char *path, cons
       return;
     }
 
-  if (g_str_equal (method, "Receive"))
+  if (g_str_equal (method, "Receive") || g_str_equal (method, "ReceiveMedia"))
     {
       const char *destination, *ext, *name;
       gint64 sent, message;
+      g_autoptr(GVariant) dict = NULL;
+      g_autoptr(SmsPart) part = NULL;
 
-      g_variant_get (parameters, "(&s&sx&s&s)", &destination, &text, &sent, &ext, &name);
+      if (g_str_equal (method, "ReceiveMedia"))
+        {
+          g_variant_get (parameters, "(&s&sx&s&s@a{sv})", &destination, &text, &sent, &ext, &name, &dict);
+          part = sms_part_new_from_dict (dict);
+        }
+      else
+        g_variant_get (parameters, "(&s&sx&s&s)", &destination, &text, &sent, &ext, &name);
       if (!sms_provider_is (destination) || !*text)
         g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
                                                "Not a provider\'s destination, or no text");
-      else if (!(message = provider_receive (self, destination, text, sent, ext)))
+      else if (!(message = provider_receive (self, destination, text, sent, ext, part)))
         g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR, G_DBUS_ERROR_FAILED, "Not kept");
       else
         g_dbus_method_invocation_return_value (invocation, g_variant_new ("(x)", message));

@@ -224,6 +224,38 @@ withdrawable (ConversationView *self, const SmsMessage *message)
   return seconds > 0 && g_get_real_time () / 1000 - message->sent <= seconds * 1000;
 }
 
+/* the preview a typed part carried (a photo's, a video's, a sticker's, a map's), fitted inside media-preview-size
+ * keeping its shape; NULL when it has none or it is not an image */
+static GtkWidget *
+make_preview (ConversationView *self, const SmsPart *part)
+{
+  g_autoptr(GError) error = NULL;
+  g_autoptr(GdkTexture) texture = part->thumbnail ? gdk_texture_new_from_bytes (part->thumbnail, &error) : NULL;
+  guint box = g_settings_get_uint (self->settings, "media-preview-size");
+  /* the media's own shape when it is known, the preview's otherwise */
+  double w = part->width && part->height ? (double) part->width : texture ? gdk_texture_get_width (texture) : 0;
+  double h = part->width && part->height ? (double) part->height : texture ? gdk_texture_get_height (texture) : 0;
+  double scale;
+  GtkWidget *picture, *frame;
+
+  if (!texture)
+    {
+      if (error)
+        g_debug ("a preview that is not an image: %s", error->message);
+      return NULL;
+    }
+  scale = box / MAX (w, h);
+  picture = gtk_picture_new_for_paintable (GDK_PAINTABLE (texture));
+  gtk_picture_set_content_fit (GTK_PICTURE (picture), GTK_CONTENT_FIT_COVER);
+  gtk_picture_set_can_shrink (GTK_PICTURE (picture), TRUE);
+  gtk_widget_set_size_request (picture, MAX (1, (int) (w * scale)), MAX (1, (int) (h * scale)));
+  gtk_widget_add_css_class (picture, "msg-media-preview");
+  /* a picture's height follows the width it is given: in a horizontal box it is given its own, not the bubble's */
+  frame = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+  gtk_box_append (GTK_BOX (frame), picture);
+  return frame;
+}
+
 static GtkWidget *
 make_message (ConversationView *self, const SmsMessage *message, gboolean clustered_above,
               gboolean clustered_below)
@@ -273,6 +305,13 @@ make_message (ConversationView *self, const SmsMessage *message, gboolean cluste
   gtk_label_set_xalign (GTK_LABEL (text), 0);
   gtk_label_set_selectable (GTK_LABEL (text), FALSE);
   gtk_widget_add_css_class (text, "msg-message-text");
+  if (message->part)
+    {
+      GtkWidget *preview = make_preview (self, message->part);
+
+      if (preview)
+        gtk_box_append (GTK_BOX (content), preview);
+    }
   gtk_box_append (GTK_BOX (content), text);
   {
     g_autofree char *agent = agent_of (message);

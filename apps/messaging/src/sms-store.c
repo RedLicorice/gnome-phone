@@ -68,7 +68,14 @@ static const char schema[] =
   "  content_type TEXT,"
   "  timestamp INT,"
   "  conversation_id INT NOT NULL REFERENCES conversations(_id) ON DELETE CASCADE"
-  ");";
+  ");"
+  "CREATE INDEX IF NOT EXISTS index_parts_message ON parts (message_id);";
+
+/* a message's typed part (SmsPart): columns added to bugle_db's parts, where content_type and uri already are */
+static const char *const part_columns[] = {
+  "kind TEXT", "caption TEXT", "name TEXT", "size INT", "duration INT", "width INT", "height INT", "thumbnail BLOB",
+  "animated INT", "view_once INT", "latitude REAL", "longitude REAL", "url TEXT",
+};
 
 void
 sms_conversation_free (SmsConversation *conversation)
@@ -91,7 +98,50 @@ sms_message_free (SmsMessage *message)
   g_free (message->text);
   g_free (message->sms_uri);
   g_free (message->origin);
+  sms_part_free (message->part);
   g_free (message);
+}
+
+void
+sms_part_free (SmsPart *part)
+{
+  if (!part)
+    return;
+  g_free (part->kind);
+  g_free (part->mime);
+  g_free (part->caption);
+  g_free (part->name);
+  g_clear_pointer (&part->thumbnail, g_bytes_unref);
+  g_free (part->url);
+  g_free (part->uri);
+  g_free (part);
+}
+
+SmsPart *
+sms_part_new_from_dict (GVariant *dict)
+{
+  g_autoptr(GVariant) thumbnail = g_variant_lookup_value (dict, "thumbnail", G_VARIANT_TYPE_BYTESTRING);
+  SmsPart *part;
+
+  if (!g_variant_lookup (dict, "kind", "s", NULL))
+    return NULL;
+  part = g_new0 (SmsPart, 1);
+  g_variant_lookup (dict, "kind", "s", &part->kind);
+  g_variant_lookup (dict, "mime", "s", &part->mime);
+  g_variant_lookup (dict, "caption", "s", &part->caption);
+  g_variant_lookup (dict, "name", "s", &part->name);
+  g_variant_lookup (dict, "url", "s", &part->url);
+  g_variant_lookup (dict, "size", "t", &part->size);
+  g_variant_lookup (dict, "duration", "u", &part->duration);
+  g_variant_lookup (dict, "width", "u", &part->width);
+  g_variant_lookup (dict, "height", "u", &part->height);
+  g_variant_lookup (dict, "animated", "b", &part->animated);
+  g_variant_lookup (dict, "view-once", "b", &part->view_once);
+  part->located = g_variant_lookup (dict, "latitude", "d", &part->latitude)
+                  & g_variant_lookup (dict, "longitude", "d", &part->longitude);
+  if (thumbnail && g_variant_get_size (thumbnail))
+    part->thumbnail = g_variant_get_data_as_bytes (thumbnail);
+  return part;
 }
 
 static gboolean
@@ -182,6 +232,21 @@ sms_store_open (const char *path, gboolean read_only, GError **error)
   /* a store made before the origin column: the column added, every older row the owner's */
   if (query_int (self, prepare (self, "SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'origin'"), 1) == 0)
     exec (self, "ALTER TABLE messages ADD COLUMN origin TEXT", NULL);
+  /* a store made before typed parts: their columns added, every older part a text one */
+  for (guint i = 0; i < G_N_ELEMENTS (part_columns); i++)
+    {
+      g_autofree char *name = g_strndup (part_columns[i], strcspn (part_columns[i], " "));
+      sqlite3_stmt *has = prepare (self, "SELECT COUNT(*) FROM pragma_table_info('parts') WHERE name = ?");
+
+      if (has)
+        sqlite3_bind_text (has, 1, name, -1, SQLITE_TRANSIENT);
+      if (query_int (self, has, 1) == 0)
+        {
+          g_autofree char *add = g_strconcat ("ALTER TABLE parts ADD COLUMN ", part_columns[i], NULL);
+
+          exec (self, add, NULL);
+        }
+    }
   if (user_version == 0)
     {
       g_autofree char *set = g_strdup_printf ("PRAGMA user_version=%d", SCHEMA_VERSION);
@@ -341,9 +406,20 @@ refresh_conversation (SmsStore *self, gint64 conversation_id)
   run (self, update);
 }
 
+/* binds @text if any, else NULL */
+static void
+bind_text (sqlite3_stmt *statement, int column, const char *text)
+{
+  if (text)
+    sqlite3_bind_text (statement, column, text, -1, SQLITE_TRANSIENT);
+  else
+    sqlite3_bind_null (statement, column);
+}
+
 static gint64
 add_message (SmsStore *self, gint64 conversation_id, gint64 sender_id, const char *text, gint64 sent,
-             gint64 received, MessageStatus status, gboolean read, const char *sms_uri, const char *origin)
+             gint64 received, MessageStatus status, gboolean read, const char *sms_uri, const char *origin,
+             const SmsPart *typed)
 {
   sqlite3_stmt *insert = prepare (self, "INSERT INTO messages (conversation_id, sender_id, sent_timestamp,"
                                         " received_timestamp, message_protocol, message_status, seen, read,"
@@ -370,14 +446,37 @@ add_message (SmsStore *self, gint64 conversation_id, gint64 sender_id, const cha
   if (!run (self, insert))
     return 0;
   id = sqlite3_last_insert_rowid (self->db);
-  part = prepare (self, "INSERT INTO parts (message_id, text, content_type, timestamp, conversation_id)"
-                        " VALUES (?, ?, 'text/plain', ?, ?)");
+  part = prepare (self, "INSERT INTO parts (message_id, text, content_type, timestamp, conversation_id, kind, caption,"
+                        " name, size, duration, width, height, thumbnail, animated, view_once, latitude, longitude,"
+                        " url) VALUES (?, ?, IFNULL(?, 'text/plain'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
   if (!part)
     return 0;
   sqlite3_bind_int64 (part, 1, id);
   sqlite3_bind_text (part, 2, text ? text : "", -1, SQLITE_TRANSIENT);
-  sqlite3_bind_int64 (part, 3, received);
-  sqlite3_bind_int64 (part, 4, conversation_id);
+  bind_text (part, 3, typed ? typed->mime : NULL);
+  sqlite3_bind_int64 (part, 4, received);
+  sqlite3_bind_int64 (part, 5, conversation_id);
+  if (typed)
+    {
+      bind_text (part, 6, typed->kind);
+      bind_text (part, 7, typed->caption);
+      bind_text (part, 8, typed->name);
+      sqlite3_bind_int64 (part, 9, typed->size);
+      sqlite3_bind_int (part, 10, typed->duration);
+      sqlite3_bind_int (part, 11, typed->width);
+      sqlite3_bind_int (part, 12, typed->height);
+      if (typed->thumbnail)
+        sqlite3_bind_blob (part, 13, g_bytes_get_data (typed->thumbnail, NULL), g_bytes_get_size (typed->thumbnail),
+                           SQLITE_TRANSIENT);
+      sqlite3_bind_int (part, 14, typed->animated);
+      sqlite3_bind_int (part, 15, typed->view_once);
+      if (typed->located)
+        {
+          sqlite3_bind_double (part, 16, typed->latitude);
+          sqlite3_bind_double (part, 17, typed->longitude);
+        }
+      bind_text (part, 18, typed->url);
+    }
   if (!run (self, part))
     return 0;
   refresh_conversation (self, conversation_id);
@@ -386,7 +485,7 @@ add_message (SmsStore *self, gint64 conversation_id, gint64 sender_id, const cha
 
 gint64
 sms_store_add_incoming (SmsStore *self, const char *sender, const char *text, gint64 sent, gint64 received,
-                        const char *sms_uri)
+                        const char *sms_uri, const SmsPart *part)
 {
   const char *destinations[] = { sender, NULL };
   gint64 conversation_id, sender_id, id = 0;
@@ -395,7 +494,7 @@ sms_store_add_incoming (SmsStore *self, const char *sender, const char *text, gi
   exec (self, "BEGIN", NULL);
   if ((conversation_id = get_conversation (self, destinations)) && (sender_id = participant_id (self, sender)))
     id = add_message (self, conversation_id, sender_id, text, sent, received, MESSAGE_STATUS_INCOMING_COMPLETE,
-                      FALSE, sms_uri, NULL);
+                      FALSE, sms_uri, NULL, part);
   /* ReceiveSmsMessageAction: a new message brings an archived conversation back */
   if (id && (unarchive = prepare (self, "UPDATE conversations SET archive_status = 0 WHERE _id = ?")))
     {
@@ -408,7 +507,7 @@ sms_store_add_incoming (SmsStore *self, const char *sender, const char *text, gi
 
 gint64
 sms_store_add_sent (SmsStore *self, const char *destination, const char *text, gint64 sent, const char *sms_uri,
-                    const char *origin)
+                    const char *origin, const SmsPart *part)
 {
   const char *destinations[] = { destination, NULL };
   gint64 conversation_id, id = 0;
@@ -416,7 +515,7 @@ sms_store_add_sent (SmsStore *self, const char *destination, const char *text, g
   exec (self, "BEGIN", NULL);
   if ((conversation_id = get_conversation (self, destinations)))
     id = add_message (self, conversation_id, 0, text, sent, sent, MESSAGE_STATUS_OUTGOING_COMPLETE, TRUE, sms_uri,
-                      origin);
+                      origin, part);
   exec (self, id ? "COMMIT" : "ROLLBACK", NULL);
   return id;
 }
@@ -434,7 +533,8 @@ sms_store_add_outgoing (SmsStore *self, gint64 conversation_id, const char *text
       sqlite3_bind_int64 (draft, 1, conversation_id);
       run (self, draft);
     }
-  id = add_message (self, conversation_id, 0, text, now, now, MESSAGE_STATUS_OUTGOING_YET_TO_SEND, TRUE, NULL, origin);
+  id = add_message (self, conversation_id, 0, text, now, now, MESSAGE_STATUS_OUTGOING_YET_TO_SEND, TRUE, NULL, origin,
+                    NULL);
   exec (self, id ? "COMMIT" : "ROLLBACK", NULL);
   return id;
 }
@@ -658,8 +758,40 @@ sms_store_get (SmsStore *self, gint64 conversation_id)
   "SELECT m._id, m.conversation_id, p.normalized_destination," \
   " (SELECT group_concat(text, '') FROM parts WHERE message_id = m._id)," \
   " m.sent_timestamp, m.received_timestamp, m.message_status, m.read, m.seen, m.sms_message_uri, m.raw_status," \
-  " m.origin" \
-  " FROM messages m LEFT JOIN participants p ON p._id = m.sender_id"
+  " m.origin, t.kind, t.content_type, t.caption, t.name, t.size, t.duration, t.width, t.height, t.thumbnail," \
+  " t.animated, t.view_once, t.latitude, t.longitude, t.url, t.uri" \
+  " FROM messages m LEFT JOIN participants p ON p._id = m.sender_id" \
+  " LEFT JOIN parts t ON t.message_id = m._id AND t.kind IS NOT NULL"
+
+/* the typed part of a MESSAGE_COLUMNS row, or NULL for a text message */
+static SmsPart *
+part_from_row (sqlite3_stmt *row)
+{
+  SmsPart *part;
+  const void *thumbnail;
+
+  if (sqlite3_column_type (row, 12) == SQLITE_NULL)
+    return NULL;
+  part = g_new0 (SmsPart, 1);
+  part->kind = column_text (row, 12);
+  part->mime = column_text (row, 13);
+  part->caption = column_text (row, 14);
+  part->name = column_text (row, 15);
+  part->size = sqlite3_column_int64 (row, 16);
+  part->duration = sqlite3_column_int (row, 17);
+  part->width = sqlite3_column_int (row, 18);
+  part->height = sqlite3_column_int (row, 19);
+  if ((thumbnail = sqlite3_column_blob (row, 20)))
+    part->thumbnail = g_bytes_new (thumbnail, sqlite3_column_bytes (row, 20));
+  part->animated = sqlite3_column_int (row, 21);
+  part->view_once = sqlite3_column_int (row, 22);
+  part->located = sqlite3_column_type (row, 23) != SQLITE_NULL;
+  part->latitude = sqlite3_column_double (row, 23);
+  part->longitude = sqlite3_column_double (row, 24);
+  part->url = column_text (row, 25);
+  part->uri = column_text (row, 26);
+  return part;
+}
 
 /* oldest first; with a limit, only the newest that many (columns 6 and 1: received_timestamp and _id) */
 static GPtrArray *
@@ -695,6 +827,7 @@ list_messages (SmsStore *self, const char *where, gint64 value, guint limit)
       message->sms_uri = column_text (select, 9);
       message->raw_status = sqlite3_column_int (select, 10);
       message->origin = column_text (select, 11);
+      message->part = part_from_row (select);
       g_ptr_array_add (messages, message);
     }
   sqlite3_finalize (select);
