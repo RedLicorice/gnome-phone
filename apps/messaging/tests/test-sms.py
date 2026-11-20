@@ -540,6 +540,17 @@ def run_providers(t):
     n = t.wait('notified, with the provider named', lambda: t.notification('+49 170 1111111 \u00b7 WhatsApp')
                or t.notification('WhatsApp'))
     check('a notification came', n is not None, t.report()['notifications'])
+    # what the owner wrote from WhatsApp on his phone: sent, by its origin, read, once per network id, never Outgoing
+    t.outgoing.clear()
+    mine = t.service('Sent', (WHATSAPP, 'Arrivo', when + 1, 'WA-2', 'phone-wa'), '(ssxss)')[0]
+    check('Sent: kept as sent by the owner elsewhere, read', t.query(
+        'SELECT message_status, sender_id IS NULL, read, seen, origin FROM messages WHERE _id = ?', mine)
+          == [(COMPLETE, 1, 1, 1, 'phone-wa')])
+    check('the same network id twice is kept once, and no Outgoing',
+          t.service('Sent', (WHATSAPP, 'Arrivo', when + 1, 'WA-2', 'phone-wa'), '(ssxss)')[0] == mine
+          and not t.outgoing, t.outgoing)
+    check('Sent as the owner himself: InvalidArgs', t.error('Sent', (WHATSAPP, 'x', when, 'WA-3', 'owner'), '(ssxss)')
+          == invalid)
     t.outgoing.clear()
     sent = t.service('Send', (chat, 'Ciao Andrea'), '(xs)')[0]
     t.wait('Send: Outgoing, from the owner', lambda: (sent, chat, WHATSAPP, 'Ciao Andrea', 'owner') in t.outgoing)

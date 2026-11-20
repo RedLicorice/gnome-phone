@@ -93,6 +93,13 @@ static const char introspection[] =
   /* a message from a provider ('whatsapp:<number>', ...): kept as one that came into its conversation (made if new).
    * @sent the network's time in Unix ms (0: now), @ext the provider's message id (a repeat is kept once), @name its
    * name for the chat (not stored) */
+  /* what the owner wrote to a provider's chat elsewhere (its own app on his phone), as the provider saw it: kept as sent
+   * by @origin ('phone-wa'), read, no Outgoing and no notification; @sent the network's time in Unix ms (0: now),
+   * @ext its id (a repeat is kept once) */
+  "    <method name='Sent'><arg name='destination' type='s' direction='in'/>"
+  "      <arg name='text' type='s' direction='in'/><arg name='sent' type='x' direction='in'/>"
+  "      <arg name='ext' type='s' direction='in'/><arg name='origin' type='s' direction='in'/>"
+  "      <arg name='message' type='x' direction='out'/></method>"
   "    <method name='Receive'><arg name='destination' type='s' direction='in'/>"
   "      <arg name='text' type='s' direction='in'/><arg name='sent' type='x' direction='in'/>"
   "      <arg name='ext' type='s' direction='in'/><arg name='name' type='s' direction='in'/>"
@@ -1288,6 +1295,30 @@ on_method_call (GDBusConnection *bus, const char *sender, const char *path, cons
         }
       return;
     }
+  if (g_str_equal (method, "Sent"))
+    {
+      const char *destination, *ext, *origin;
+      gint64 sent, now = g_get_real_time () / 1000, message = 0;
+      g_autoptr(SmsMessage) row = NULL;
+
+      g_variant_get (parameters, "(&s&sx&s&s)", &destination, &text, &sent, &ext, &origin);
+      if (!sms_provider_is (destination) || !*text || !*origin || !g_strcmp0 (origin, "owner"))
+        g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                                               "Not a provider\'s destination, no text or no origin");
+      else if (*ext && (message = sms_store_find_by_uri (self->store, ext)))
+        g_dbus_method_invocation_return_value (invocation, g_variant_new ("(x)", message));
+      else if (!(message = sms_store_add_sent (self->store, destination, text, sent > 0 ? sent : now,
+                                               *ext ? ext : NULL, origin))
+               || !(row = sms_store_get_message (self->store, message)))
+        g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR, G_DBUS_ERROR_FAILED, "Not kept");
+      else
+        {
+          emit_changed (self, row->conversation_id);
+          g_dbus_method_invocation_return_value (invocation, g_variant_new ("(x)", message));
+        }
+      return;
+    }
+
   if (g_str_equal (method, "Receive"))
     {
       const char *destination, *ext, *name;

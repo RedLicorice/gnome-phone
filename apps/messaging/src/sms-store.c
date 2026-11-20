@@ -407,6 +407,21 @@ sms_store_add_incoming (SmsStore *self, const char *sender, const char *text, gi
 }
 
 gint64
+sms_store_add_sent (SmsStore *self, const char *destination, const char *text, gint64 sent, const char *sms_uri,
+                    const char *origin)
+{
+  const char *destinations[] = { destination, NULL };
+  gint64 conversation_id, id = 0;
+
+  exec (self, "BEGIN", NULL);
+  if ((conversation_id = get_conversation (self, destinations)))
+    id = add_message (self, conversation_id, 0, text, sent, sent, MESSAGE_STATUS_OUTGOING_COMPLETE, TRUE, sms_uri,
+                      origin);
+  exec (self, id ? "COMMIT" : "ROLLBACK", NULL);
+  return id;
+}
+
+gint64
 sms_store_add_outgoing (SmsStore *self, gint64 conversation_id, const char *text, gint64 now, const char *origin)
 {
   sqlite3_stmt *draft;
