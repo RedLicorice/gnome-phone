@@ -32,6 +32,8 @@ void       sms_client_set_archived (SmsClient *self, gint64 conversation, gboole
 void       sms_client_set_draft (SmsClient *self, gint64 conversation, const char *text);
 void       sms_client_delete_conversation (SmsClient *self, gint64 conversation);
 void       sms_client_delete_message (SmsClient *self, gint64 message);
+/* the media of a provider's message, which is not on the phone, is asked for: Changed tells when it is */
+void       sms_client_fetch_media (SmsClient *self, gint64 message);
 /* what is in front: -1 nothing, 0 the conversation list at its top, else that conversation */
 void       sms_client_set_visible (SmsClient *self, gint64 conversation);
 

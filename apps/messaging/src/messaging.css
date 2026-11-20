@@ -471,3 +471,8 @@
   border-radius: 8px;
   margin-bottom: 4px;
 }
+
+/* a sticker has its own outline: no corners cut */
+.msg-media-preview.sticker {
+  border-radius: 0;
+}

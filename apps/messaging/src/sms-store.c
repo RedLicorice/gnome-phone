@@ -584,6 +584,18 @@ sms_store_set_sms_uri (SmsStore *self, gint64 message_id, const char *sms_uri)
   run (self, update);
 }
 
+void
+sms_store_set_media (SmsStore *self, gint64 message_id, const char *uri)
+{
+  sqlite3_stmt *update = prepare (self, "UPDATE parts SET uri = ? WHERE message_id = ? AND kind IS NOT NULL");
+
+  if (!update)
+    return;
+  bind_text (update, 1, uri);
+  sqlite3_bind_int64 (update, 2, message_id);
+  run (self, update);
+}
+
 static guint
 mark (SmsStore *self, const char *sql, gint64 conversation_id)
 {

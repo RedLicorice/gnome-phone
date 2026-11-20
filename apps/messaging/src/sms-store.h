@@ -110,6 +110,8 @@ gint64    sms_store_add_outgoing (SmsStore *store, gint64 conversation_id, const
 void      sms_store_set_status (SmsStore *store, gint64 message_id, MessageStatus status, int raw_status,
                                 gint64 sent);
 void      sms_store_set_sms_uri (SmsStore *store, gint64 message_id, const char *sms_uri);
+/* the media of the message's typed part is at @uri (a path on this phone) */
+void      sms_store_set_media (SmsStore *store, gint64 message_id, const char *uri);
 /* the messages are read (the conversation was shown) and seen (their notification can go); how many changed */
 guint     sms_store_mark_read (SmsStore *store, gint64 conversation_id);
 guint     sms_store_mark_seen (SmsStore *store, gint64 conversation_id);

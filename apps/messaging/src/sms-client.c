@@ -131,6 +131,12 @@ sms_client_delete_conversation (SmsClient *self, gint64 conversation)
 }
 
 void
+sms_client_fetch_media (SmsClient *self, gint64 message)
+{
+  call (self, "FetchMedia", g_variant_new ("(x)", message));
+}
+
+void
 sms_client_delete_message (SmsClient *self, gint64 message)
 {
   call (self, "DeleteMessage", g_variant_new ("(x)", message));

@@ -9,6 +9,7 @@
 #include "msg-dialog.h"
 #include "msg-image.h"
 #include "msg-markdown.h"
+#include "msg-media.h"
 #include "msg-people.h"
 #include "msg-directory.h"
 #include "msg-sound.h"
@@ -155,6 +156,36 @@ status_text (ConversationView *self, const SmsMessage *message, gboolean last_of
 
 static void select_message (ConversationView *self, gint64 id);
 
+/* a provider's message tapped: its media opened in the app that shows its type, a place on the map; media that is
+ * not on the phone is asked for, and the conversation changes when it is */
+static void
+open_media (ConversationView *self, const SmsMessage *message)
+{
+  GtkWindow *window = GTK_WINDOW (gtk_widget_get_root (GTK_WIDGET (self)));
+  const SmsPart *part = message->part;
+
+  if (msg_media_is_here (part))
+    {
+      g_autoptr(GFile) file = g_file_new_for_path (part->uri);
+      g_autoptr(GtkFileLauncher) launcher = gtk_file_launcher_new (file);
+
+      gtk_file_launcher_launch (launcher, window, NULL, NULL, NULL);
+    }
+  else if (part->located || part->url)
+    {
+      char lat[G_ASCII_DTOSTR_BUF_SIZE], lon[G_ASCII_DTOSTR_BUF_SIZE];
+      g_autofree char *geo = part->located ? g_strdup_printf ("geo:%s,%s",
+                                                              g_ascii_dtostr (lat, sizeof lat, part->latitude),
+                                                              g_ascii_dtostr (lon, sizeof lon, part->longitude)) : NULL;
+      g_autoptr(GtkUriLauncher) launcher = gtk_uri_launcher_new (part->url ? part->url : geo);
+
+      gtk_uri_launcher_launch (launcher, window, NULL, NULL, NULL);
+    }
+  /* only media has a type: a contact's or a poll's message has nothing to download */
+  else if (message->sms_uri && part->mime)
+    sms_client_fetch_media (self->client, message->id);
+}
+
 static void
 on_bubble_clicked (GtkWidget *pressable, gpointer data)
 {
@@ -172,6 +203,8 @@ on_bubble_clicked (GtkWidget *pressable, gpointer data)
   message = store ? sms_store_get_message (store, id) : NULL;
   if (message && message->status == MESSAGE_STATUS_OUTGOING_FAILED)
     sms_client_resend (self->client, id);
+  else if (message && message->part)
+    open_media (self, message);
 }
 
 static void
@@ -224,38 +257,6 @@ withdrawable (ConversationView *self, const SmsMessage *message)
   return seconds > 0 && g_get_real_time () / 1000 - message->sent <= seconds * 1000;
 }
 
-/* the preview a typed part carried (a photo's, a video's, a sticker's, a map's), fitted inside media-preview-size
- * keeping its shape; NULL when it has none or it is not an image */
-static GtkWidget *
-make_preview (ConversationView *self, const SmsPart *part)
-{
-  g_autoptr(GError) error = NULL;
-  g_autoptr(GdkTexture) texture = part->thumbnail ? gdk_texture_new_from_bytes (part->thumbnail, &error) : NULL;
-  guint box = g_settings_get_uint (self->settings, "media-preview-size");
-  /* the media's own shape when it is known, the preview's otherwise */
-  double w = part->width && part->height ? (double) part->width : texture ? gdk_texture_get_width (texture) : 0;
-  double h = part->width && part->height ? (double) part->height : texture ? gdk_texture_get_height (texture) : 0;
-  double scale;
-  GtkWidget *picture, *frame;
-
-  if (!texture)
-    {
-      if (error)
-        g_debug ("a preview that is not an image: %s", error->message);
-      return NULL;
-    }
-  scale = box / MAX (w, h);
-  picture = gtk_picture_new_for_paintable (GDK_PAINTABLE (texture));
-  gtk_picture_set_content_fit (GTK_PICTURE (picture), GTK_CONTENT_FIT_COVER);
-  gtk_picture_set_can_shrink (GTK_PICTURE (picture), TRUE);
-  gtk_widget_set_size_request (picture, MAX (1, (int) (w * scale)), MAX (1, (int) (h * scale)));
-  gtk_widget_add_css_class (picture, "msg-media-preview");
-  /* a picture's height follows the width it is given: in a horizontal box it is given its own, not the bubble's */
-  frame = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-  gtk_box_append (GTK_BOX (frame), picture);
-  return frame;
-}
-
 static GtkWidget *
 make_message (ConversationView *self, const SmsMessage *message, gboolean clustered_above,
               gboolean clustered_below)
@@ -273,7 +274,8 @@ make_message (ConversationView *self, const SmsMessage *message, gboolean cluste
   g_autofree char *weight = g_settings_get_string (self->settings, "markdown-strong-weight");
   g_autofree char *markup = message->text && g_settings_get_boolean (self->settings, "markdown") ?
                             msg_markdown_to_pango (message->text, weight) : NULL;
-  GtkWidget *bubble, *pressable;
+  g_auto(GStrv) unlabelled = g_settings_get_strv (self->settings, "media-unlabelled");
+  GtkWidget *bubble, *pressable, *preview = NULL;
   GdkRGBA color;
 
   /* the sender's, or for the ones sent from here "Me": hidden but keeping its place within a cluster */
@@ -296,7 +298,16 @@ make_message (ConversationView *self, const SmsMessage *message, gboolean cluste
       g_signal_connect (avatar, "long-pressed", G_CALLBACK (on_bubble_long_pressed), NULL);
     }
 
-  if (markup)
+  if (message->part)
+    preview = msg_media_new (message->part, g_settings_get_uint (self->settings, "media-preview-size"));
+  /* a picture that says what it is: only its caption */
+  if (preview && g_strv_contains ((const char * const *) unlabelled, message->part->kind))
+    {
+      g_clear_pointer (&markup, g_free);
+      gtk_label_set_text (GTK_LABEL (text), message->part->caption ? message->part->caption : "");
+      gtk_widget_set_visible (text, message->part->caption != NULL);
+    }
+  else if (markup)
     gtk_label_set_markup (GTK_LABEL (text), markup);
   else if (message->text)
     gtk_label_set_text (GTK_LABEL (text), message->text);
@@ -305,13 +316,8 @@ make_message (ConversationView *self, const SmsMessage *message, gboolean cluste
   gtk_label_set_xalign (GTK_LABEL (text), 0);
   gtk_label_set_selectable (GTK_LABEL (text), FALSE);
   gtk_widget_add_css_class (text, "msg-message-text");
-  if (message->part)
-    {
-      GtkWidget *preview = make_preview (self, message->part);
-
-      if (preview)
-        gtk_box_append (GTK_BOX (content), preview);
-    }
+  if (preview)
+    gtk_box_append (GTK_BOX (content), preview);
   gtk_box_append (GTK_BOX (content), text);
   {
     g_autofree char *agent = agent_of (message);
@@ -381,6 +387,9 @@ make_message (ConversationView *self, const SmsMessage *message, gboolean cluste
     color = msg_avatar_color (sender->identifier);
   else
     gdk_rgba_parse (&color, "#33666d");
+  /* a sticker shown on its own is drawn without a bubble, but a selected one still shows it is selected */
+  if (preview && !selected && g_strcmp0 (message->part->kind, "sticker") == 0 && !message->part->caption)
+    color.alpha = 0;
   msg_bubble_set_color (MSG_BUBBLE (bubble), &color);
   pressable = neo_pressable_new (bubble);
   neo_pressable_set_ripple (NEO_PRESSABLE (pressable), NEO_RIPPLE_NONE, 0);

@@ -40,6 +40,13 @@
       <description>The largest width or height, in pixels, of a photo, video, sticker or map preview in a conversation</description>
     </key>
 
+    <!-- a picture that says what it is needs no "foto" or "sticker" under it: only its caption, if it has one -->
+    <key name="media-unlabelled" type="as">
+      <default>['image', 'gif', 'sticker']</default>
+      <summary>Media shown without its label</summary>
+      <description>The kinds of media whose picture is shown with only its caption, not its label (foto, GIF, sticker)</description>
+    </key>
+
     <!-- agents write Markdown (**bold**, `code`, lists): a message's text is drawn formatted (msg-markdown.c), its
          copy stays the text as written -->
     <key name="markdown" type="b">
