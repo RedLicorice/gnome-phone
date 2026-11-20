@@ -1102,6 +1102,7 @@ static const struct {
   { "budget", ns_page_minerva_budget },
   { "network", ns_page_minerva_network },
   { "kiosk", ns_page_minerva_kiosk },
+  { "avatar", ns_page_minerva_avatar },
   { "self_notebook", open_self_notebook },
 };
 

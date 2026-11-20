@@ -82,6 +82,9 @@ static const Entry entries[] = {
   { "network-wireless-symbolic", "green", "Rete", "Wi-Fi • Dati mobili • Controllo di internet • Ripristino",
     "rete network wifi dati mobili sim internet offline controllo ripristino soglia segnale debole connectivity",
     ns_page_minerva_network, NULL, NULL, ns_minerva_available, TRUE },
+  { "face-smile-big-symbolic", "pink", "Avatar", "Dimensioni • Animazione • Aspetto • Occhi • Gesti",
+    "avatar viso faccia face dimensione grandezza size animazione aspetto colore occhi gesti tocco pulsante flottante fab",
+    ns_page_minerva_avatar, NULL, NULL, ns_minerva_available, TRUE },
   { "video-display-symbolic", "blue", "Kiosk", "Orientamento • Resta acceso (dock)",
     "kiosk orientamento orientation ruota rotazione orizzontale verticale landscape portrait dock resta acceso carica "
     "schermo", ns_page_minerva_kiosk, NULL, NULL, ns_minerva_available, TRUE },
@@ -524,6 +527,7 @@ static const struct {
   { "budget", ns_page_minerva_budget }, { "budgets", ns_page_minerva_budget }, { "spesa", ns_page_minerva_budget },
   { "minerva-network", ns_page_minerva_network }, { "rete", ns_page_minerva_network },
   { "minerva-kiosk", ns_page_minerva_kiosk }, { "kiosk", ns_page_minerva_kiosk },
+  { "minerva-avatar", ns_page_minerva_avatar }, { "avatar", ns_page_minerva_avatar },
   { "events", ns_page_events }, { "eventi", ns_page_events },
   { "messaging", ns_page_messaging }, { "messaggi", ns_page_messaging },
   { "chat", ns_page_messaging }, { "chats", ns_page_messaging },
