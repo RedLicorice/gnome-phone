@@ -6,6 +6,12 @@
 #include <gio/gio.h>
 #include <glib/gi18n.h>
 #include <langinfo.h>
+#include <locale.h>
+#include <unicode/udat.h>
+#include <unicode/udatpg.h>
+#include <unicode/udateintervalformat.h>
+#include <unicode/uloc.h>
+#include <unicode/ustring.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,6 +34,129 @@ cal_format_uses_24h (void)
   settings = g_settings_new ("org.gnome.desktop.interface");
   format = g_settings_get_string (settings, "clock-format");
   return g_strcmp0 (format, "12h") != 0;
+}
+
+/* the ICU locale of a POSIX category ("it_IT.UTF-8@euro" is it_IT; the POSIX locale is ICU's en_US, as glibc's C) */
+static const char *
+icu_locale (int category, char *id, size_t size)
+{
+  const char *posix = setlocale (category, NULL);
+  size_t n;
+
+  if (!posix || g_str_equal (posix, "C") || g_str_has_prefix (posix, "C.") || g_str_equal (posix, "POSIX"))
+    return "en_US";
+  n = strcspn (posix, ".@");
+  if (n >= size)
+    return "en_US";
+  memcpy (id, posix, n);
+  id[n] = 0;
+  return id;
+}
+
+const char *
+cal_format_date_locale (void)
+{
+  static char id[ULOC_FULLNAME_CAPACITY];
+
+  return icu_locale (LC_TIME, id, sizeof id);
+}
+
+/* the language of the sentences (LC_MESSAGES): a weekday inside "Weekly on Sunday" is in it */
+static const char *
+messages_locale (void)
+{
+  static char id[ULOC_FULLNAME_CAPACITY];
+
+  return icu_locale (LC_MESSAGES, id, sizeof id);
+}
+
+/* an ICU format for the LC_TIME locale, a skeleton and a zone, made once (the views format at every draw) */
+static UDateFormat *
+skeleton_format (const char *locale, const char *skeleton)
+{
+  static GHashTable *formats;
+  g_autofree char *key = g_strjoin ("|", locale, skeleton, NULL);
+  UDateFormat *format;
+  UErrorCode status = U_ZERO_ERROR;
+  UDateTimePatternGenerator *generator;
+  UChar wanted[32], pattern[128], utc[] = { 'U', 'T', 'C', 0 };
+  int32_t length;
+
+  if (!formats)
+    formats = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) udat_close);
+  if ((format = g_hash_table_lookup (formats, key)))
+    return format;
+  if (strlen (skeleton) >= G_N_ELEMENTS (wanted))
+    return NULL;
+  generator = udatpg_open (locale, &status);
+  if (U_FAILURE (status))
+    return NULL;
+  u_uastrcpy (wanted, skeleton);
+  length = udatpg_getBestPattern (generator, wanted, -1, pattern, G_N_ELEMENTS (pattern), &status);
+  udatpg_close (generator);
+  if (U_FAILURE (status))
+    return NULL;
+  /* in UTC: the caller's wall clock is shifted there (format_skeleton), whatever zone it is in */
+  format = udat_open (UDAT_PATTERN, UDAT_PATTERN, locale, utc, -1, pattern, length, &status);
+  if (U_FAILURE (status))
+    return NULL;
+  g_hash_table_insert (formats, g_steal_pointer (&key), format);
+  return format;
+}
+
+/* a day or a time in the LC_TIME locale's own order for an ICU skeleton (DateFormat.getBestDateTimePattern) */
+static char *
+format_skeleton_in (GDateTime *time, const char *skeleton, const char *locale)
+{
+  UDateFormat *format = skeleton_format (locale, skeleton);
+  /* the wall clock of the time's own zone, as a UTC instant */
+  UDate wall = ((double) g_date_time_to_unix (time) + g_date_time_get_utc_offset (time) / G_TIME_SPAN_SECOND) * 1000.0;
+  UErrorCode status = U_ZERO_ERROR;
+  UChar text[256];
+  int32_t length;
+  char *out = NULL;
+
+  if (!format)
+    return g_date_time_format (time, "%x");
+  length = udat_format (format, wall, text, G_N_ELEMENTS (text), NULL, &status);
+  if (U_SUCCESS (status))
+    out = g_utf16_to_utf8 ((const gunichar2 *) text, length, NULL, NULL, NULL);
+  return out ? out : g_date_time_format (time, "%x");
+}
+
+char *
+cal_format_skeleton (GDateTime *time, const char *skeleton)
+{
+  return format_skeleton_in (time, skeleton, cal_format_date_locale ());
+}
+
+static GDateTime *local_day (int day);
+static char *weekday_name (int weekday, gboolean abbreviated);
+
+/* two days as one interval in the LC_TIME locale ("November 9 – 11", "9–11 novembre"; DateUtils.formatDateRange) */
+static char *
+format_day_interval (int first, int last, const char *skeleton)
+{
+  UErrorCode status = U_ZERO_ERROR;
+  UChar wanted[32], text[256], utc[] = { 'U', 'T', 'C', 0 };
+  g_autoptr(GDateTime) a = local_day (first), b = local_day (last);
+  UDateIntervalFormat *format;
+  int32_t length;
+  char *out = NULL;
+
+  u_uastrcpy (wanted, skeleton);
+  format = udtitvfmt_open (cal_format_date_locale (), wanted, -1, utc, -1, &status);
+  if (U_FAILURE (status))
+    return NULL;
+  /* the wall clocks as UTC instants, as format_skeleton_in */
+  length = udtitvfmt_format (format,
+                             ((double) g_date_time_to_unix (a) + g_date_time_get_utc_offset (a) / G_TIME_SPAN_SECOND) * 1000.0,
+                             ((double) g_date_time_to_unix (b) + g_date_time_get_utc_offset (b) / G_TIME_SPAN_SECOND) * 1000.0,
+                             text, G_N_ELEMENTS (text), NULL, &status);
+  if (U_SUCCESS (status))
+    out = g_utf16_to_utf8 ((const gunichar2 *) text, length, NULL, NULL, NULL);
+  udtitvfmt_close (format);
+  return out;
 }
 
 static GDateTime *
@@ -62,64 +191,68 @@ cal_format_time_range (gint64 start, gint64 end)
 }
 
 static char *
-format_day (int day, const char *format)
+format_day (int day, const char *skeleton)
 {
   g_autoptr(GDateTime) local = local_day (day);
 
-  return g_date_time_format (local, format);
+  return cal_format_skeleton (local, skeleton);
 }
 
 char *
 cal_format_month_year (int day)
 {
-  /* TRANSLATORS: strftime; the toolbar of the Week and Month views, "November 2026" */
-  return format_day (day, C_("date", "%B %Y"));
+  /* the toolbar of the Week and Month views, "November 2026" */
+  return format_day (day, "MMMMy");
 }
 
 char *
 cal_format_full_date (int day)
 {
-  /* TRANSLATORS: strftime; "November 7, 2026" (DateUtils FORMAT_SHOW_DATE | FORMAT_SHOW_YEAR) */
-  return format_day (day, C_("date", "%B %-d, %Y"));
+  /* "November 7, 2026" (DateUtils FORMAT_SHOW_DATE | FORMAT_SHOW_YEAR) */
+  return format_day (day, "MMMMdy");
 }
 
 char *
 cal_format_month_day (int day)
 {
-  /* TRANSLATORS: strftime; "November 7" */
-  return format_day (day, C_("date", "%B %-d"));
+  /* "November 7" */
+  return format_day (day, "MMMMd");
 }
 
 char *
 cal_format_weekday (int day)
 {
-  return format_day (day, "%A");
+  return format_day (day, "EEEE");
 }
 
 char *
 cal_format_weekday_short (int day)
 {
-  return format_day (day, "%a");
+  return format_day (day, "EEE");
 }
 
 char *
 cal_format_editor_date (int day)
 {
-  /* TRANSLATORS: strftime; "Sun, Nov 1, 2026" (SHOW_DATE | SHOW_YEAR | SHOW_WEEKDAY | ABBREV_MONTH | ABBREV_WEEKDAY) */
-  return format_day (day, C_("date", "%a, %b %-d, %Y"));
+  /* "Sun, Nov 1, 2026" (SHOW_DATE | SHOW_YEAR | SHOW_WEEKDAY | ABBREV_MONTH | ABBREV_WEEKDAY) */
+  return format_day (day, "EEEMMMdy");
 }
 
 char *
 cal_format_picker_date (int day)
 {
-  /* TRANSLATORS: strftime; the date picker's header, "Nov 1, 2026" */
-  return format_day (day, C_("date", "%b %-d, %Y"));
+  /* the date picker's header, "Nov 1, 2026" */
+  return format_day (day, "MMMdy");
 }
 
 char *
 cal_format_relative_weekday (int day, int today)
 {
-  g_autofree char *weekday = cal_format_weekday (day);
+  g_autoptr(GDateTime) date = local_day (day);
+  /* alone, the weekday is a date (LC_TIME); inside "Today, %s" it is a word of the sentence (LC_MESSAGES) */
+  g_autofree char *weekday = day >= today - 1 && day <= today + 1
+                             ? weekday_name (g_date_time_get_day_of_week (date) % 7, FALSE)
+                             : cal_format_weekday (day);
 
   /* agenda_today, agenda_yesterday, agenda_tomorrow (S:329-333) */
   if (day == today)
@@ -137,11 +270,11 @@ weekday_date (int day, int today)
 {
   g_autoptr(GDateTime) a = local_day (day), b = local_day (today);
 
+  /* "Thursday, April 12" */
   if (g_date_time_get_year (a) == g_date_time_get_year (b))
-    /* TRANSLATORS: strftime; "Thursday, April 12" */
-    return g_date_time_format (a, C_("date", "%A, %B %-d"));
-  /* TRANSLATORS: strftime; "Thursday, April 12, 2027" */
-  return g_date_time_format (a, C_("date", "%A, %B %-d, %Y"));
+    return cal_format_skeleton (a, "EEEEMMMMd");
+  /* "Thursday, April 12, 2027" */
+  return cal_format_skeleton (a, "EEEEMMMMdy");
 }
 
 char *
@@ -184,9 +317,9 @@ cal_format_event_when (gint64 start, gint64 end, gboolean all_day, gint64 now)
   /* over several days: "Fri, Apr 6, 17:00 – Sun, Apr 8, 18:00" (ABBREV_MONTH | ABBREV_WEEKDAY) */
   {
     g_autoptr(GDateTime) a = local_time (start), b = local_time (end);
-    /* TRANSLATORS: strftime; the date of a multi-day event's start or end, "Fri, Apr 6" */
-    g_autofree char *da = g_date_time_format (a, C_("date", "%a, %b %-d"));
-    g_autofree char *db = g_date_time_format (b, C_("date", "%a, %b %-d"));
+  /* the date of a multi-day event's start or end, "Fri, Apr 6" */
+    g_autofree char *da = cal_format_skeleton (a, "EEEMMMd");
+    g_autofree char *db = cal_format_skeleton (b, "EEEMMMd");
     g_autofree char *ta = cal_format_time (start), *tb = cal_format_time (end);
 
     return g_strdup_printf ("%s, %s" RANGE "%s, %s", da, ta, db, tb);
@@ -199,14 +332,14 @@ cal_format_agenda_when (gint64 start, gint64 end, gboolean all_day)
   if (all_day)
     {
       int first = cal_day_number (start), last = end > start ? cal_day_number (end - 1) : first;
-      g_autofree char *a = cal_format_month_day (first);
+      char *range;
 
       if (first == last)
-        return g_steal_pointer (&a);
+        return cal_format_month_day (first);
+      if ((range = format_day_interval (first, last, "MMMMd")))
+        return range;
       {
-        g_autoptr(GDateTime) x = local_day (first), y = local_day (last);
-        g_autofree char *b = g_date_time_get_month (x) == g_date_time_get_month (y)
-                             ? g_date_time_format (y, "%-d") : cal_format_month_day (last);
+        g_autofree char *a = cal_format_month_day (first), *b = cal_format_month_day (last);
 
         return g_strconcat (a, RANGE, b, NULL);
       }
@@ -215,9 +348,9 @@ cal_format_agenda_when (gint64 start, gint64 end, gboolean all_day)
     {
       /* over midnight: DateUtils adds the dates, "Nov 9, 22:00 – Nov 10, 02:00" */
       g_autoptr(GDateTime) a = local_time (start), b = local_time (end);
-      /* TRANSLATORS: strftime; "Nov 9" */
-      g_autofree char *da = g_date_time_format (a, C_("date", "%b %-d"));
-      g_autofree char *db = g_date_time_format (b, C_("date", "%b %-d"));
+  /* "Nov 9" */
+      g_autofree char *da = cal_format_skeleton (a, "MMMd");
+      g_autofree char *db = cal_format_skeleton (b, "MMMd");
       g_autofree char *ta = cal_format_time (start), *tb = cal_format_time (end);
 
       return g_strdup_printf ("%s, %s" RANGE "%s, %s", da, ta, db, tb);
@@ -236,8 +369,8 @@ cal_format_reminder_text (gint64 start, gboolean all_day, const char *location, 
   if (day < today || day > today + 1)
     {
       g_autoptr(GDateTime) local = local_time (start);
-      /* TRANSLATORS: strftime; "Nov 9" */
-      g_autofree char *date = g_date_time_format (local, C_("date", "%b %-d"));
+  /* "Nov 9" */
+      g_autofree char *date = cal_format_skeleton (local, "MMMd");
 
       g_string_append (text, date);
       if (!all_day)
@@ -314,7 +447,32 @@ weekday_name (int weekday, gboolean abbreviated)
   /* 2023-01-01 was a Sunday */
   g_autoptr(GDateTime) date = g_date_time_new_local (2023, 1, 1 + weekday, 12, 0, 0);
 
-  return g_date_time_format (date, abbreviated ? "%a" : "%A");
+  return format_skeleton_in (date, abbreviated ? "EEE" : "EEEE", messages_locale ());
+}
+
+/* repeat_by_nth_sun … _sat: "on every [first … fourth, last] [weekday]", one string each for the languages whose
+ * words change with the weekday's gender */
+static const char *const repeat_by_nth[7][5] = {
+  { N_("on every first Sunday"), N_("on every second Sunday"), N_("on every third Sunday"),
+    N_("on every fourth Sunday"), N_("on every last Sunday") },
+  { N_("on every first Monday"), N_("on every second Monday"), N_("on every third Monday"),
+    N_("on every fourth Monday"), N_("on every last Monday") },
+  { N_("on every first Tuesday"), N_("on every second Tuesday"), N_("on every third Tuesday"),
+    N_("on every fourth Tuesday"), N_("on every last Tuesday") },
+  { N_("on every first Wednesday"), N_("on every second Wednesday"), N_("on every third Wednesday"),
+    N_("on every fourth Wednesday"), N_("on every last Wednesday") },
+  { N_("on every first Thursday"), N_("on every second Thursday"), N_("on every third Thursday"),
+    N_("on every fourth Thursday"), N_("on every last Thursday") },
+  { N_("on every first Friday"), N_("on every second Friday"), N_("on every third Friday"),
+    N_("on every fourth Friday"), N_("on every last Friday") },
+  { N_("on every first Saturday"), N_("on every second Saturday"), N_("on every third Saturday"),
+    N_("on every fourth Saturday"), N_("on every last Saturday") },
+};
+
+const char *
+cal_format_nth_weekday (int weekday, int nth)
+{
+  return _(repeat_by_nth[CLAMP (weekday, 0, 6)][CLAMP (nth, 0, 4)]);
 }
 
 char *
@@ -387,8 +545,8 @@ cal_format_rrule (const char *rrule, gint64 start)
 
       if (date)
         {
-          /* TRANSLATORS: strftime; a repeat rule's end date, numeric (FORMAT_NUMERIC_DATE) */
-          g_autofree char *text_date = g_date_time_format (date, C_("date", "%-m/%-d/%Y"));
+  /* a repeat rule's end date, numeric (FORMAT_NUMERIC_DATE) */
+          g_autofree char *text_date = cal_format_skeleton (date, "yMd");
 
           g_string_append_printf (end, _("; until %s"), text_date);
         }
@@ -431,12 +589,11 @@ cal_format_rrule (const char *rrule, gint64 start)
     {
       if (nth_byday && n_days == 1)
         {
-          static const char *nth[] = { N_("first"), N_("second"), N_("third"), N_("fourth"), N_("last") };
           int week = (g_date_time_get_day_of_month (first) - 1) / 7;
-          g_autofree char *name = weekday_name (g_date_time_get_day_of_week (first) % 7, FALSE);
 
-          /* repeat_by_nth_*: "on every first Monday" */
-          text = g_strdup_printf (_("Monthly (on every %s %s)"), _(nth[MIN (week, 4)]), name);
+          /* repeat_by_nth_*: "Monthly (on every first Monday)", one phrase per weekday and week */
+          text = g_strdup_printf (_("Monthly (%s)"),
+                                  cal_format_nth_weekday (g_date_time_get_day_of_week (first) % 7, MIN (week, 4)));
         }
       else
         text = g_strdup (_("Monthly"));

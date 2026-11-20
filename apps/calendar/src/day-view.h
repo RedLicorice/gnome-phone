@@ -31,6 +31,8 @@ void       cal_day_view_set_first_day  (CalDayView *self, int first_day);
 int        cal_day_view_get_first_day  (CalDayView *self);
 /* the events of the shown period and the periods either side (for a swipe), sorted by cal_event_compare */
 void       cal_day_view_set_events     (CalDayView *self, GPtrArray *events);
+/* where Minerva's run history begins (0: none) and the text its line carries */
+void       cal_day_view_set_history    (CalDayView *self, gint64 history, const char *text);
 void       cal_day_view_set_cell_height (CalDayView *self, double cell_height);
 /* Staggered display: overlapping timed events overlap, each later column narrower and shadowed, its title where it
  * shows (Event.computePositions with drawStaggered, EventGeometry) */

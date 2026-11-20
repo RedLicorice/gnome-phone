@@ -60,6 +60,8 @@ struct _CalDayView {
   GPtrArray *timed;             /* those drawn in the grid, laid out together */
   GPtrArray *all_day;           /* those drawn in the all-day area, laid out together */
   gboolean staggered;           /* Staggered display */
+  gint64 history;               /* where Minerva's run history begins (0: not shown), and what its line says */
+  char *history_text;
 
   double cell_height;           /* one hour, dp, without the gap */
   double view_start_y;          /* the grid's scroll, dp */
@@ -395,7 +397,7 @@ event_color (CalDayView *self, CalEvent *event)
 {
   if (event == self->clicked)
     return CAL_CLICKED;
-  if (event->self_status == CAL_STATUS_DECLINED)
+  if (cal_event_faded (event))
     return cal_declined_color (cal_event_display_color (event));
   return 0xff000000 | cal_event_display_color (event);
 }
@@ -586,7 +588,7 @@ draw_all_day_events (CalDayView *self, GtkSnapshot *snapshot, const Metrics *m, 
         fill (snapshot, CAL_MORE_EVENTS, x + EVENT_SQUARE_WIDTH - 1, sy - 1, EVENT_RECT_STROKE_WIDTH,
               EVENT_SQUARE_WIDTH + 2);
         /* month_more_events: "+%d" */
-        text = g_strdup_printf (_("+%d"), skipped[d]);
+        text = g_strdup_printf (C_("more events", "+%d"), skipped[d]);
         layout = make_layout (self, text, m->event_text_size, PANGO_WEIGHT_NORMAL);
         draw_text (snapshot, layout, x + EVENT_SQUARE_WIDTH + EVENT_LINE_PADDING, sy + EVENT_SQUARE_WIDTH,
                    CAL_MORE_EVENTS);
@@ -612,6 +614,30 @@ draw_now_line (CalDayView *self, GtkSnapshot *snapshot, const Metrics *m, int in
     fill (snapshot, ((guint32) (0x60 - i * 0x18) << 24) | 0x3a0000, left, top + 5 * m->px + i * m->px * 3, right - left,
           3 * m->px);
   fill (snapshot, CAL_NOW_LINE, left, top, right - left, 5 * m->px);
+}
+
+/* where Minerva's run history begins: a line across its day at its time, the text over the line's start */
+static void
+draw_history_line (CalDayView *self, GtkSnapshot *snapshot, const Metrics *m, int first_day)
+{
+  int index = self->history ? cal_day_number (self->history) - first_day : -1, minute;
+  double left, right, y;
+
+  if (index < 0 || index >= self->num_days)
+    return;
+  minute = cal_minute_of_day (self->history);
+  y = (minute / 60) * m->pitch + (minute % 60) * self->cell_height / 60 + m->px;
+  left = day_left (m, self->num_days, index) + m->px;
+  right = day_left (m, self->num_days, index + 1);
+  fill (snapshot, CAL_HOUR_LABEL, left, y, right - left, 2 * m->px);
+  if (self->history_text && right - left >= MIN_CELL_WIDTH_FOR_TEXT)
+    {
+      g_autoptr(PangoLayout) layout = make_layout (self, self->history_text, m->event_text_size, PANGO_WEIGHT_NORMAL);
+
+      pango_layout_set_width (layout, (int) ((right - left - 2 * EVENT_TEXT_HORIZONTAL_MARGIN) * PANGO_SCALE));
+      pango_layout_set_ellipsize (layout, PANGO_ELLIPSIZE_END);
+      draw_text (snapshot, layout, left + EVENT_TEXT_HORIZONTAL_MARGIN, y - EVENT_TEXT_VERTICAL_MARGIN, CAL_HOUR_LABEL);
+    }
 }
 
 static void
@@ -730,6 +756,7 @@ draw_page (CalDayView *self, GtkSnapshot *snapshot, int first_day)
         }
     }
 
+  draw_history_line (self, snapshot, &m, first_day);
   draw_timed_events (self, snapshot, &m, first_day);
   if (today_index >= 0 && today_index < self->num_days)
     draw_now_line (self, snapshot, &m, today_index, now_y);
@@ -1227,6 +1254,7 @@ cal_day_view_dispose (GObject *object)
   g_clear_pointer (&self->events, g_ptr_array_unref);
   g_clear_pointer (&self->timed, g_ptr_array_unref);
   g_clear_pointer (&self->all_day, g_ptr_array_unref);
+  g_clear_pointer (&self->history_text, g_free);
   G_OBJECT_CLASS (cal_day_view_parent_class)->dispose (object);
 }
 
@@ -1363,6 +1391,15 @@ cal_day_view_set_staggered (CalDayView *self, gboolean staggered)
     return;
   self->staggered = !!staggered;
   layout_events (self);
+  gtk_widget_queue_draw (GTK_WIDGET (self));
+}
+
+void
+cal_day_view_set_history (CalDayView *self, gint64 history, const char *text)
+{
+  self->history = history;
+  g_free (self->history_text);
+  self->history_text = g_strdup (text);
   gtk_widget_queue_draw (GTK_WIDGET (self));
 }
 

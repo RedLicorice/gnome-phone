@@ -732,25 +732,6 @@ cal_recurrence_picker_can_handle (const char *rrule)
 #define BUBBLE_RADIUS 11.6998              /* the bubbles' circle, in their 24 × 24 viewport */
 #define BUBBLE_STROKE 0.600365
 
-/* repeat_by_nth_sun … _sat: "on every [first … fourth, last] [weekday]", one string each for the languages whose
- * words change with the weekday's gender */
-static const char *const repeat_by_nth[7][5] = {
-  { N_("on every first Sunday"), N_("on every second Sunday"), N_("on every third Sunday"),
-    N_("on every fourth Sunday"), N_("on every last Sunday") },
-  { N_("on every first Monday"), N_("on every second Monday"), N_("on every third Monday"),
-    N_("on every fourth Monday"), N_("on every last Monday") },
-  { N_("on every first Tuesday"), N_("on every second Tuesday"), N_("on every third Tuesday"),
-    N_("on every fourth Tuesday"), N_("on every last Tuesday") },
-  { N_("on every first Wednesday"), N_("on every second Wednesday"), N_("on every third Wednesday"),
-    N_("on every fourth Wednesday"), N_("on every last Wednesday") },
-  { N_("on every first Thursday"), N_("on every second Thursday"), N_("on every third Thursday"),
-    N_("on every fourth Thursday"), N_("on every last Thursday") },
-  { N_("on every first Friday"), N_("on every second Friday"), N_("on every third Friday"),
-    N_("on every fourth Friday"), N_("on every last Friday") },
-  { N_("on every first Saturday"), N_("on every second Saturday"), N_("on every third Saturday"),
-    N_("on every fourth Saturday"), N_("on every last Saturday") },
-};
-
 typedef struct {
   NeoDialog *dialog;
   CalRecurrenceSet done;
@@ -995,7 +976,7 @@ update_dialog (Picker *picker)
     {
       g_autoptr(GDateTime) date = time_at (model->end_day, 12 * 3600, NULL);
       /* FORMAT_NUMERIC_DATE, as the editor's "; until 12/31/2026" */
-      g_autofree char *text = g_date_time_format (date, C_("date", "%-m/%-d/%Y"));
+      g_autofree char *text = cal_format_skeleton (date, "yMd");
 
       gtk_label_set_label (GTK_LABEL (picker->end_date), text);
     }
@@ -1424,6 +1405,8 @@ cal_recurrence_picker_show (GtkWidget *parent, const char *rrule, gint64 start, 
   gtk_box_append (GTK_BOX (top), picker->freq);
   /* app:thumbTint (white on, darker grey off) left out: CalMaterialSwitch draws Material 3's thumb */
   picker->repeat_switch = cal_material_switch_new ();
+  gtk_accessible_update_property (GTK_ACCESSIBLE (picker->repeat_switch), GTK_ACCESSIBLE_PROPERTY_LABEL,
+                                  _("Repeat event"), -1);
   gtk_widget_set_valign (picker->repeat_switch, GTK_ALIGN_CENTER);
   gtk_widget_add_css_class (picker->repeat_switch, "cal-recur-switch");
   gtk_box_append (GTK_BOX (top), picker->repeat_switch);
@@ -1468,9 +1451,9 @@ cal_recurrence_picker_show (GtkWidget *parent, const char *rrule, gint64 start, 
   /* monthly: by the date, or by the nth weekday (its text set once, from the model) */
   picker->month_group = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
   picker->by_month_day = radio_row (picker, _("on the same day each month"));
-  nth_text = g_strdup (_(repeat_by_nth[picker->model.monthly_by_day_of_week]
-                                      [(picker->model.monthly_by_nth_day_of_week < 0 ? FIFTH_WEEK_IN_A_MONTH
-                                        : picker->model.monthly_by_nth_day_of_week) - 1]));
+  nth_text = g_strdup (cal_format_nth_weekday (picker->model.monthly_by_day_of_week,
+                                               (picker->model.monthly_by_nth_day_of_week < 0 ? FIFTH_WEEK_IN_A_MONTH
+                                                : picker->model.monthly_by_nth_day_of_week) - 1));
   picker->by_nth = radio_row (picker, nth_text);
   gtk_box_append (GTK_BOX (picker->month_group), picker->by_month_day);
   gtk_box_append (GTK_BOX (picker->month_group), picker->by_nth);

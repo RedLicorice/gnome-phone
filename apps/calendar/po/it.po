@@ -1,0 +1,1506 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the neo-calendar package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: neo-calendar\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-11-20 16:55+0000\n"
+"PO-Revision-Date: 2026-11-20 17:00+0000\n"
+"Last-Translator: neo-calendar\n"
+"Language-Team: Italian\n"
+"Language: it\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: src/agenda-view.c:329 src/agenda-view.c:534 src/cal-alert-page.c:232
+#: src/cal-model.c:97 src/day-view.c:283 src/event-info.c:181
+#: src/event-info.c:427 src/month-view.c:525 src/reminders-main.c:337
+msgid "(No title)"
+msgstr "(Senza titolo)"
+
+#: src/cal-accounts.c:208 src/cal-accounts.c:230
+msgid "The calendar could not be added."
+msgstr "Impossibile aggiungere il calendario."
+
+#: src/cal-accounts.c:225
+msgid "Enter a calendar name!"
+msgstr "Inserisci un nome per il calendario!"
+
+#: src/cal-accounts.c:267 src/cal-settings.c:582
+msgid "Add offline calendar"
+msgstr "Aggiungi calendario offline"
+
+#: src/cal-accounts.c:269 src/cal-accounts.c:1097
+msgid ""
+"Offline calendars are NOT synchronized to a cloud service and only available "
+"on your phone."
+msgstr ""
+"I calendari offline NON vengono sincronizzati con un servizio cloud e sono "
+"disponibili solo sul telefono."
+
+#: src/cal-accounts.c:271
+msgid "Name"
+msgstr "Nome"
+
+#: src/cal-accounts.c:277 src/cal-alert-page.c:443 src/cal-date-picker.c:1034
+#: src/cal-dialogs.c:124 src/cal-dialogs.c:158 src/cal-dialogs.c:173
+#: src/cal-dialogs.c:217 src/cal-time-picker.c:808
+msgid "Cancel"
+msgstr "Annulla"
+
+#: src/cal-accounts.c:277
+msgid "Add calendar"
+msgstr "Aggiungi calendario"
+
+#: src/cal-accounts.c:423 src/cal-accounts.c:836 src/cal-accounts.c:912
+#: src/cal-accounts.c:1026 src/cal-settings.c:544
+msgid "Unnamed calendar"
+msgstr "Calendario senza nome"
+
+#: src/cal-accounts.c:454
+msgid "The server did not accept this user name and password."
+msgstr "Il server non ha accettato questo nome utente e questa password."
+
+#: src/cal-accounts.c:456
+msgid "The server's certificate is not trusted, so nothing was sent to it."
+msgstr ""
+"Il certificato del server non è attendibile, quindi non è stato inviato "
+"nulla."
+
+#: src/cal-accounts.c:459
+#, c-format
+msgid "Could not reach the server: %s"
+msgstr "Impossibile raggiungere il server: %s"
+
+#: src/cal-accounts.c:460
+msgid "unknown error"
+msgstr "errore sconosciuto"
+
+#: src/cal-accounts.c:468
+msgid "The server has no calendars for this user."
+msgstr "Il server non ha calendari per questo utente."
+
+#: src/cal-accounts.c:492
+msgid "Enter a valid URL"
+msgstr "Inserisci un URL valido"
+
+#: src/cal-accounts.c:497
+msgid "Enter a user name"
+msgstr "Inserisci un nome utente"
+
+#: src/cal-accounts.c:502
+msgid "Enter a password"
+msgstr "Inserisci una password"
+
+#: src/cal-accounts.c:519
+msgid "Looking for calendars…"
+msgstr "Ricerca dei calendari…"
+
+#: src/cal-accounts.c:563
+msgid "The account could not be added."
+msgstr "Impossibile aggiungere l'account."
+
+#: src/cal-accounts.c:570
+msgid "Account added. Its calendars appear once they are synchronized."
+msgstr ""
+"Account aggiunto. I suoi calendari appariranno dopo la sincronizzazione."
+
+#: src/cal-accounts.c:587
+msgid ""
+"The password could not be kept (no keyring), so the account was not added."
+msgstr ""
+"Impossibile conservare la password (nessun portachiavi), quindi l'account "
+"non è stato aggiunto."
+
+#: src/cal-accounts.c:608
+msgid "Enter an account name"
+msgstr "Inserisci un nome per l'account"
+
+#: src/cal-accounts.c:667 src/cal-settings.c:578
+msgid "Add CalDAV calendar"
+msgstr "Aggiungi calendario CalDAV"
+
+#: src/cal-accounts.c:669
+msgid "Login with URL and user name"
+msgstr "Accedi con URL e nome utente"
+
+#: src/cal-accounts.c:674
+msgid "Base URL"
+msgstr "URL di base"
+
+#: src/cal-accounts.c:675
+msgid "User name"
+msgstr "Nome utente"
+
+#: src/cal-accounts.c:676
+msgid "Password"
+msgstr "Password"
+
+#: src/cal-accounts.c:677
+msgid "Account name"
+msgstr "Nome account"
+
+#: src/cal-accounts.c:690
+msgid "Log in"
+msgstr "Accedi"
+
+#: src/cal-accounts.c:695
+msgid "Calendars"
+msgstr "Calendari"
+
+#: src/cal-accounts.c:704
+msgid "Create account"
+msgstr "Crea account"
+
+#: src/cal-accounts.c:789
+msgid "Calendar Color"
+msgstr "Colore calendario"
+
+#: src/cal-accounts.c:812
+msgid "Warning"
+msgstr "Attenzione"
+
+#: src/cal-accounts.c:814
+msgid ""
+"Changing the color may be reverted when the calendar is synchronized again."
+msgstr ""
+"La modifica del colore potrebbe essere annullata alla prossima "
+"sincronizzazione del calendario."
+
+#: src/cal-accounts.c:815
+msgid "I understand"
+msgstr "Ho capito"
+
+#: src/cal-accounts.c:844 src/cal-accounts.c:1069
+msgid "Change name"
+msgstr "Cambia nome"
+
+#: src/cal-accounts.c:857
+msgid "The calendar could not be deleted."
+msgstr "Impossibile eliminare il calendario."
+
+#: src/cal-accounts.c:879
+msgid "Do you really want to delete this calendar?"
+msgstr "Vuoi davvero eliminare questo calendario?"
+
+#: src/cal-accounts.c:879 src/cal-accounts.c:1074
+msgid "Delete calendar"
+msgstr "Elimina calendario"
+
+#: src/cal-accounts.c:918
+#, c-format
+msgid "%d events"
+msgstr "%d eventi"
+
+#: src/cal-accounts.c:975
+msgid "Google"
+msgstr "Google"
+
+#: src/cal-accounts.c:975
+msgid "CalDAV"
+msgstr "CalDAV"
+
+#: src/cal-accounts.c:976
+msgid "Nextcloud"
+msgstr "Nextcloud"
+
+#: src/cal-accounts.c:976
+msgid "Outlook"
+msgstr "Outlook"
+
+#: src/cal-accounts.c:976
+msgid "Microsoft 365"
+msgstr "Microsoft 365"
+
+#: src/cal-accounts.c:977
+msgid "Exchange"
+msgstr "Exchange"
+
+#: src/cal-accounts.c:977
+msgid "Yahoo"
+msgstr "Yahoo"
+
+#: src/cal-accounts.c:977
+msgid "Web calendar"
+msgstr "Calendario web"
+
+#: src/cal-accounts.c:978
+msgid "Contacts"
+msgstr "Contatti"
+
+#: src/cal-accounts.c:978
+msgid "Weather"
+msgstr "Meteo"
+
+#: src/cal-accounts.c:1048 src/cal-accounts.c:1051
+msgid "Display events"
+msgstr "Mostra eventi"
+
+#: src/cal-accounts.c:1059
+msgid "Color"
+msgstr "Colore"
+
+#: src/cal-accounts.c:1081
+#, c-format
+msgid "Configure calendar in %s"
+msgstr "Configura il calendario in %s"
+
+#: src/cal-accounts.c:1091
+msgid "Calendar information"
+msgstr "Informazioni calendario"
+
+#: src/cal-accounts.c:1095
+msgid "Offline calendar"
+msgstr "Calendario offline"
+
+#: src/cal-accounts.c:1103
+#, c-format
+msgid "%s account"
+msgstr "Account %s"
+
+#: src/cal-alert-page.c:295
+msgid "Calendar notifications"
+msgstr "Notifiche di Calendar"
+
+#: src/cal-alert-page.c:297
+msgid "Dismiss all"
+msgstr "Ignora tutto"
+
+#: src/cal-alert-page.c:438
+msgid "Set snooze delay"
+msgstr "Imposta ritardo posticipo"
+
+#: src/cal-alert-page.c:444 src/cal-date-picker.c:1035 src/cal-dialogs.c:126
+#: src/cal-dialogs.c:218 src/cal-time-picker.c:809 src/event-info.c:432
+msgid "OK"
+msgstr "OK"
+
+#: src/cal-alert-page.c:502
+msgid "Write your own…"
+msgstr "Scrivi la tua…"
+
+#: src/cal-alert-page.c:503
+msgid "Choose quick response"
+msgstr "Scegli risposta rapida"
+
+#. TRANSLATORS: DateUtils' weekday and date, "Sunday, November 8"
+#. TRANSLATORS: a date and a time range, "November 8, 10:00 – 11:00"
+#: src/cal-alerts.c:367 src/cal-alerts.c:398
+#, c-format
+msgctxt "alert"
+msgid "%s, %s"
+msgstr "%s, %s"
+
+#: src/cal-alerts.c:523 src/cal-date-picker.c:273 src/cal-prefs.c:295
+msgid "None"
+msgstr "Nessuno"
+
+#: src/cal-alerts.c:525
+msgid "Default notification sound"
+msgstr "Suono di notifica predefinito"
+
+#: src/cal-color-picker.c:293
+#, c-format
+msgid "Color %d selected"
+msgstr "Colore %d selezionato"
+
+#: src/cal-color-picker.c:294
+#, c-format
+msgid "Color %d"
+msgstr "Colore %d"
+
+#: src/cal-color-picker.c:351
+msgid "Set to default calendar color"
+msgstr "Imposta il colore predefinito del calendario"
+
+#: src/cal-color-picker.c:377
+msgid "Event Color"
+msgstr "Colore evento"
+
+#: src/cal-date-picker.c:270
+msgid "Selected date"
+msgstr "Data selezionata"
+
+#: src/cal-date-picker.c:272
+#, c-format
+msgid "Current selection: %s"
+msgstr "Selezione attuale: %s"
+
+#: src/cal-date-picker.c:540
+msgid "Date"
+msgstr "Data"
+
+#: src/cal-date-picker.c:632
+msgctxt "date input: day"
+msgid "d"
+msgstr "g"
+
+#: src/cal-date-picker.c:634
+msgctxt "date input: month"
+msgid "m"
+msgstr "m"
+
+#: src/cal-date-picker.c:636
+msgctxt "date input: year"
+msgid "y"
+msgstr "a"
+
+#: src/cal-date-picker.c:761
+#, c-format
+msgid "Use: %s"
+msgstr "Usa: %s"
+
+#: src/cal-date-picker.c:762
+#, c-format
+msgid "Example: %s"
+msgstr "Esempio: %s"
+
+#: src/cal-date-picker.c:763
+msgid "Invalid format."
+msgstr "Formato non valido."
+
+#: src/cal-date-picker.c:794
+#, c-format
+msgid "Out of range: %s"
+msgstr "Fuori intervallo: %s"
+
+#: src/cal-date-picker.c:883
+msgid "Switch to calendar input mode"
+msgstr "Passa alla modalità di inserimento da calendario"
+
+#: src/cal-date-picker.c:884 src/cal-date-picker.c:972
+msgid "Switch to text input mode"
+msgstr "Passa alla modalità di inserimento testo"
+
+#: src/cal-date-picker.c:992
+msgid "Switch to year view"
+msgstr "Passa alla visualizzazione anno"
+
+#: src/cal-date-picker.c:1005
+msgid "Change to previous month"
+msgstr "Passa al mese precedente"
+
+#: src/cal-date-picker.c:1011
+msgid "Change to next month"
+msgstr "Passa al mese successivo"
+
+#: src/cal-format.c:254
+#, c-format
+msgid "Today, %s"
+msgstr "Oggi, %s"
+
+#: src/cal-format.c:256
+#, c-format
+msgid "Yesterday, %s"
+msgstr "Ieri, %s"
+
+#: src/cal-format.c:258
+#, c-format
+msgid "Tomorrow, %s"
+msgstr "Domani, %s"
+
+#: src/cal-format.c:285 src/cal-search.c:769 src/cal-window.c:926
+msgid "Today"
+msgstr "Oggi"
+
+#: src/cal-format.c:287 src/cal-format.c:384
+msgid "Tomorrow"
+msgstr "Domani"
+
+#: src/cal-format.c:302
+#, c-format
+msgid "Today at %s"
+msgstr "Oggi alle %s"
+
+#: src/cal-format.c:304
+#, c-format
+msgid "Tomorrow at %s"
+msgstr "Domani alle %s"
+
+#: src/cal-format.c:309
+#, c-format
+msgid "%s, %s"
+msgstr "%s, %s"
+
+#: src/cal-format.c:400
+#, c-format
+msgid "%d week"
+msgid_plural "%d weeks"
+msgstr[0] "%d settimana"
+msgstr[1] "%d settimane"
+
+#: src/cal-format.c:403
+#, c-format
+msgid "%d day"
+msgid_plural "%d days"
+msgstr[0] "%d giorno"
+msgstr[1] "%d giorni"
+
+#: src/cal-format.c:405
+#, c-format
+msgid "%d hour"
+msgid_plural "%d hours"
+msgstr[0] "%d ora"
+msgstr[1] "%d ore"
+
+#: src/cal-format.c:406
+#, c-format
+msgid "%d minute"
+msgid_plural "%d minutes"
+msgstr[0] "%d minuto"
+msgstr[1] "%d minuti"
+
+#: src/cal-format.c:451
+msgid "on every first Sunday"
+msgstr "ogni prima domenica"
+
+#: src/cal-format.c:451
+msgid "on every second Sunday"
+msgstr "ogni seconda domenica"
+
+#: src/cal-format.c:451
+msgid "on every third Sunday"
+msgstr "ogni terza domenica"
+
+#: src/cal-format.c:452
+msgid "on every fourth Sunday"
+msgstr "ogni quarta domenica"
+
+#: src/cal-format.c:452
+msgid "on every last Sunday"
+msgstr "ogni ultima domenica"
+
+#: src/cal-format.c:453
+msgid "on every first Monday"
+msgstr "ogni primo lunedì"
+
+#: src/cal-format.c:453
+msgid "on every second Monday"
+msgstr "ogni secondo lunedì"
+
+#: src/cal-format.c:453
+msgid "on every third Monday"
+msgstr "ogni terzo lunedì"
+
+#: src/cal-format.c:454
+msgid "on every fourth Monday"
+msgstr "ogni quarto lunedì"
+
+#: src/cal-format.c:454
+msgid "on every last Monday"
+msgstr "ogni ultimo lunedì"
+
+#: src/cal-format.c:455
+msgid "on every first Tuesday"
+msgstr "ogni primo martedì"
+
+#: src/cal-format.c:455
+msgid "on every second Tuesday"
+msgstr "ogni secondo martedì"
+
+#: src/cal-format.c:455
+msgid "on every third Tuesday"
+msgstr "ogni terzo martedì"
+
+#: src/cal-format.c:456
+msgid "on every fourth Tuesday"
+msgstr "ogni quarto martedì"
+
+#: src/cal-format.c:456
+msgid "on every last Tuesday"
+msgstr "ogni ultimo martedì"
+
+#: src/cal-format.c:457
+msgid "on every first Wednesday"
+msgstr "ogni primo mercoledì"
+
+#: src/cal-format.c:457
+msgid "on every second Wednesday"
+msgstr "ogni secondo mercoledì"
+
+#: src/cal-format.c:457
+msgid "on every third Wednesday"
+msgstr "ogni terzo mercoledì"
+
+#: src/cal-format.c:458
+msgid "on every fourth Wednesday"
+msgstr "ogni quarto mercoledì"
+
+#: src/cal-format.c:458
+msgid "on every last Wednesday"
+msgstr "ogni ultimo mercoledì"
+
+#: src/cal-format.c:459
+msgid "on every first Thursday"
+msgstr "ogni primo giovedì"
+
+#: src/cal-format.c:459
+msgid "on every second Thursday"
+msgstr "ogni secondo giovedì"
+
+#: src/cal-format.c:459
+msgid "on every third Thursday"
+msgstr "ogni terzo giovedì"
+
+#: src/cal-format.c:460
+msgid "on every fourth Thursday"
+msgstr "ogni quarto giovedì"
+
+#: src/cal-format.c:460
+msgid "on every last Thursday"
+msgstr "ogni ultimo giovedì"
+
+#: src/cal-format.c:461
+msgid "on every first Friday"
+msgstr "ogni primo venerdì"
+
+#: src/cal-format.c:461
+msgid "on every second Friday"
+msgstr "ogni secondo venerdì"
+
+#: src/cal-format.c:461
+msgid "on every third Friday"
+msgstr "ogni terzo venerdì"
+
+#: src/cal-format.c:462
+msgid "on every fourth Friday"
+msgstr "ogni quarto venerdì"
+
+#: src/cal-format.c:462
+msgid "on every last Friday"
+msgstr "ogni ultimo venerdì"
+
+#: src/cal-format.c:463
+msgid "on every first Saturday"
+msgstr "ogni primo sabato"
+
+#: src/cal-format.c:463
+msgid "on every second Saturday"
+msgstr "ogni secondo sabato"
+
+#: src/cal-format.c:463
+msgid "on every third Saturday"
+msgstr "ogni terzo sabato"
+
+#: src/cal-format.c:464
+msgid "on every fourth Saturday"
+msgstr "ogni quarto sabato"
+
+#: src/cal-format.c:464
+msgid "on every last Saturday"
+msgstr "ogni ultimo sabato"
+
+#: src/cal-format.c:546
+#, c-format
+msgid "; until %s"
+msgstr "; fino al %s"
+
+#: src/cal-format.c:550
+#, c-format
+msgid "; for one time"
+msgid_plural "; for %d times"
+msgstr[0] "; per una volta"
+msgstr[1] "; per %d volte"
+
+#: src/cal-format.c:553
+#, c-format
+msgid "Daily"
+msgid_plural "Every %d days"
+msgstr[0] "Ogni giorno"
+msgstr[1] "Ogni %d giorni"
+
+#: src/cal-format.c:562
+msgid "Every weekday (Mon–Fri)"
+msgstr "Ogni giorno feriale (lun–ven)"
+
+#: src/cal-format.c:578
+#, c-format
+msgid "Weekly on %s"
+msgstr "Ogni settimana: %s"
+
+#: src/cal-format.c:580
+#, c-format
+msgid "Every %d week on %s"
+msgid_plural "Every %d weeks on %s"
+msgstr[0] "Ogni %d settimana: %s"
+msgstr[1] "Ogni %d settimane: %s"
+
+#: src/cal-format.c:590
+#, c-format
+msgid "Monthly (%s)"
+msgstr "Ogni mese (%s)"
+
+#: src/cal-format.c:594
+msgid "Monthly"
+msgstr "Ogni mese"
+
+#: src/cal-format.c:597
+msgid "Yearly"
+msgstr "Ogni anno"
+
+#: src/cal-format.c:659
+#, c-format
+msgid "Week %d"
+msgid_plural "Week %d"
+msgstr[0] "Settimana %d"
+msgstr[1] "Settimana %d"
+
+#: src/cal-page.c:79 src/cal-search.c:923 src/event-editor.c:894
+msgid "Back"
+msgstr "Indietro"
+
+#: src/cal-recurrence-picker.c:789
+#, c-format
+msgid "Every %d day"
+msgid_plural "Every %d days"
+msgstr[0] "Ogni %d giorno"
+msgstr[1] "Ogni %d giorni"
+
+#: src/cal-recurrence-picker.c:791
+#, c-format
+msgid "Every %d week"
+msgid_plural "Every %d weeks"
+msgstr[0] "Ogni %d settimana"
+msgstr[1] "Ogni %d settimane"
+
+#: src/cal-recurrence-picker.c:793
+#, c-format
+msgid "Every %d month"
+msgid_plural "Every %d months"
+msgstr[0] "Ogni %d mese"
+msgstr[1] "Ogni %d mesi"
+
+#: src/cal-recurrence-picker.c:795
+#, c-format
+msgid "Every %d year"
+msgid_plural "Every %d years"
+msgstr[0] "Ogni %d anno"
+msgstr[1] "Ogni %d anni"
+
+#: src/cal-recurrence-picker.c:802
+#, c-format
+msgid "For %d event"
+msgid_plural "For %d events"
+msgstr[0] "Per %d evento"
+msgstr[1] "Per %d eventi"
+
+#: src/cal-recurrence-picker.c:859
+#, c-format
+msgid "Until %s"
+msgstr "Fino al %s"
+
+#: src/cal-recurrence-picker.c:872 src/cal-recurrence-picker.c:1068
+msgid "Until a date"
+msgstr "Fino a una data"
+
+#: src/cal-recurrence-picker.c:879 src/cal-recurrence-picker.c:1068
+msgid "For a number of events"
+msgstr "Per un numero di eventi"
+
+#: src/cal-recurrence-picker.c:890 src/cal-recurrence-picker.c:1068
+msgid "Forever"
+msgstr "Per sempre"
+
+#: src/cal-recurrence-picker.c:1102
+msgid "Select date"
+msgstr "Seleziona data"
+
+#: src/cal-recurrence-picker.c:1369
+msgid "REPEAT DAILY"
+msgstr "RIPETI OGNI GIORNO"
+
+#: src/cal-recurrence-picker.c:1369
+msgid "REPEAT WEEKLY"
+msgstr "RIPETI OGNI SETTIMANA"
+
+#: src/cal-recurrence-picker.c:1369
+msgid "REPEAT MONTHLY"
+msgstr "RIPETI OGNI MESE"
+
+#: src/cal-recurrence-picker.c:1369
+msgid "REPEAT YEARLY"
+msgstr "RIPETI OGNI ANNO"
+
+#: src/cal-recurrence-picker.c:1409 src/event-editor.c:1131
+msgid "Repeat event"
+msgstr "Ripeti evento"
+
+#: src/cal-recurrence-picker.c:1453
+msgid "on the same day each month"
+msgstr "lo stesso giorno di ogni mese"
+
+#: src/cal-recurrence-picker.c:1481
+msgid "End"
+msgstr "Fine"
+
+#: src/cal-recurrence-picker.c:1496
+msgid "change end date"
+msgstr "modifica data di fine"
+
+#: src/cal-recurrence-picker.c:1518
+msgid "Done"
+msgstr "Fine"
+
+#: src/cal-reminders.c:80
+msgid "Reminder time"
+msgstr "Orario promemoria"
+
+#: src/cal-reminders.c:85
+msgid "Remove reminder"
+msgstr "Rimuovi promemoria"
+
+#: src/cal-search.c:348
+msgid "Edit query"
+msgstr "Modifica ricerca"
+
+#: src/cal-search.c:554
+msgid "Search query"
+msgstr "Testo da cercare"
+
+#: src/cal-search.c:577
+msgid "Clear query"
+msgstr "Cancella ricerca"
+
+#: src/cal-search.c:706 src/cal-settings.c:562 src/cal-window.c:610
+msgid "Settings"
+msgstr "Impostazioni"
+
+#: src/cal-search.c:774 src/cal-window.c:804 src/cal-window.c:932
+#: src/event-info.c:725 src/event-info.c:802
+msgid "More options"
+msgstr "Altre opzioni"
+
+#: src/cal-settings.c:120
+msgid "Search history cleared."
+msgstr "Cronologia delle ricerche cancellata."
+
+#: src/cal-settings.c:132
+msgid "Ask for snooze delay whenever snoozing reminders"
+msgstr "Chiedi il ritardo ogni volta che posticipi un promemoria"
+
+#: src/cal-settings.c:133
+msgid "Always use default snooze delay"
+msgstr "Usa sempre il ritardo di posticipo predefinito"
+
+#: src/cal-settings.c:173 src/cal-settings.c:570
+msgid "General settings"
+msgstr "Impostazioni generali"
+
+#: src/cal-settings.c:184
+msgid "0 minutes"
+msgstr "0 minuti"
+
+#: src/cal-settings.c:184
+msgid "15 minutes"
+msgstr "15 minuti"
+
+#: src/cal-settings.c:184
+msgid "30 minutes"
+msgstr "30 minuti"
+
+#: src/cal-settings.c:184
+msgid "1 hour"
+msgstr "1 ora"
+
+#: src/cal-settings.c:185
+msgid "1.5 hours"
+msgstr "1,5 ore"
+
+#: src/cal-settings.c:185
+msgid "2 hours"
+msgstr "2 ore"
+
+#: src/cal-settings.c:187
+msgid "2 days"
+msgstr "2 giorni"
+
+#: src/cal-settings.c:187
+msgid "3 days"
+msgstr "3 giorni"
+
+#: src/cal-settings.c:187
+msgid "4 days"
+msgstr "4 giorni"
+
+#: src/cal-settings.c:187
+msgid "5 days"
+msgstr "5 giorni"
+
+#: src/cal-settings.c:187
+msgid "6 days"
+msgstr "6 giorni"
+
+#: src/cal-settings.c:188
+msgid "7 days"
+msgstr "7 giorni"
+
+#: src/cal-settings.c:199
+msgid "Calendar view setting"
+msgstr "Impostazioni visualizzazione calendario"
+
+#: src/cal-settings.c:204
+msgid "Theme"
+msgstr "Tema"
+
+#: src/cal-settings.c:205
+msgid "System default"
+msgstr "Predefinito di sistema"
+
+#: src/cal-settings.c:206
+msgid "Light"
+msgstr "Chiaro"
+
+#: src/cal-settings.c:207
+msgid "Dark"
+msgstr "Scuro"
+
+#: src/cal-settings.c:209
+msgid "Pure black night mode"
+msgstr "Modalità notte nero puro"
+
+#: src/cal-settings.c:220
+msgid "Use real event colors"
+msgstr "Usa i colori reali degli eventi"
+
+#: src/cal-settings.c:223
+msgid "Default view"
+msgstr "Visualizzazione predefinita"
+
+#: src/cal-settings.c:224
+msgid "Previously used view"
+msgstr "Ultima visualizzazione usata"
+
+#: src/cal-settings.c:225 src/cal-window.c:583
+msgid "Day"
+msgstr "Giorno"
+
+#: src/cal-settings.c:226 src/cal-window.c:584
+msgid "Week"
+msgstr "Settimana"
+
+#: src/cal-settings.c:227 src/cal-window.c:585
+msgid "Month"
+msgstr "Mese"
+
+#: src/cal-settings.c:228 src/cal-window.c:586
+msgid "Agenda"
+msgstr "Agenda"
+
+#: src/cal-settings.c:231 src/cal-settings.c:346
+msgid "Display options"
+msgstr "Opzioni di visualizzazione"
+
+#: src/cal-settings.c:232
+msgid "Hide declined events"
+msgstr "Nascondi eventi rifiutati"
+
+#: src/cal-settings.c:233 src/cal-settings.c:237
+msgid "Staggered display"
+msgstr "Visualizzazione sfalsata"
+
+#: src/cal-settings.c:233
+msgid "Display overlapping events in a staggered layout"
+msgstr "Mostra gli eventi sovrapposti in un layout sfalsato"
+
+#: src/cal-settings.c:241
+msgid "Show week number"
+msgstr "Mostra numero settimana"
+
+#: src/cal-settings.c:244
+msgid "Week starts on"
+msgstr "La settimana inizia di"
+
+#: src/cal-settings.c:245
+msgid "Locale default"
+msgstr "Predefinito per la lingua"
+
+#: src/cal-settings.c:255
+msgid "Days per week"
+msgstr "Giorni per settimana"
+
+#: src/cal-settings.c:260
+msgid "Default event duration"
+msgstr "Durata predefinita evento"
+
+#: src/cal-settings.c:268 src/cal-settings.c:270
+msgid "Use home time zone"
+msgstr "Usa fuso orario di casa"
+
+#: src/cal-settings.c:271
+msgid ""
+"Displays calendars and event times in your home time zone when traveling"
+msgstr ""
+"Mostra calendari e orari degli eventi nel fuso orario di casa quando sei in "
+"viaggio"
+
+#: src/cal-settings.c:274
+msgid "Home time zone"
+msgstr "Fuso orario di casa"
+
+#: src/cal-settings.c:282
+msgid "Clear search history"
+msgstr "Cancella cronologia ricerche"
+
+#: src/cal-settings.c:282
+msgid "Remove all the searches you've performed"
+msgstr "Rimuovi tutte le ricerche effettuate"
+
+#: src/cal-settings.c:287
+msgid "Notifications & reminders"
+msgstr "Notifiche e promemoria"
+
+#: src/cal-settings.c:288 src/cal-settings.c:360
+msgid "Notifications"
+msgstr "Notifiche"
+
+#: src/cal-settings.c:289
+msgid "Pop-up notification"
+msgstr "Notifica pop-up"
+
+#: src/cal-settings.c:290
+msgid "Ask for reminder snooze delay"
+msgstr "Chiedi ritardo posticipo promemoria"
+
+#: src/cal-settings.c:292
+msgid "Default snooze delay time"
+msgstr "Ritardo di posticipo predefinito"
+
+#: src/cal-settings.c:296
+msgid "Default reminder time"
+msgstr "Orario promemoria predefinito"
+
+#: src/cal-settings.c:301 src/cal-settings.c:470
+msgid "Quick responses"
+msgstr "Risposte rapide"
+
+#: src/cal-settings.c:301
+msgid "Edit default responses when emailing guests"
+msgstr "Modifica le risposte predefinite per le email agli invitati"
+
+#: src/cal-settings.c:306
+msgid "Experimental"
+msgstr "Sperimentale"
+
+#: src/cal-settings.c:307
+msgid "Skip Reminders"
+msgstr "Salta promemoria"
+
+#: src/cal-settings.c:308
+msgid "Only if declined"
+msgstr "Solo se rifiutato"
+
+#: src/cal-settings.c:309
+msgid "If declined or not responded"
+msgstr "Se rifiutato o senza risposta"
+
+#: src/cal-settings.c:327
+msgid "Max number of lines in event"
+msgstr "Numero massimo di righe per evento"
+
+#: src/cal-settings.c:333
+msgid "Display time"
+msgstr "Mostra orario"
+
+#: src/cal-settings.c:334
+msgid "Don't show time"
+msgstr "Non mostrare l'orario"
+
+#: src/cal-settings.c:335
+msgid "Only start time"
+msgstr "Solo orario di inizio"
+
+#: src/cal-settings.c:336
+msgid "Start and end time"
+msgstr "Orario di inizio e fine"
+
+#: src/cal-settings.c:338
+msgid "Display location"
+msgstr "Mostra luogo"
+
+#: src/cal-settings.c:348
+msgid "Month view layout (Portrait)"
+msgstr "Layout visualizzazione mese (verticale)"
+
+#: src/cal-settings.c:349
+msgid "Month view layout (Landscape)"
+msgstr "Layout visualizzazione mese (orizzontale)"
+
+#: src/cal-settings.c:365
+msgid "Show notifications"
+msgstr "Mostra notifiche"
+
+#: src/cal-settings.c:367
+msgid "Sound"
+msgstr "Suono"
+
+#: src/cal-settings.c:381
+msgid "Vibrate"
+msgstr "Vibrazione"
+
+#: src/cal-settings.c:435
+msgid "Quick response"
+msgstr "Risposta rapida"
+
+#: src/cal-settings.c:545
+msgid "Events are not displayed"
+msgstr "Gli eventi non vengono mostrati"
+
+#: src/cal-settings.c:599 src/cal-window.c:612
+msgid "About Calendar"
+msgstr "Informazioni su Calendar"
+
+#: src/cal-settings.c:608
+msgid "Build version"
+msgstr "Versione build"
+
+#: src/cal-store.c:1019 src/cal-store.c:1052 src/cal-store.c:1087
+#: src/cal-store.c:1616
+msgid "Event not found."
+msgstr "Evento non trovato."
+
+#: src/cal-time-picker.c:494
+msgid "Select AM or PM"
+msgstr "Seleziona AM o PM"
+
+#: src/cal-time-picker.c:497
+msgid "PM"
+msgstr "PM"
+
+#: src/cal-time-picker.c:497
+msgid "AM"
+msgstr "AM"
+
+#: src/cal-time-picker.c:641 src/cal-time-picker.c:643
+#: src/cal-time-picker.c:651 src/cal-time-picker.c:777
+msgid "Minute"
+msgstr "Minuto"
+
+#: src/cal-time-picker.c:641 src/cal-time-picker.c:643
+#: src/cal-time-picker.c:651 src/cal-time-picker.c:776
+msgid "Hour"
+msgstr "Ora"
+
+#: src/cal-time-picker.c:718
+msgid "Switch to clock mode for the time input."
+msgstr "Passa alla modalità orologio per l'inserimento dell'ora."
+
+#: src/cal-time-picker.c:719 src/cal-time-picker.c:817
+msgid "Switch to text input mode for the time input."
+msgstr "Passa alla modalità testo per l'inserimento dell'ora."
+
+#: src/cal-time-picker.c:757
+msgid "Select time"
+msgstr "Seleziona ora"
+
+#: src/cal-time-picker.c:797
+msgid "Clock face"
+msgstr "Quadrante"
+
+#: src/cal-tz-picker.c:198
+msgid "Australian Central - NT"
+msgstr "Australia centrale - NT"
+
+#: src/cal-tz-picker.c:199
+msgid "Australian Central - SA"
+msgstr "Australia centrale - SA"
+
+#: src/cal-tz-picker.c:200
+msgid "Australian Eastern - QLD"
+msgstr "Australia orientale - QLD"
+
+#: src/cal-tz-picker.c:201
+msgid "Australian Eastern - NSW"
+msgstr "Australia orientale - NSW"
+
+#: src/cal-tz-picker.c:202
+msgid "Mountain Standard - Dawson Creek"
+msgstr "Ora standard Montagne Rocciose - Dawson Creek"
+
+#: src/cal-tz-picker.c:203
+msgid "Central Standard - Saskatchewan"
+msgstr "Ora standard centrale - Saskatchewan"
+
+#: src/cal-tz-picker.c:204
+msgid "Eastern Standard - Atikokan"
+msgstr "Ora standard orientale - Atikokan"
+
+#: src/cal-tz-picker.c:205
+msgid "Atlantic Standard - Quebec"
+msgstr "Ora standard atlantica - Quebec"
+
+#: src/cal-tz-picker.c:206
+msgid "Hawaii-Aleutian - Hawaii"
+msgstr "Hawaii-Aleutine - Hawaii"
+
+#: src/cal-tz-picker.c:207
+msgid "Hawaii-Aleutian - Alaska"
+msgstr "Hawaii-Aleutine - Alaska"
+
+#: src/cal-tz-picker.c:208
+msgid "Pacific Standard - Metlakatla"
+msgstr "Ora standard del Pacifico - Metlakatla"
+
+#: src/cal-tz-picker.c:209
+msgid "Mountain Standard - Arizona"
+msgstr "Ora standard Montagne Rocciose - Arizona"
+
+#: src/cal-tz-picker.c:210
+msgid "Pacific - Baja California"
+msgstr "Pacifico - Baja California"
+
+#: src/cal-tz-picker.c:211
+msgid "Mountain - Chihuahua"
+msgstr "Montagne Rocciose - Chihuahua"
+
+#: src/cal-tz-picker.c:212
+msgid "Central - Tamaulipas"
+msgstr "Centrale - Tamaulipas"
+
+#: src/cal-tz-picker.c:213
+msgid "Mountain - Sonora"
+msgstr "Montagne Rocciose - Sonora"
+
+#: src/cal-tz-picker.c:214
+msgid "East Africa Time"
+msgstr "Ora dell'Africa orientale"
+
+#: src/cal-tz-picker.c:215 src/cal-tz-picker.c:216
+msgid "Atlantic Standard Time"
+msgstr "Ora standard atlantica"
+
+#: src/cal-tz-picker.c:217
+msgid "Eastern European Time"
+msgstr "Ora dell'Europa orientale"
+
+#: src/cal-tz-picker.c:218
+msgid "Kaliningrad Time"
+msgstr "Ora di Kaliningrad"
+
+#: src/cal-tz-picker.c:219
+msgid "Amazon - Rondônia"
+msgstr "Amazzonia - Rondônia"
+
+#: src/cal-tz-picker.c:220
+msgid "Brasilia - Pará"
+msgstr "Brasilia - Pará"
+
+#: src/cal-tz-picker.c:431
+msgid "Palestine"
+msgstr "Palestina"
+
+#: src/cal-tz-picker.c:949 src/cal-tz-picker.c:1011
+msgid "Type country name"
+msgstr "Digita il nome del paese"
+
+#: src/cal-tz-picker.c:1022
+msgid "Clear search"
+msgstr "Cancella ricerca"
+
+#: src/cal-tz-picker.c:1179
+msgid "No results found"
+msgstr "Nessun risultato trovato"
+
+#: src/cal-window.c:602 src/cal-window.c:627 src/cal-window.c:1337
+#: src/event-editor.c:1009 src/reminders-main.c:379
+msgid "Calendar"
+msgstr "Calendar"
+
+#: src/cal-window.c:675 src/cal-window.c:805 src/event-editor.c:662
+#: src/event-editor.c:669
+msgid "Go to…"
+msgstr "Vai a…"
+
+#: src/cal-window.c:748
+msgid "Calendar files"
+msgstr "File di calendario"
+
+#: src/cal-window.c:806
+msgid "Refresh"
+msgstr "Aggiorna"
+
+#: src/cal-window.c:807
+msgid "Search"
+msgstr "Cerca"
+
+#: src/cal-window.c:808
+msgid "Import event"
+msgstr "Importa evento"
+
+#: src/cal-window.c:811
+msgid "View settings"
+msgstr "Visualizza impostazioni"
+
+#: src/cal-window.c:898
+msgid "Open navigation drawer"
+msgstr "Apri riquadro di navigazione"
+
+#: src/cal-window.c:1167
+msgid "Message"
+msgstr "Messaggio"
+
+#: src/cal-window.c:1397
+msgid "New event"
+msgstr "Nuovo evento"
+
+#: src/day-view.c:591
+#, c-format
+msgctxt "more events"
+msgid "+%d"
+msgstr "+%d"
+
+#: src/day-view.c:750
+msgid "+ New event"
+msgstr "+ Nuovo evento"
+
+#: src/event-editor.c:187
+msgid "Custom (can't customize on phone)"
+msgstr "Personalizzato (non personalizzabile sul telefono)"
+
+#: src/event-editor.c:188
+msgid "One-time event"
+msgstr "Evento singolo"
+
+#: src/event-editor.c:243 src/event-editor.c:916
+msgid "Event name"
+msgstr "Nome evento"
+
+#: src/event-editor.c:466
+msgid "Empty event not created."
+msgstr "Evento vuoto non creato."
+
+#: src/event-editor.c:478
+msgid "Event created."
+msgstr "Evento creato."
+
+#: src/event-editor.c:478
+msgid "Event saved."
+msgstr "Evento salvato."
+
+#: src/event-editor.c:506
+msgid "Do you want to discard changes?"
+msgstr "Vuoi annullare le modifiche?"
+
+#: src/event-editor.c:506
+msgid "Discard"
+msgstr "Annulla modifiche"
+
+#: src/event-editor.c:885
+msgid "CANCEL"
+msgstr "ANNULLA"
+
+#: src/event-editor.c:889
+msgid "DONE"
+msgstr "FINE"
+
+#: src/event-editor.c:1001 src/event-info.c:785
+msgid "Choose event color"
+msgstr "Scegli colore evento"
+
+#: src/event-editor.c:1027
+msgid "All day"
+msgstr "Tutto il giorno"
+
+#: src/event-editor.c:1035
+msgid "All day event"
+msgstr "Evento di tutto il giorno"
+
+#: src/event-editor.c:1056
+msgid "Start date"
+msgstr "Data di inizio"
+
+#: src/event-editor.c:1057
+msgid "Start time"
+msgstr "Ora di inizio"
+
+#: src/event-editor.c:1058
+msgid "End date"
+msgstr "Data di fine"
+
+#: src/event-editor.c:1059
+msgid "End time"
+msgstr "Ora di fine"
+
+#: src/event-editor.c:1067
+msgid "Time zone"
+msgstr "Fuso orario"
+
+#: src/event-editor.c:1092
+msgid "Guests are not sent an invitation"
+msgstr "Agli invitati non viene inviato alcun invito"
+
+#: src/event-editor.c:1101
+msgid "Guests"
+msgstr "Invitati"
+
+#: src/event-editor.c:1118
+msgid "Location"
+msgstr "Luogo"
+
+#: src/event-editor.c:1120
+msgid "Description"
+msgstr "Descrizione"
+
+#: src/event-editor.c:1122
+msgid "URL"
+msgstr "URL"
+
+#: src/event-editor.c:1150 src/event-info.c:932
+msgid "Add reminder"
+msgstr "Aggiungi promemoria"
+
+#: src/event-editor.c:1165
+msgid "Busy"
+msgstr "Occupato"
+
+#: src/event-editor.c:1165
+msgid "Available"
+msgstr "Disponibile"
+
+#: src/event-editor.c:1172
+msgid "Show me as"
+msgstr "Mostrami come"
+
+#: src/event-editor.c:1180
+msgid "Default"
+msgstr "Predefinito"
+
+#: src/event-editor.c:1180
+msgid "Confidential"
+msgstr "Riservato"
+
+#: src/event-editor.c:1180
+msgid "Private"
+msgstr "Privato"
+
+#: src/event-editor.c:1180
+msgid "Public"
+msgstr "Pubblico"
+
+#: src/event-editor.c:1185
+msgid "Privacy"
+msgstr "Privacy"
+
+#: src/event-editor.c:1329
+msgid "Change only this event"
+msgstr "Modifica solo questo evento"
+
+#: src/event-editor.c:1329
+msgid "Change this and all future events"
+msgstr "Modifica questo evento e tutti quelli futuri"
+
+#: src/event-editor.c:1330
+msgid "Change all events in the series"
+msgstr "Modifica tutti gli eventi della serie"
+
+#: src/event-editor.c:1339
+msgid "Details"
+msgstr "Dettagli"
+
+#: src/event-editor.c:1378 src/event-editor.c:1390
+msgid "Invalid iCalendar file"
+msgstr "File iCalendar non valido"
+
+#: src/event-info.c:236 src/reminders-main.c:340
+msgid "Email guests"
+msgstr "Invia email agli invitati"
+
+#: src/event-info.c:236
+msgid "Email organizer"
+msgstr "Invia email all'organizzatore"
+
+#: src/event-info.c:424
+msgid "Only this event"
+msgstr "Solo questo evento"
+
+#: src/event-info.c:424
+msgid "This and future events"
+msgstr "Questo evento e quelli futuri"
+
+#: src/event-info.c:424
+msgid "All events"
+msgstr "Tutti gli eventi"
+
+#: src/event-info.c:426
+#, c-format
+msgid "Delete %s?"
+msgstr "Eliminare %s?"
+
+#: src/event-info.c:432
+msgid "Delete this event?"
+msgstr "Eliminare questo evento?"
+
+#: src/event-info.c:478 src/event-info.c:783
+msgid "Export event"
+msgstr "Esporta evento"
+
+#: src/event-info.c:627
+msgid "Yes"
+msgstr "Sì"
+
+#: src/event-info.c:627
+msgid "No"
+msgstr "No"
+
+#: src/event-info.c:627
+msgid "Maybe"
+msgstr "Forse"
+
+#: src/event-info.c:627
+msgid "No response"
+msgstr "Nessuna risposta"
+
+#: src/event-info.c:771 src/event-info.c:777
+msgid "Edit"
+msgstr "Modifica"
+
+#: src/event-info.c:772 src/event-info.c:779
+msgid "Delete"
+msgstr "Elimina"
+
+#: src/event-info.c:780
+msgid "Duplicate"
+msgstr "Duplica"
+
+#: src/event-info.c:782
+msgid "Share"
+msgstr "Condividi"
+
+#: src/event-info.c:873
+msgid "Calendar:"
+msgstr "Calendario:"
+
+#: src/event-info.c:885
+msgid "Organizer:"
+msgstr "Organizzatore:"
+
+#: src/event-info.c:926
+msgid "REMINDERS"
+msgstr "PROMEMORIA"
+
+#: src/month-view.c:1129
+#, c-format
+msgid "+%d"
+msgid_plural "+%d"
+msgstr[0] "+%d"
+msgstr[1] "+%d"
+
+#: src/reminders-main.c:340
+msgid "Map"
+msgstr "Mappa"
+
+#: src/reminders-main.c:340
+msgid "Call"
+msgstr "Chiama"
+
+#: src/reminders-main.c:340
+msgid "Snooze"
+msgstr "Posticipa"
+
+#: src/reminders-main.c:359
+msgid "Open"
+msgstr "Apri"

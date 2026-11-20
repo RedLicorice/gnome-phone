@@ -33,6 +33,9 @@ const char *cal_minerva_repeat_of_rrule (const char *rrule, gint64 start);
 /* The RRULE of a repeat starting at @start, NULL for "none" and for one the app cannot make */
 char *cal_minerva_rrule_of_repeat (const char *repeat, gint64 start);
 
+/* A past run's outcome before its title: @ui's "mark_<state>" (minerva-config schedule ui), when it has one */
+void cal_minerva_mark_outcomes (GPtrArray *events, JsonObject *ui);
+
 /* @template with "{@key}" replaced by @value (minerva-config's texts) */
 char *cal_minerva_fill (const char *template, const char *key, const char *value);
 

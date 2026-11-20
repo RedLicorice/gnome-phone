@@ -243,6 +243,13 @@ show_minerva (Editor *editor)
                                                                           : _("Event name"));
 }
 
+/* the account is said only when it adds something: a calendar named as its account ("Minerva") is its name alone */
+static gboolean
+has_own_account (const CalCalendar *calendar)
+{
+  return calendar->account && *calendar->account && g_strcmp0 (calendar->account, calendar->name) != 0;
+}
+
 static void
 show_calendar (Editor *editor)
 {
@@ -251,7 +258,7 @@ show_calendar (Editor *editor)
 
   gtk_label_set_label (GTK_LABEL (editor->calendar_name), calendar ? calendar->name : "");
   gtk_label_set_label (GTK_LABEL (editor->calendar_account), calendar ? calendar->account : "");
-  gtk_widget_set_visible (editor->calendar_account, calendar && calendar->account && *calendar->account);
+  gtk_widget_set_visible (editor->calendar_account, calendar && has_own_account (calendar));
   /* the square shows the event's colour when it has its own, else the calendar's (setSpinnerBackgroundColor) */
   color = cal_argb (0xff000000 | (editor->own_color ? editor->color : calendar ? calendar->color : 0x3f51b5));
   g_object_set_data_full (G_OBJECT (editor->calendar_color), "cal-color", g_memdup2 (&color, sizeof color), g_free);
@@ -542,7 +549,7 @@ on_calendar (NeoPressable *row, Editor *editor)
         continue;
       if (g_strcmp0 (calendar->uid, editor->calendar) == 0)
         selected = (int) labels->len;
-      g_ptr_array_add (labels, calendar->account && *calendar->account
+      g_ptr_array_add (labels, has_own_account (calendar)
                                ? g_strdup_printf ("%s (%s)", calendar->name, calendar->account)
                                : g_strdup (calendar->name));
     }

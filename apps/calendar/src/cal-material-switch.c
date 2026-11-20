@@ -114,6 +114,15 @@ cal_material_switch_dispose (GObject *object)
   G_OBJECT_CLASS (cal_material_switch_parent_class)->dispose (object);
 }
 
+/* the tap as an action, so assistive technologies can toggle it too (AT-SPI lists a widget's actions) */
+static void
+switch_toggle (GtkWidget *widget, const char *name, GVariant *parameter)
+{
+  CalMaterialSwitch *self = CAL_MATERIAL_SWITCH (widget);
+
+  cal_material_switch_set_active (self, !self->active);
+}
+
 static void
 cal_material_switch_class_init (CalMaterialSwitchClass *klass)
 {
@@ -127,6 +136,7 @@ cal_material_switch_class_init (CalMaterialSwitchClass *klass)
   widget_class->measure = cal_material_switch_measure;
   gtk_widget_class_set_css_name (widget_class, "neo-switch");
   gtk_widget_class_set_accessible_role (widget_class, GTK_ACCESSIBLE_ROLE_SWITCH);
+  gtk_widget_class_install_action (widget_class, "switch.toggle", NULL, switch_toggle);
   props[PROP_ACTIVE] = g_param_spec_boolean ("active", NULL, NULL, FALSE,
                                              G_PARAM_READWRITE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
   g_object_class_install_properties (object_class, N_PROPS, props);
@@ -254,6 +264,14 @@ cal_check_box_set_property (GObject *object, guint id, const GValue *value, GPar
 }
 
 static void
+box_toggle (GtkWidget *widget, const char *name, GVariant *parameter)
+{
+  CalCheckBox *self = CAL_CHECK_BOX (widget);
+
+  cal_check_box_set_active (self, !self->active);
+}
+
+static void
 cal_check_box_class_init (CalCheckBoxClass *klass)
 {
   GObjectClass *object_class = G_OBJECT_CLASS (klass);
@@ -265,6 +283,7 @@ cal_check_box_class_init (CalCheckBoxClass *klass)
   widget_class->measure = cal_check_box_measure;
   gtk_widget_class_set_css_name (widget_class, "cal-check-box");
   gtk_widget_class_set_accessible_role (widget_class, GTK_ACCESSIBLE_ROLE_CHECKBOX);
+  gtk_widget_class_install_action (widget_class, "checkbox.toggle", NULL, box_toggle);
   box_props[BOX_PROP_ACTIVE] = g_param_spec_boolean ("active", NULL, NULL, FALSE,
                                                      G_PARAM_READWRITE | G_PARAM_EXPLICIT_NOTIFY
                                                      | G_PARAM_STATIC_STRINGS);

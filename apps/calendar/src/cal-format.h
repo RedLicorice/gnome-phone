@@ -1,11 +1,20 @@
 /* The calendar's dates and times as text: Android's DateUtils.formatDateRange and formatDateTime with the flags
- * Etar passes, and Etar's own phrases ("Today at …", "Tomorrow, …"). English patterns, translatable: the order of
- * day, month and year is the translation's to choose. GLib only (the reminder service uses it too). */
+ * Etar passes, and Etar's own phrases ("Today at …", "Tomorrow, …"). Dates follow LC_TIME (ICU skeletons, as
+ * DateFormat.getBestDateTimePattern): "20 novembre 2026" under it_IT whatever language the messages are in. */
 #pragma once
 
 #include <glib.h>
 
 G_BEGIN_DECLS
+
+/* the ICU locale of LC_TIME ("it_IT"; the POSIX locale is en_US): the language of every date */
+const char *cal_format_date_locale (void);
+
+/* a time in the LC_TIME locale's own order for an ICU skeleton ("yMd": "20/11/2026" under it_IT) */
+char *cal_format_skeleton (GDateTime *time, const char *skeleton);
+
+/* "on every first Sunday" … "on every last Saturday" (weekday 0 = Sunday, nth 0-3, 4 = last), translated */
+const char *cal_format_nth_weekday (int weekday, int nth);
 
 /* the system clock's 24-hour setting (org.gnome.desktop.interface clock-format; DateFormat.is24HourFormat) */
 gboolean cal_format_uses_24h (void);

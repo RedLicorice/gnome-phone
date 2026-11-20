@@ -165,6 +165,20 @@ on_events (GPtrArray *events, gpointer data)
         cal_window_toast (shell->window, text);
       }
   }
+  /* where the run history begins, in the views that can show it: a row in the agenda, a line in the day and week */
+  {
+    gint64 history = cal_store_minerva_history (shell->store);
+    JsonObject *ui = cal_store_minerva_ui (shell->store);
+    const CalCalendar *minerva = cal_store_find_calendar (shell->store, CAL_MINERVA_CALENDAR);
+    gboolean shown = ui && minerva && minerva->visible && history > 0;
+    g_autofree char *date = shown ? cal_format_full_date (cal_day_number (history)) : NULL;
+    g_autofree char *text = shown ? cal_minerva_fill (ns_json_str (ui, "history_row"), "date", date) : NULL;
+
+    cal_agenda_view_set_history (CAL_AGENDA_VIEW (shell->view_widgets[VIEW_AGENDA]),
+                                 shown ? cal_day_number (history) : 0, text);
+    cal_day_view_set_history (CAL_DAY_VIEW (shell->view_widgets[VIEW_DAY]), shown ? history : 0, text);
+    cal_day_view_set_history (CAL_DAY_VIEW (shell->view_widgets[VIEW_WEEK]), shown ? history : 0, text);
+  }
   view = shell->view_widgets[shell->view];
   switch (shell->view)
     {

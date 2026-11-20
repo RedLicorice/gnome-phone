@@ -130,6 +130,8 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC (CalEvent, cal_event_unref)
 
 /* Etar's Event.drawAsAllday: all-day, or lasting a day or more; drawn in the all-day area, not the grid */
 gboolean cal_event_draws_as_all_day (const CalEvent *event);
+/* drawn faded (the declined colours): a declined invitation, or a run of Minerva's that is history */
+gboolean cal_event_faded (const CalEvent *event);
 
 /* the days an event covers, as day numbers (cal_day_number); an end exactly at midnight ends the day before */
 int cal_event_first_day (const CalEvent *event);

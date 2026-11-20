@@ -101,6 +101,29 @@ cal_minerva_events_of (JsonObject *root, guint32 color, gint64 *history_from)
   return out;
 }
 
+void
+cal_minerva_mark_outcomes (GPtrArray *events, JsonObject *ui)
+{
+  for (guint i = 0; ui && events && i < events->len; i++)
+    {
+      CalEvent *event = events->pdata[i];
+      g_autofree char *key = NULL;
+      const char *mark;
+
+      if (!event->minerva || !event->minerva->past || !event->minerva->state)
+        continue;
+      key = g_strconcat ("mark_", event->minerva->state, NULL);
+      mark = json_object_get_string_member_with_default (ui, key, "");
+      if (*mark)
+        {
+          char *title = g_strdup_printf ("%s %s", mark, event->title ? event->title : "");
+
+          g_free (event->title);
+          event->title = title;
+        }
+    }
+}
+
 /* the day of the week of @start (0 Sunday), in local time */
 static int
 weekday_of (gint64 start)

@@ -33,6 +33,8 @@
 #define TITLE_SIZE 18.0
 #define WHEN_SIZE 14.0
 #define WHERE_TOP -3.0
+#define HISTORY_HEIGHT 32.0             /* the row where Minerva's run history begins */
+#define HISTORY_TEXT_PADDING 8.0        /* the gap cut in its line around the text */
 
 #define DAY_TEXT_COLOR CAL_AGENDA_DAY_TEXT
 #define ITEM_TITLE_COLOR CAL_AGENDA_TITLE   /* agenda_item_standard_color */
@@ -43,7 +45,7 @@
 #define WINDOW_AFTER 60
 #define WINDOW_GROW 60
 
-typedef enum { ROW_DAY, ROW_EVENT } RowType;
+typedef enum { ROW_DAY, ROW_EVENT, ROW_HISTORY } RowType;
 
 typedef struct {
   RowType type;
@@ -52,6 +54,139 @@ typedef struct {
   gboolean past_present;        /* ROW_DAY: the first day from today on, under the red line */
   double y, height;
 } Row;
+
+/* --- a row for assistive technologies: the list is drawn, so each row is an accessible object of its own (a
+ * list item with its text and place), the list's accessible children */
+
+#define CAL_TYPE_AGENDA_ROW_A11Y (cal_agenda_row_a11y_get_type ())
+G_DECLARE_FINAL_TYPE (CalAgendaRowA11y, cal_agenda_row_a11y, CAL, AGENDA_ROW_A11Y, GObject)
+
+struct _CalAgendaRowA11y {
+  GObject parent;
+  GtkATContext *context;
+  GtkAccessible *list;          /* its parent: not a reference, the list holds the rows */
+  CalAgendaRowA11y *next;       /* not a reference either */
+  GtkAccessibleRole role;       /* GtkAccessible's "accessible-role": what GTK reads before the context is realized */
+  double y, height;
+};
+
+enum { ROW_A11Y_PROP_ROLE = 1 };
+
+static void cal_agenda_row_a11y_accessible_init (GtkAccessibleInterface *iface);
+
+G_DEFINE_FINAL_TYPE_WITH_CODE (CalAgendaRowA11y, cal_agenda_row_a11y, G_TYPE_OBJECT,
+                               G_IMPLEMENT_INTERFACE (GTK_TYPE_ACCESSIBLE, cal_agenda_row_a11y_accessible_init))
+
+static GtkATContext *
+row_a11y_get_at_context (GtkAccessible *accessible)
+{
+  CalAgendaRowA11y *self = CAL_AGENDA_ROW_A11Y (accessible);
+
+  return self->context ? g_object_ref (self->context) : NULL;
+}
+
+static gboolean
+row_a11y_get_platform_state (GtkAccessible *accessible, GtkAccessiblePlatformState state)
+{
+  return FALSE;
+}
+
+static GtkAccessible *
+row_a11y_get_parent (GtkAccessible *accessible)
+{
+  CalAgendaRowA11y *self = CAL_AGENDA_ROW_A11Y (accessible);
+
+  return self->list ? g_object_ref (self->list) : NULL;
+}
+
+static GtkAccessible *
+row_a11y_get_first_child (GtkAccessible *accessible)
+{
+  return NULL;
+}
+
+static GtkAccessible *
+row_a11y_get_next_sibling (GtkAccessible *accessible)
+{
+  CalAgendaRowA11y *self = CAL_AGENDA_ROW_A11Y (accessible);
+
+  return self->next ? g_object_ref (GTK_ACCESSIBLE (self->next)) : NULL;
+}
+
+static gboolean
+row_a11y_get_bounds (GtkAccessible *accessible, int *x, int *y, int *width, int *height)
+{
+  CalAgendaRowA11y *self = CAL_AGENDA_ROW_A11Y (accessible);
+
+  if (!self->list)
+    return FALSE;
+  *x = 0;
+  *y = (int) self->y;
+  *width = gtk_widget_get_width (GTK_WIDGET (self->list));
+  *height = (int) ceil (self->height);
+  return TRUE;
+}
+
+static void
+cal_agenda_row_a11y_accessible_init (GtkAccessibleInterface *iface)
+{
+  iface->get_at_context = row_a11y_get_at_context;
+  iface->get_platform_state = row_a11y_get_platform_state;
+  iface->get_accessible_parent = row_a11y_get_parent;
+  iface->get_first_accessible_child = row_a11y_get_first_child;
+  iface->get_next_accessible_sibling = row_a11y_get_next_sibling;
+  iface->get_bounds = row_a11y_get_bounds;
+}
+
+static void
+cal_agenda_row_a11y_dispose (GObject *object)
+{
+  g_clear_object (&CAL_AGENDA_ROW_A11Y (object)->context);
+  G_OBJECT_CLASS (cal_agenda_row_a11y_parent_class)->dispose (object);
+}
+
+static void
+row_a11y_get_property (GObject *object, guint id, GValue *value, GParamSpec *pspec)
+{
+  if (id == ROW_A11Y_PROP_ROLE)
+    g_value_set_enum (value, CAL_AGENDA_ROW_A11Y (object)->role);
+}
+
+static void
+row_a11y_set_property (GObject *object, guint id, const GValue *value, GParamSpec *pspec)
+{
+  if (id == ROW_A11Y_PROP_ROLE)
+    CAL_AGENDA_ROW_A11Y (object)->role = g_value_get_enum (value);
+}
+
+static void
+cal_agenda_row_a11y_class_init (CalAgendaRowA11yClass *klass)
+{
+  GObjectClass *object_class = G_OBJECT_CLASS (klass);
+
+  object_class->dispose = cal_agenda_row_a11y_dispose;
+  object_class->get_property = row_a11y_get_property;
+  object_class->set_property = row_a11y_set_property;
+  g_object_class_override_property (object_class, ROW_A11Y_PROP_ROLE, "accessible-role");
+}
+
+static void
+cal_agenda_row_a11y_init (CalAgendaRowA11y *self)
+{
+}
+
+static CalAgendaRowA11y *
+row_a11y_new (GtkWidget *list, GtkAccessibleRole role, const char *label, double y, double height)
+{
+  CalAgendaRowA11y *self = g_object_new (CAL_TYPE_AGENDA_ROW_A11Y, "accessible-role", role, NULL);
+
+  self->list = GTK_ACCESSIBLE (list);
+  self->y = y;
+  self->height = height;
+  self->context = gtk_at_context_create (role, GTK_ACCESSIBLE (self), gtk_widget_get_display (list));
+  gtk_accessible_update_property (GTK_ACCESSIBLE (self), GTK_ACCESSIBLE_PROPERTY_LABEL, label ? label : "", -1);
+  return self;
+}
 
 /* --- the drawn list */
 
@@ -64,9 +199,28 @@ struct _CalAgendaList {
   NeoRipple ripple;
   int pressed;                  /* the row the ripple is on, or −1 */
   double drawn_from, drawn_to;  /* the part of the list the last snapshot drew */
+  GPtrArray *a11y;              /* CalAgendaRowA11y, one per row, in order */
 };
 
-G_DEFINE_FINAL_TYPE (CalAgendaList, cal_agenda_list, GTK_TYPE_WIDGET)
+static void cal_agenda_list_accessible_init (GtkAccessibleInterface *iface);
+
+G_DEFINE_FINAL_TYPE_WITH_CODE (CalAgendaList, cal_agenda_list, GTK_TYPE_WIDGET,
+                               G_IMPLEMENT_INTERFACE (GTK_TYPE_ACCESSIBLE, cal_agenda_list_accessible_init))
+
+/* the list's accessible children are its rows (it has no widget children) */
+static GtkAccessible *
+list_get_first_accessible_child (GtkAccessible *accessible)
+{
+  CalAgendaList *self = CAL_AGENDA_LIST (accessible);
+
+  return self->a11y && self->a11y->len ? g_object_ref (GTK_ACCESSIBLE (self->a11y->pdata[0])) : NULL;
+}
+
+static void
+cal_agenda_list_accessible_init (GtkAccessibleInterface *iface)
+{
+  iface->get_first_accessible_child = list_get_first_accessible_child;
+}
 
 struct _CalAgendaView {
   GtkWidget parent;
@@ -76,6 +230,8 @@ struct _CalAgendaView {
   GArray *rows;
   double content_height;
   int first, last;              /* the days loaded */
+  int history_day;              /* the day Minerva's run history begins on (0: none to show), and what its row says */
+  char *history_text;
   int top_day;
   /* growing the window: what it waits for, and the ends where a growth found nothing more (no more asking there
    * until the next go_to) */
@@ -154,6 +310,24 @@ draw_day (GtkWidget *widget, GtkSnapshot *snapshot, int scale, const Row *row, d
                  y + top + DAY_LINE_TOP + day_height + DAY_LINE_BOTTOM + date_baseline, 0, &text);
 }
 
+/* where Minerva's run history begins: a line across the row, the text in a gap at its middle */
+static void
+draw_history (GtkWidget *widget, GtkSnapshot *snapshot, int scale, const char *text, double y, double width)
+{
+  double px = 1.0 / scale, baseline, height, text_width, mid = y + HISTORY_HEIGHT / 2;
+  GdkRGBA line = cal_argb (CAL_AGENDA_SEPARATOR), color = cal_argb (ITEM_WHEN_COLOR);
+  g_autoptr(PangoLayout) layout = cal_text_layout (widget, text ? text : "", WHEN_SIZE, 700);
+  int w;
+
+  cal_text_ellipsize (layout, width - 2 * (DAY_LEFT + HISTORY_TEXT_PADDING));
+  pango_layout_get_pixel_size (layout, &w, NULL);
+  text_width = w + 2 * HISTORY_TEXT_PADDING;
+  cal_fill_rect (snapshot, scale, DAY_LEFT, mid, (width - text_width) / 2 - DAY_LEFT, px, &line);
+  cal_fill_rect (snapshot, scale, (width + text_width) / 2, mid, (width - text_width) / 2 - DAY_LEFT, px, &line);
+  cal_text_line (WHEN_SIZE, scale, &baseline, &height);
+  cal_text_draw (snapshot, layout, width / 2, mid - height / 2 + baseline, 0.5, &color);
+}
+
 static void
 draw_event (GtkWidget *widget, GtkSnapshot *snapshot, int scale, const Row *row, double y, double width)
 {
@@ -162,7 +336,7 @@ draw_event (GtkWidget *widget, GtkSnapshot *snapshot, int scale, const Row *row,
   double text_x = CHIP_LEFT + CHIP_WIDTH + CHIP_RIGHT, text_width = width - text_x - ITEM_RIGHT_MARGIN;
   /* AgendaAdapter.bindView: a declined event's text in the declined colours and its chip faded (DRAW_FADED); an
    * unanswered invitation's chip a frame (DRAW_BORDER) */
-  gboolean declined = event->self_status == CAL_STATUS_DECLINED;
+  gboolean declined = cal_event_faded (event);   /* a declined invitation, or a run of Minerva's that is history */
   guint32 chip_rgb = cal_event_display_color (event);
   GdkRGBA separator = cal_argb (CAL_AGENDA_SEPARATOR);
   GdkRGBA chip = cal_argb (declined ? cal_declined_color (chip_rgb) : 0xff000000 | chip_rgb);
@@ -236,6 +410,8 @@ cal_agenda_list_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
         continue;
       if (row->type == ROW_DAY)
         draw_day (widget, snapshot, scale, row, row->y, width);
+      else if (row->type == ROW_HISTORY)
+        draw_history (widget, snapshot, scale, view->history_text, row->y, width);
       else
         draw_event (widget, snapshot, scale, row, row->y, width);
       if ((int) i == self->pressed && neo_ripple_is_active (&self->ripple))
@@ -306,6 +482,7 @@ static void
 cal_agenda_list_dispose (GObject *object)
 {
   neo_ripple_clear (&CAL_AGENDA_LIST (object)->ripple);
+  g_clear_pointer (&CAL_AGENDA_LIST (object)->a11y, g_ptr_array_unref);
   G_OBJECT_CLASS (cal_agenda_list_parent_class)->dispose (object);
 }
 
@@ -326,6 +503,7 @@ cal_agenda_list_init (CalAgendaList *self)
   GtkGesture *click = gtk_gesture_click_new ();
 
   self->pressed = -1;
+  self->a11y = g_ptr_array_new_with_free_func (g_object_unref);
   neo_ripple_init (&self->ripple, GTK_WIDGET (self));
   g_signal_connect (click, "pressed", G_CALLBACK (on_list_pressed), self);
   g_signal_connect (click, "released", G_CALLBACK (on_list_released), self);
@@ -347,6 +525,44 @@ static double
 event_row_height (CalAgendaView *self)
 {
   return 1.0 / neo_device_scale (GTK_WIDGET (self)) + ITEM_MIN_HEIGHT;
+}
+
+/* the rows as assistive technologies read them: a day ("Today, Friday, November 20"), an event (its title, when
+ * and where), the history's row (its text) */
+static void
+build_a11y (CalAgendaView *self)
+{
+  GPtrArray *a11y = self->list->a11y;
+
+  g_ptr_array_set_size (a11y, 0);
+  for (guint i = 0; i < self->rows->len; i++)
+    {
+      const Row *row = &g_array_index (self->rows, Row, i);
+      g_autofree char *label = NULL;
+      CalAgendaRowA11y *item;
+
+      if (row->type == ROW_DAY)
+        {
+          g_autofree char *day = day_text (row->day), *date = date_text (row->day);
+
+          label = g_strdup_printf ("%s, %s", day, date);
+        }
+      else if (row->type == ROW_HISTORY)
+        label = g_strdup (self->history_text);
+      else
+        {
+          CalEvent *event = row->event;
+          g_autofree char *when = cal_format_agenda_when (event->start, event->end, event->all_day);
+          const char *title = event->title && *event->title ? event->title : _("(No title)");
+
+          label = event->location && *event->location ? g_strdup_printf ("%s, %s, %s", title, when, event->location)
+                                                       : g_strdup_printf ("%s, %s", title, when);
+        }
+      item = row_a11y_new (GTK_WIDGET (self->list), GTK_ACCESSIBLE_ROLE_LIST_ITEM, label, row->y, row->height);
+      if (a11y->len)
+        CAL_AGENDA_ROW_A11Y (a11y->pdata[a11y->len - 1])->next = item;
+      g_ptr_array_add (a11y, item);
+    }
 }
 
 static void
@@ -385,6 +601,14 @@ build_rows (CalAgendaView *self)
       GPtrArray *list = g_hash_table_lookup (days, GINT_TO_POINTER (day));
       Row header = { ROW_DAY, day, NULL, FALSE, 0, 0 };
 
+      /* the history's first day, with or without events: what is above it is no longer kept */
+      if (day == self->history_day && day > self->first)
+        {
+          Row history = { ROW_HISTORY, day, NULL, FALSE, y, HISTORY_HEIGHT };
+
+          y += history.height;
+          g_array_append_val (self->rows, history);
+        }
       if (!list)
         continue;
       if (!past_present_done && day >= now)
@@ -402,6 +626,7 @@ build_rows (CalAgendaView *self)
         }
     }
   self->content_height = y;
+  build_a11y (self);
 }
 
 /* the y of the anchor row: the header of its day (or the first day after it), or its event under that day */
@@ -571,6 +796,7 @@ cal_agenda_view_dispose (GObject *object)
   g_clear_pointer (&self->events, g_ptr_array_unref);
   g_clear_pointer (&self->rows, g_array_unref);
   g_clear_pointer (&self->anchor_uid, g_free);
+  g_clear_pointer (&self->history_text, g_free);
   G_OBJECT_CLASS (cal_agenda_view_parent_class)->dispose (object);
 }
 
@@ -637,6 +863,16 @@ cal_agenda_view_get_range (CalAgendaView *self, int *first, int *last)
 {
   *first = self->first;
   *last = self->last;
+}
+
+void
+cal_agenda_view_set_history (CalAgendaView *self, int day, const char *text)
+{
+  if (self->history_day == day && g_strcmp0 (self->history_text, text) == 0)
+    return;
+  self->history_day = day;
+  g_free (self->history_text);
+  self->history_text = g_strdup (text);
 }
 
 void

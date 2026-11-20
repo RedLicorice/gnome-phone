@@ -485,8 +485,8 @@ formatted_time (CalMonthView *self, const CalEvent *event, const Details *detail
           /* FORMAT_SHOW_DATE | FORMAT_ABBREV_ALL: "Nov 9", with the year when it is not this one */
           g_autoptr(GDateTime) local = g_date_time_new_from_unix_local (event->end);
           g_autoptr(GDateTime) now = g_date_time_new_now_local ();
-          g_autofree char *date = g_date_time_format (local, g_date_time_get_year (local) == g_date_time_get_year (now)
-                                                             ? C_("date", "%b %-d") : C_("date", "%b %-d, %Y"));
+          g_autofree char *date = cal_format_skeleton (local, g_date_time_get_year (local) == g_date_time_get_year (now)
+                                                              ? "MMMd" : "yMMMd");
 
           g_string_append_printf (time, "%s, ", date);
         }
@@ -971,7 +971,7 @@ draw_rectangle (GtkSnapshot *snapshot, const Px *px, const Box *box, const Forma
   int span = format_span (formatted->format, day), lines = formatted->format->lines;
   int left, right, top, bottom;
   guint32 rgb = cal_event_display_color (event);
-  guint32 color = 0xff000000 | (event->self_status == CAL_STATUS_DECLINED ? cal_declined_color (rgb) : rgb);
+  guint32 color = 0xff000000 | (cal_event_faded (event) ? cal_declined_color (rgb) : rgb);
 
   left = box->x;
   if (formatted->bounds == BOUNDS_ALL_DAY)
@@ -1010,7 +1010,7 @@ text_color (const Formatted *formatted)
   if (event->self_status != CAL_STATUS_INVITED && bar)
     /* on the bar: white, or black or white by the bar's brightness with real event colours */
     return cal_adaptive_text_color (0xffffffff, rgb);
-  if (event->self_status == CAL_STATUS_DECLINED)
+  if (cal_event_faded (event))
     return CAL_AGENDA_DECLINED_TITLE;
   if (bar)
     /* an invitation's frame: the text in the frame's colour */
@@ -1089,7 +1089,7 @@ draw_times (CalMonthView *self, GtkSnapshot *snapshot, const Px *px, Box *box, c
 
   draw_line (self, snapshot, px, time, EXTRAS_SIZE, 400, x, box_y (box) + px->event_ascent,
              box_right (box, 1) - border - x, FALSE,
-             formatted->event->self_status == CAL_STATUS_DECLINED ? CAL_AGENDA_DECLINED_WHEN : CAL_MONTH_EVENT_EXTRA);
+             cal_event_faded (formatted->event) ? CAL_AGENDA_DECLINED_WHEN : CAL_MONTH_EVENT_EXTRA);
   box->y_offset += px->extras_height;
 }
 

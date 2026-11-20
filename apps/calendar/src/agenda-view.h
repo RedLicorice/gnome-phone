@@ -26,5 +26,7 @@ GtkWidget *cal_agenda_view_new       (void);
 void       cal_agenda_view_go_to     (CalAgendaView *self, int day);
 void       cal_agenda_view_get_range (CalAgendaView *self, int *first, int *last);
 void       cal_agenda_view_set_events (CalAgendaView *self, GPtrArray *events);
+/* the day Minerva's run history begins on (0: none) and its row's text: a row there from the next set_events */
+void       cal_agenda_view_set_history (CalAgendaView *self, int day, const char *text);
 
 G_END_DECLS

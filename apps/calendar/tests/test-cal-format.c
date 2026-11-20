@@ -53,6 +53,31 @@ test_week_start (void)
   g_assert_cmpint (cal_week_start (7), ==, 6);   /* Saturday */
 }
 
+/* the dates follow LC_TIME and the sentences LC_MESSAGES: an Italian date under English messages is
+ * "20 novembre 2026", and a weekday inside a sentence stays in the sentence's language */
+static void
+test_dates_follow_lc_time (void)
+{
+  g_autoptr(GDateTime) friday = g_date_time_new_local (2026, 11, 20, 12, 0, 0);
+  int day = cal_day_number (g_date_time_to_unix (friday));
+  g_autofree char *c = cal_format_full_date (day);
+
+  g_assert_cmpstr (c, ==, "November 20, 2026");
+  if (!setlocale (LC_TIME, "it_IT.UTF-8"))
+    {
+      g_test_skip ("no it_IT.UTF-8 locale here");
+      return;
+    }
+  {
+    g_autofree char *it = cal_format_full_date (day);
+    g_autofree char *rule = cal_format_rrule ("FREQ=WEEKLY;BYDAY=FR", g_date_time_to_unix (friday));
+
+    g_assert_cmpstr (it, ==, "20 novembre 2026");
+    g_assert_cmpstr (rule, ==, "Weekly on Friday");
+  }
+  setlocale (LC_TIME, "C.UTF-8");
+}
+
 int
 main (int argc, char **argv)
 {
@@ -62,5 +87,6 @@ main (int argc, char **argv)
   g_test_add_func ("/format/rrule", test_rrule);
   g_test_add_func ("/format/reminder-minutes", test_reminder_minutes);
   g_test_add_func ("/format/week-start", test_week_start);
+  g_test_add_func ("/format/dates-follow-lc-time", test_dates_follow_lc_time);
   return g_test_run ();
 }

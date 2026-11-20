@@ -191,6 +191,12 @@ cal_event_draws_as_all_day (const CalEvent *event)
   return event->all_day || event->end - event->start >= 24 * 3600;
 }
 
+gboolean
+cal_event_faded (const CalEvent *event)
+{
+  return event->self_status == CAL_STATUS_DECLINED || (event->minerva && event->minerva->past);
+}
+
 int
 cal_event_first_day (const CalEvent *event)
 {

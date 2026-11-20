@@ -894,6 +894,8 @@ on_minerva_read (JsonObject *root, const char *err, gpointer data)
     {
       g_autoptr(GPtrArray) events = cal_minerva_events_of (root, read->color, &read->store->minerva_history);
 
+      cal_minerva_mark_outcomes (events, read->store->minerva_ui);
+
       for (guint i = 0; i < events->len; i++)
         g_ptr_array_add (query->events, cal_event_ref (events->pdata[i]));
     }
@@ -1021,6 +1023,7 @@ typedef struct {
   GTask *task;
   char *uid, *rid;
   guint32 color;
+  JsonObject *ui;               /* the app's texts, for a run's outcome mark */
 } MinervaFind;
 
 static void
@@ -1032,6 +1035,8 @@ on_minerva_found (JsonObject *root, const char *err, gpointer data)
   if (!err && root && json_object_get_boolean_member_with_default (root, "ok", FALSE))
     {
       g_autoptr(GPtrArray) events = cal_minerva_events_of (root, find->color, NULL);
+
+      cal_minerva_mark_outcomes (events, find->ui);
 
       for (guint i = 0; !found && i < events->len; i++)
         {
@@ -1048,6 +1053,7 @@ on_minerva_found (JsonObject *root, const char *err, gpointer data)
   g_object_unref (find->task);
   g_free (find->uid);
   g_free (find->rid);
+  g_clear_pointer (&find->ui, json_object_unref);
   g_free (find);
 }
 
@@ -1071,6 +1077,7 @@ cal_store_find_event (CalStore *self, const char *calendar, const char *uid, con
       find->uid = g_strdup (uid);
       find->rid = g_strdup (rid);
       find->color = info ? info->color : 0;
+      find->ui = self->minerva_ui ? json_object_ref (self->minerva_ui) : NULL;
       ns_mc_run (G_OBJECT (self), args, NULL, on_minerva_found, find);
       return;
     }

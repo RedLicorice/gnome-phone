@@ -597,7 +597,7 @@ static char *
 input_pattern (void)
 {
   UErrorCode status = U_ZERO_ERROR;
-  UDateFormat *format = udat_open (UDAT_NONE, UDAT_SHORT, uloc_getDefault (), NULL, 0, NULL, 0, &status);
+  UDateFormat *format = udat_open (UDAT_NONE, UDAT_SHORT, cal_format_date_locale (), NULL, 0, NULL, 0, &status);
   UChar pattern[64];
   int32_t length;
   g_autofree char *text = NULL;
@@ -649,7 +649,7 @@ pattern_format (const char *pattern)
   if (strlen (pattern) >= G_N_ELEMENTS (text))
     return NULL;
   u_uastrcpy (text, pattern);
-  format = udat_open (UDAT_PATTERN, UDAT_PATTERN, uloc_getDefault (), utc, -1, text, -1, &status);
+  format = udat_open (UDAT_PATTERN, UDAT_PATTERN, cal_format_date_locale (), utc, -1, text, -1, &status);
   if (U_FAILURE (status))
     return NULL;
   udat_setLenient (format, FALSE);
@@ -679,7 +679,7 @@ static char *
 format_far_day (UDate ms)
 {
   UErrorCode status = U_ZERO_ERROR;
-  UDateTimePatternGenerator *generator = udatpg_open (uloc_getDefault (), &status);
+  UDateTimePatternGenerator *generator = udatpg_open (cal_format_date_locale (), &status);
   UChar skeleton[] = { 'y', 'M', 'M', 'M', 'd', 0 }, pattern[64], text[64], utc[] = { 'U', 'T', 'C', 0 };
   UDateFormat *format;
   int32_t length;
@@ -691,7 +691,7 @@ format_far_day (UDate ms)
   udatpg_close (generator);
   if (U_FAILURE (status))
     return NULL;
-  format = udat_open (UDAT_PATTERN, UDAT_PATTERN, uloc_getDefault (), utc, -1, pattern, length, &status);
+  format = udat_open (UDAT_PATTERN, UDAT_PATTERN, cal_format_date_locale (), utc, -1, pattern, length, &status);
   if (U_FAILURE (status))
     return NULL;
   length = udat_format (format, ms, text, G_N_ELEMENTS (text), NULL, &status);

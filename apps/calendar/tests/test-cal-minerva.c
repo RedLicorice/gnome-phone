@@ -42,6 +42,17 @@ test_events (void)
   g_assert_cmpstr (past->rid, ==, "run-2");
   g_assert_cmpstr (past->minerva->error, ==, "timeout");
   g_assert_cmpint (history, ==, 1795137795);   /* 01:23:15 UTC */
+  /* a run is drawn faded, its outcome's mark (the app's texts) before its title; a due time keeps its own */
+  g_assert_true (cal_event_faded (past));
+  g_assert_false (cal_event_faded (once));
+  {
+    g_autoptr(JsonParser) parser = json_parser_new ();
+
+    g_assert_true (json_parser_load_from_data (parser, "{\"mark_failed\": \"\u2715\"}", -1, NULL));
+    cal_minerva_mark_outcomes (events, json_node_get_object (json_parser_get_root (parser)));
+  }
+  g_assert_cmpstr (past->title, ==, "\u2715 pulizia");
+  g_assert_cmpstr (once->title, ==, "chiama Anna");
   g_assert_null (cal_minerva_events ("[", 0, NULL, &error));
 }
 
