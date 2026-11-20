@@ -1,7 +1,7 @@
 /* Minerva > Avatar: the owner's avatar settings, built entirely from the one schema the kiosk serves
  * (org.minerva.Kiosk1 SettingsDescribe: Minerva's kiosk/data/avatar-settings.json with each setting's default and
  * value). Each group of the schema is an accordion (AdwExpanderRow) with one row per setting: a slider for a number,
- * a switch for a flag, a drop-down for a choice; a "restore defaults" row per group and a global one. A change goes to
+ * a switch for a flag, a drop-down for a choice, a drop-down of swatches (and the colour dialog) for a colour; a "restore defaults" row per group and a global one. A change goes to
  * the kiosk at once (SettingsSet), which checks it against the same schema and shows it on the face live; the page
  * keeps no list of settings of its own (docs/avatar-settings.md in Minerva's repository). */
 #include <math.h>
@@ -9,6 +9,7 @@
 #include <adwaita.h>
 #include <json-glib/json-glib.h>
 
+#include "ns-avatar-preview.h"
 #include "ns-pages.h"
 #include "ns-ui.h"
 
@@ -163,9 +164,19 @@ show_value (Av *a, const char *key, JsonNode *value)
     gtk_range_set_value (GTK_RANGE (w), json_node_get_double (value));
   } else if (GTK_IS_DROP_DOWN (w)) {
     GStrv ids = g_object_get_data (G_OBJECT (w), "av-ids");
+    const char *v = json_node_get_string (value);
+    gboolean found = FALSE;
     for (guint i = 0; ids && ids[i]; i++)
-      if (!g_strcmp0 (ids[i], json_node_get_string (value)))
+      if (!g_strcmp0 (ids[i], v)) {
         gtk_drop_down_set_selected (GTK_DROP_DOWN (w), i);
+        found = TRUE;
+      }
+    if (g_object_get_data (G_OBJECT (w), "av-colour") != NULL) {   /* a colour: the custom item holds any other */
+      g_object_set_data_full (G_OBJECT (w), "av-value", g_strdup (v), g_free);
+      if (!found && g_object_get_data (G_OBJECT (w), "av-custom") != NULL)
+        gtk_drop_down_set_selected (GTK_DROP_DOWN (w), g_strv_length (ids));
+      gtk_widget_queue_draw (w);
+    }
   }
   a->syncing = FALSE;
 }
@@ -207,6 +218,137 @@ drop_changed (GtkDropDown *dd, GParamSpec *ps, Av *a)
     return;
   g_autofree char *quoted = g_strdup_printf ("\"%s\"", ids[i]);
   av_set (a, g_object_get_data (G_OBJECT (dd), "av-key"), quoted);
+}
+
+/* ---- a colour: the part's own presets, each with its swatch, and a custom colour from the colour dialog ---- */
+
+static gboolean
+rgba_of (GtkDropDown *dd, guint i, GdkRGBA *rgba)
+{
+  GStrv ids = g_object_get_data (G_OBJECT (dd), "av-ids");
+  GStrv hexes = g_object_get_data (G_OBJECT (dd), "av-colour");
+  const char *v = g_object_get_data (G_OBJECT (dd), "av-value");
+
+  if (i < g_strv_length (ids))
+    return gdk_rgba_parse (rgba, hexes[i]);
+  return v != NULL && !g_strv_contains ((const char *const *) ids, v) && gdk_rgba_parse (rgba, v);
+}
+
+static void
+swatch_draw (GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer data)
+{
+  GtkListItem *item = data;
+  GtkDropDown *dd = g_object_get_data (G_OBJECT (area), "av-dd");
+  guint i = item != NULL ? gtk_list_item_get_position (item) : gtk_drop_down_get_selected (dd);
+  GdkRGBA c;
+  double r = MIN (w, h) / 2.0;
+
+  if (dd == NULL || !rgba_of (dd, i, &c))
+    return;
+  cairo_arc (cr, w / 2.0, h / 2.0, r - 1, 0, 2 * G_PI);
+  gdk_cairo_set_source_rgba (cr, &c);
+  cairo_fill_preserve (cr);
+  gtk_widget_get_color (GTK_WIDGET (area), &c);   /* a hairline in the theme's text colour: white or black stays visible */
+  gdk_cairo_set_source_rgba (cr, &c);
+  cairo_set_line_width (cr, 1);
+  cairo_stroke (cr);
+}
+
+static void
+swatch_setup (GtkSignalListItemFactory *f, GtkListItem *item, GtkDropDown *dd)
+{
+  GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+  GtkWidget *area = gtk_drawing_area_new ();
+  GtkWidget *label = gtk_label_new ("");
+
+  gtk_widget_set_size_request (area, TOUCH_PX / 2, TOUCH_PX / 2);
+  gtk_widget_set_valign (area, GTK_ALIGN_CENTER);
+  g_object_set_data (G_OBJECT (area), "av-dd", dd);
+  gtk_drawing_area_set_draw_func (GTK_DRAWING_AREA (area), swatch_draw, item, NULL);
+  gtk_box_append (GTK_BOX (box), area);
+  gtk_box_append (GTK_BOX (box), label);
+  gtk_list_item_set_child (item, box);
+}
+
+static void
+swatch_bind (GtkSignalListItemFactory *f, GtkListItem *item, GtkDropDown *dd)
+{
+  GtkWidget *box = gtk_list_item_get_child (item);
+  gtk_label_set_text (GTK_LABEL (gtk_widget_get_last_child (box)),
+                      gtk_string_object_get_string (gtk_list_item_get_item (item)));
+  gtk_widget_queue_draw (gtk_widget_get_first_child (box));
+}
+
+static void
+colour_chosen (GObject *src, GAsyncResult *res, gpointer data)
+{
+  GtkDropDown *dd = data;
+  Av *a = g_object_get_data (G_OBJECT (dd), "av");
+  g_autoptr (GdkRGBA) c = gtk_color_dialog_choose_rgba_finish (GTK_COLOR_DIALOG (src), res, NULL);
+
+  if (c != NULL) {
+    g_autofree char *hex = g_strdup_printf ("\"#%02x%02x%02x\"", (int) round (c->red * 255), (int) round (c->green * 255),
+                                            (int) round (c->blue * 255));
+    av_set (a, g_object_get_data (G_OBJECT (dd), "av-key"), hex);
+  } else {
+    av_load (a);   /* cancelled: the page shows what the kiosk holds again */
+  }
+  g_object_unref (dd);
+}
+
+static void
+colour_changed (GtkDropDown *dd, GParamSpec *ps, Av *a)
+{
+  GStrv ids = g_object_get_data (G_OBJECT (dd), "av-ids");
+  guint i = gtk_drop_down_get_selected (dd);
+  GdkRGBA now;
+
+  gtk_widget_queue_draw (GTK_WIDGET (dd));
+  if (a->syncing || i == GTK_INVALID_LIST_POSITION)
+    return;
+  if (i < g_strv_length (ids)) {
+    g_autofree char *quoted = g_strdup_printf ("\"%s\"", ids[i]);
+    av_set (a, g_object_get_data (G_OBJECT (dd), "av-key"), quoted);
+    return;
+  }
+  g_autoptr (GtkColorDialog) dialog = gtk_color_dialog_new ();
+  gtk_color_dialog_set_with_alpha (dialog, FALSE);
+  gtk_color_dialog_choose_rgba (dialog, GTK_WINDOW (gtk_widget_get_root (GTK_WIDGET (dd))),
+                                rgba_of (dd, i, &now) ? &now : NULL, NULL, colour_chosen, g_object_ref (dd));
+}
+
+static GtkWidget *
+colour_control (Av *a, JsonObject *s)
+{
+  JsonArray *choices = json_object_get_array_member (s, "choices");
+  JsonObject *labels = json_object_has_member (s, "choice_labels") ? json_object_get_object_member (s, "choice_labels") : NULL;
+  JsonObject *swatches = json_object_get_object_member (s, "swatches");
+  guint n = choices ? json_array_get_length (choices) : 0;
+  GStrv ids = g_new0 (char *, n + 1), hexes = g_new0 (char *, n + 1);
+  g_autoptr (GtkStringList) shown = gtk_string_list_new (NULL);
+  GtkListItemFactory *factory = gtk_signal_list_item_factory_new ();
+  GtkWidget *dd;
+
+  for (guint i = 0; i < n; i++) {
+    const char *id = json_array_get_string_element (choices, i);
+    ids[i] = g_strdup (id);
+    hexes[i] = g_strdup (swatches && json_object_has_member (swatches, id) ? json_object_get_string_member (swatches, id) : "");
+    gtk_string_list_append (shown, labels && json_object_has_member (labels, id)
+                                   ? text_of (json_object_get_object_member (labels, id), a->lang) : id);
+  }
+  if (json_object_has_member (s, "pattern"))   /* the colour dialog for any other colour, as the kiosk allows */
+    gtk_string_list_append (shown, av_text (a, "custom_colour"));
+  dd = gtk_drop_down_new (G_LIST_MODEL (g_object_ref (shown)), NULL);
+  g_object_set_data_full (G_OBJECT (dd), "av-ids", ids, (GDestroyNotify) g_strfreev);
+  g_object_set_data_full (G_OBJECT (dd), "av-colour", hexes, (GDestroyNotify) g_strfreev);
+  g_object_set_data (G_OBJECT (dd), "av-custom", json_object_has_member (s, "pattern") ? GINT_TO_POINTER (1) : NULL);
+  g_object_set_data (G_OBJECT (dd), "av", a);
+  g_signal_connect (factory, "setup", G_CALLBACK (swatch_setup), dd);
+  g_signal_connect (factory, "bind", G_CALLBACK (swatch_bind), dd);
+  gtk_drop_down_set_factory (GTK_DROP_DOWN (dd), factory);
+  g_object_unref (factory);
+  g_signal_connect (dd, "notify::selected", G_CALLBACK (colour_changed), a);
+  return dd;
 }
 
 static gboolean
@@ -267,7 +409,7 @@ setting_row (Av *a, JsonObject *s)
   const char *key = json_object_get_string_member (s, "key");
   const char *type = json_object_get_string_member (s, "type");
   JsonObject *help = json_object_has_member (s, "help") ? json_object_get_object_member (s, "help") : NULL;
-  gboolean slider = g_strcmp0 (type, "bool") && g_strcmp0 (type, "choice");
+  gboolean slider = g_strcmp0 (type, "bool") && g_strcmp0 (type, "choice") && g_strcmp0 (type, "colour");
   GtkWidget *row = NULL;
   GtkWidget *control = NULL;
   g_autoptr (GString) sub = g_string_new (text_of (help, a->lang));
@@ -304,6 +446,10 @@ setting_row (Av *a, JsonObject *s)
     g_object_set_data_full (G_OBJECT (control), "av-ids", ids, (GDestroyNotify) g_strfreev);
     gtk_widget_set_valign (control, GTK_ALIGN_CENTER);
     g_signal_connect (control, "notify::selected", G_CALLBACK (drop_changed), a);
+    adw_action_row_add_suffix (ADW_ACTION_ROW (row), control);
+  } else if (!g_strcmp0 (type, "colour")) {
+    control = colour_control (a, s);
+    gtk_widget_set_valign (control, GTK_ALIGN_CENTER);
     adw_action_row_add_suffix (ADW_ACTION_ROW (row), control);
   } else {   /* int, float: the label and its value on one line, the slider on the whole width under them */
     Grid *g = g_new0 (Grid, 1);
@@ -416,6 +562,11 @@ described (Av *a, JsonNode *reply, const char *err)
     return;
   }
   JsonArray *groups = json_object_get_array_member (root, "groups");
+  GtkWidget *preview = ns_avatar_preview_new (json_object_has_member (root, "preview")
+                                              ? json_object_get_object_member (root, "preview") : NULL, a->lang);
+  GtkWidget *view = adw_navigation_page_get_child (a->page);
+  if (preview != NULL && ADW_IS_TOOLBAR_VIEW (view))   /* above the scrolling page: it stays in sight */
+    adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (view), preview);
   a->card = ns_group (a->content, NULL);
   for (guint g = 0; g < json_array_get_length (groups); g++) {
     JsonObject *grp = json_array_get_object_element (groups, g);

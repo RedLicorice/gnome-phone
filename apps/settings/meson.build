@@ -18,12 +18,16 @@ if spongy.found()
   deps += spongy
   add_project_arguments('-DHAVE_SPONGY', language: 'c')
 endif
+# the Avatar page's live preview draws with Minerva's face library (loaded at run time), where its headers are
+if cc.has_header('minerva-face/face-engine.h')
+  add_project_arguments('-DHAVE_MINERVA_FACE', language: 'c')
+endif
 resources = gnome.compile_resources('ns-resources', 'src/neo-settings.gresource.xml', source_dir: 'src')
 
 executable('neo-settings',
   'src/main.c', 'src/ns-ui.c', 'src/ns-pages.c', 'src/ns-parallax.c', 'src/ns-net.c', 'src/ns-bt.c',
   'src/ns-sound.c', 'src/ns-apps.c', 'src/ns-shell.c', 'src/ns-fprint.c', 'src/ns-pattern.c', 'src/ns-privacy.c', 'src/ns-system.c', 'src/ns-look.c',
-  'src/ns-minerva.c', 'src/ns-avatar.c', 'src/ns-prompt.c', 'src/ns-events.c', 'src/ns-provider.c', 'src/ns-mc.c', 'src/ns-charge.c', 'src/ns-apikeys.c', 'src/ns-account.c', 'src/ns-ssh.c', 'src/ns-perm.c', 'src/ns-agents.c',
+  'src/ns-minerva.c', 'src/ns-avatar.c', 'src/ns-avatar-preview.c', 'src/ns-prompt.c', 'src/ns-events.c', 'src/ns-provider.c', 'src/ns-mc.c', 'src/ns-charge.c', 'src/ns-apikeys.c', 'src/ns-account.c', 'src/ns-ssh.c', 'src/ns-perm.c', 'src/ns-agents.c',
   resources,
   dependencies: deps,
   install: true)
