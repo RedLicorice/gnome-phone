@@ -66,6 +66,8 @@ typedef struct
   double latitude, longitude;
   char *url;
   char *uri;                    /* the media on this phone, once downloaded, or NULL */
+  GBytes *waveform;             /* a voice note's loudness, a byte 0..100 per step, or NULL */
+  char *transcript;             /* a voice note's text, once transcribed on the phone, or NULL */
 } SmsPart;
 
 typedef struct
@@ -112,6 +114,8 @@ void      sms_store_set_status (SmsStore *store, gint64 message_id, MessageStatu
 void      sms_store_set_sms_uri (SmsStore *store, gint64 message_id, const char *sms_uri);
 /* the media of the message's typed part is at @uri (a path on this phone) */
 void      sms_store_set_media (SmsStore *store, gint64 message_id, const char *uri);
+/* a voice note's transcript, and the message's text with it (what the list, the notification and the agents read) */
+void      sms_store_set_transcript (SmsStore *store, gint64 message_id, const char *transcript, const char *text);
 /* the messages are read (the conversation was shown) and seen (their notification can go); how many changed */
 guint     sms_store_mark_read (SmsStore *store, gint64 conversation_id);
 guint     sms_store_mark_seen (SmsStore *store, gint64 conversation_id);
@@ -144,7 +148,7 @@ GHashTable     *sms_store_unread_counts (SmsStore *store);
 void sms_conversation_free (SmsConversation *conversation);
 void sms_message_free (SmsMessage *message);
 /* a part from ReceiveMedia's a{sv} (kind, mime, caption, name, size t, duration u ms, width u, height u, thumbnail ay,
- * animated b, view-once b, latitude d, longitude d, url): NULL without a kind */
+ * animated b, view-once b, latitude d, longitude d, url, waveform ay): NULL without a kind */
 SmsPart *sms_part_new_from_dict (GVariant *dict);
 void sms_part_free (SmsPart *part);
 

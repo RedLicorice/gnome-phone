@@ -264,6 +264,14 @@ test_typed_part (void)
   g_assert_cmpuint (voice->part->duration, ==, 12000);
   g_assert_cmpuint (g_bytes_get_size (voice->part->thumbnail), ==, sizeof jpeg);
   g_assert_null (((SmsMessage *) messages->pdata[1])->part);
+  /* transcribed: the transcript kept, and the text (what every reader of the message gets) with it */
+  sms_store_set_transcript (store, id, "ci vediamo", "vocale 0:12: «ci vediamo»");
+  {
+    g_autoptr(SmsMessage) again = sms_store_get_message (store, id);
+
+    g_assert_cmpstr (again->text, ==, "vocale 0:12: «ci vediamo»");
+    g_assert_cmpstr (again->part->transcript, ==, "ci vediamo");
+  }
   sms_store_free (store);
 }
 

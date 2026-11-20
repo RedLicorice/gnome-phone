@@ -79,6 +79,10 @@ static const char introspection[] =
   "    <method name='FetchMedia'><arg name='message' type='x' direction='in'/></method>"
   /* the media of the provider's message @ext is now at @path, on this phone */
   "    <method name='SetMedia'><arg name='ext' type='s' direction='in'/><arg name='path' type='s' direction='in'/></method>"
+  /* a voice note of the provider's message @ext, transcribed on the phone: its @transcript, and the message's new
+   * @text (its label with the transcript) */
+  "    <method name='SetTranscript'><arg name='ext' type='s' direction='in'/>"
+  "      <arg name='transcript' type='s' direction='in'/><arg name='text' type='s' direction='in'/></method>"
   /* a conversation's newest @limit messages, oldest first: (id, written by the owner, text, Unix ms when it came or
    * was written), for a view that opens on it (the chat overlay); only the programs of the callers file's group
    * de.yesman.Messaging.Sms.GetMessages may ask (msg-callers.h) */
@@ -1473,6 +1477,26 @@ on_method_call (GDBusConnection *bus, const char *sender, const char *path, cons
         g_dbus_connection_emit_signal (self->session, NULL, SMS_PATH, SMS_INTERFACE, "MediaWanted",
                                        g_variant_new ("(sss)", conversation->destinations[0], message->sms_uri,
                                                       message->part->mime ? message->part->mime : ""), NULL);
+    }
+  else if (g_str_equal (method, "SetTranscript"))
+    {
+      const char *ext, *transcript;
+      gint64 message;
+
+      g_variant_get (parameters, "(&s&s&s)", &ext, &transcript, &text);
+      if (!*ext || !*text || !(message = sms_store_find_by_uri (self->store, ext)))
+        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS, "No message %s, or no text", ext);
+      else
+        {
+          g_autoptr(SmsMessage) row = NULL;
+
+          sms_store_set_transcript (self->store, message, transcript, text);
+          if ((row = sms_store_get_message (self->store, message)))
+            {
+              emit_changed (self, row->conversation_id);
+              update_notification (self, FALSE);
+            }
+        }
     }
   else if (g_str_equal (method, "SetMedia"))
     {

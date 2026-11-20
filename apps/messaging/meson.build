@@ -33,7 +33,7 @@ executable('neo-messaging', 'src/messaging-main.c', 'src/messaging-window.c', 's
            'src/blocked-contacts.c', 'src/people-options.c', 'src/msg-settings.c', 'src/msg-directory.c', 'src/msg-sound.c',
            'src/conversation-list.c', 'src/conversation-view.c', 'src/contact-picker.c', 'src/msg-action-bar.c',
            'src/msg-add-contact.c', 'src/msg-avatar.c', 'src/msg-bubble.c', 'src/msg-dates.c', 'src/msg-image.c',
-           'src/msg-markdown.c', 'src/msg-media.c', 'src/msg-people.c', 'src/sms-provider.c', 'src/msg-swipe.c', 'src/sms-client.c',
+           'src/msg-markdown.c', 'src/msg-media.c', 'src/msg-voice.c', 'src/msg-people.c', 'src/sms-provider.c', 'src/msg-swipe.c', 'src/sms-client.c',
            'src/sms-segments.c',
            '../dialer/src/popup-menu.c', '../dialer/src/contacts-app.c', '../dialer/src/app-action.c', resources,
            link_with: [store, phone],

@@ -10,6 +10,7 @@
 #include "msg-image.h"
 #include "msg-markdown.h"
 #include "msg-media.h"
+#include "msg-voice.h"
 #include "msg-people.h"
 #include "msg-directory.h"
 #include "msg-sound.h"
@@ -156,6 +157,21 @@ status_text (ConversationView *self, const SmsMessage *message, gboolean last_of
 
 static void select_message (ConversationView *self, gint64 id);
 
+static gboolean
+is_sound (const SmsPart *part)
+{
+  return g_strcmp0 (part->kind, "voice") == 0 || g_strcmp0 (part->kind, "audio") == 0;
+}
+
+/* play tapped on a voice note that is not on the phone: it is asked for */
+static void
+on_voice_fetch (GtkWidget *player)
+{
+  ConversationView *self = g_object_get_data (G_OBJECT (player), "view");
+
+  sms_client_fetch_media (self->client, *(gint64 *) g_object_get_data (G_OBJECT (player), "id"));
+}
+
 /* a provider's message tapped: its media opened in the app that shows its type, a place on the map; media that is
  * not on the phone is asked for, and the conversation changes when it is */
 static void
@@ -203,6 +219,8 @@ on_bubble_clicked (GtkWidget *pressable, gpointer data)
   message = store ? sms_store_get_message (store, id) : NULL;
   if (message && message->status == MESSAGE_STATUS_OUTGOING_FAILED)
     sms_client_resend (self->client, id);
+  else if (message && message->part && g_object_get_data (G_OBJECT (pressable), "voice"))
+    msg_voice_toggle (g_object_get_data (G_OBJECT (pressable), "voice"));
   else if (message && message->part)
     open_media (self, message);
 }
@@ -298,10 +316,23 @@ make_message (ConversationView *self, const SmsMessage *message, gboolean cluste
       g_signal_connect (avatar, "long-pressed", G_CALLBACK (on_bubble_long_pressed), NULL);
     }
 
-  if (message->part)
+  if (message->part && is_sound (message->part))
+    {
+      preview = msg_voice_new (message->part, G_CALLBACK (on_voice_fetch));
+      g_object_set_data (G_OBJECT (preview), "view", self);
+      g_object_set_data_full (G_OBJECT (preview), "id", g_memdup2 (&message->id, sizeof message->id), g_free);
+    }
+  else if (message->part)
     preview = msg_media_new (message->part, g_settings_get_uint (self->settings, "media-preview-size"));
+  /* a voice note's player says how long it is: its text is its transcript, once there is one */
+  if (preview && is_sound (message->part) && g_strcmp0 (message->part->kind, "voice") == 0)
+    {
+      g_clear_pointer (&markup, g_free);
+      gtk_label_set_text (GTK_LABEL (text), message->part->transcript ? message->part->transcript : "");
+      gtk_widget_set_visible (text, message->part->transcript != NULL);
+    }
   /* a picture that says what it is: only its caption */
-  if (preview && g_strv_contains ((const char * const *) unlabelled, message->part->kind))
+  else if (preview && g_strv_contains ((const char * const *) unlabelled, message->part->kind))
     {
       g_clear_pointer (&markup, g_free);
       gtk_label_set_text (GTK_LABEL (text), message->part->caption ? message->part->caption : "");
@@ -403,6 +434,8 @@ make_message (ConversationView *self, const SmsMessage *message, gboolean cluste
     gtk_accessible_update_property (GTK_ACCESSIBLE (pressable), GTK_ACCESSIBLE_PROPERTY_LABEL, spoken, -1);
   }
   g_object_set_data_full (G_OBJECT (pressable), "id", g_memdup2 (&message->id, sizeof message->id), g_free);
+  if (preview && is_sound (message->part))
+    g_object_set_data (G_OBJECT (pressable), "voice", preview);
   g_signal_connect (pressable, "clicked", G_CALLBACK (on_bubble_clicked), NULL);
   g_signal_connect (pressable, "long-pressed", G_CALLBACK (on_bubble_long_pressed), NULL);
   gtk_widget_set_hexpand (pressable, TRUE);

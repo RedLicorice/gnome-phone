@@ -74,7 +74,7 @@ static const char schema[] =
 /* a message's typed part (SmsPart): columns added to bugle_db's parts, where content_type and uri already are */
 static const char *const part_columns[] = {
   "kind TEXT", "caption TEXT", "name TEXT", "size INT", "duration INT", "width INT", "height INT", "thumbnail BLOB",
-  "animated INT", "view_once INT", "latitude REAL", "longitude REAL", "url TEXT",
+  "animated INT", "view_once INT", "latitude REAL", "longitude REAL", "url TEXT", "waveform BLOB", "transcript TEXT",
 };
 
 void
@@ -114,6 +114,8 @@ sms_part_free (SmsPart *part)
   g_clear_pointer (&part->thumbnail, g_bytes_unref);
   g_free (part->url);
   g_free (part->uri);
+  g_clear_pointer (&part->waveform, g_bytes_unref);
+  g_free (part->transcript);
   g_free (part);
 }
 
@@ -121,6 +123,7 @@ SmsPart *
 sms_part_new_from_dict (GVariant *dict)
 {
   g_autoptr(GVariant) thumbnail = g_variant_lookup_value (dict, "thumbnail", G_VARIANT_TYPE_BYTESTRING);
+  g_autoptr(GVariant) waveform = g_variant_lookup_value (dict, "waveform", G_VARIANT_TYPE_BYTESTRING);
   SmsPart *part;
 
   if (!g_variant_lookup (dict, "kind", "s", NULL))
@@ -141,6 +144,8 @@ sms_part_new_from_dict (GVariant *dict)
                   & g_variant_lookup (dict, "longitude", "d", &part->longitude);
   if (thumbnail && g_variant_get_size (thumbnail))
     part->thumbnail = g_variant_get_data_as_bytes (thumbnail);
+  if (waveform && g_variant_get_size (waveform))
+    part->waveform = g_variant_get_data_as_bytes (waveform);
   return part;
 }
 
@@ -448,7 +453,8 @@ add_message (SmsStore *self, gint64 conversation_id, gint64 sender_id, const cha
   id = sqlite3_last_insert_rowid (self->db);
   part = prepare (self, "INSERT INTO parts (message_id, text, content_type, timestamp, conversation_id, kind, caption,"
                         " name, size, duration, width, height, thumbnail, animated, view_once, latitude, longitude,"
-                        " url) VALUES (?, ?, IFNULL(?, 'text/plain'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                        " url, waveform) VALUES (?, ?, IFNULL(?, 'text/plain'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
+                        " ?, ?)");
   if (!part)
     return 0;
   sqlite3_bind_int64 (part, 1, id);
@@ -476,6 +482,9 @@ add_message (SmsStore *self, gint64 conversation_id, gint64 sender_id, const cha
           sqlite3_bind_double (part, 17, typed->longitude);
         }
       bind_text (part, 18, typed->url);
+      if (typed->waveform)
+        sqlite3_bind_blob (part, 19, g_bytes_get_data (typed->waveform, NULL), g_bytes_get_size (typed->waveform),
+                           SQLITE_TRANSIENT);
     }
   if (!run (self, part))
     return 0;
@@ -594,6 +603,26 @@ sms_store_set_media (SmsStore *self, gint64 message_id, const char *uri)
   bind_text (update, 1, uri);
   sqlite3_bind_int64 (update, 2, message_id);
   run (self, update);
+}
+
+void
+sms_store_set_transcript (SmsStore *self, gint64 message_id, const char *transcript, const char *text)
+{
+  sqlite3_stmt *update = prepare (self, "UPDATE parts SET transcript = ?, text = ? WHERE message_id = ? AND kind IS NOT NULL");
+  g_autoptr(SmsMessage) message = sms_store_get_message (self, message_id);
+
+  if (!update || !message)
+    {
+      sqlite3_finalize (update);
+      return;
+    }
+  bind_text (update, 1, transcript);
+  bind_text (update, 2, text);
+  sqlite3_bind_int64 (update, 3, message_id);
+  exec (self, "BEGIN", NULL);
+  run (self, update);
+  refresh_conversation (self, message->conversation_id);
+  exec (self, "COMMIT", NULL);
 }
 
 static guint
@@ -771,7 +800,7 @@ sms_store_get (SmsStore *self, gint64 conversation_id)
   " (SELECT group_concat(text, '') FROM parts WHERE message_id = m._id)," \
   " m.sent_timestamp, m.received_timestamp, m.message_status, m.read, m.seen, m.sms_message_uri, m.raw_status," \
   " m.origin, t.kind, t.content_type, t.caption, t.name, t.size, t.duration, t.width, t.height, t.thumbnail," \
-  " t.animated, t.view_once, t.latitude, t.longitude, t.url, t.uri" \
+  " t.animated, t.view_once, t.latitude, t.longitude, t.url, t.uri, t.waveform, t.transcript" \
   " FROM messages m LEFT JOIN participants p ON p._id = m.sender_id" \
   " LEFT JOIN parts t ON t.message_id = m._id AND t.kind IS NOT NULL"
 
@@ -802,6 +831,9 @@ part_from_row (sqlite3_stmt *row)
   part->longitude = sqlite3_column_double (row, 24);
   part->url = column_text (row, 25);
   part->uri = column_text (row, 26);
+  if ((thumbnail = sqlite3_column_blob (row, 27)))
+    part->waveform = g_bytes_new (thumbnail, sqlite3_column_bytes (row, 27));
+  part->transcript = column_text (row, 28);
   return part;
 }
 
