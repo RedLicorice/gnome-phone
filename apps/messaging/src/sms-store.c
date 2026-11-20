@@ -507,9 +507,9 @@ add_message (SmsStore *self, gint64 conversation_id, gint64 sender_id, const cha
   return id;
 }
 
-gint64
-sms_store_add_incoming (SmsStore *self, const char *sender, const char *text, gint64 sent, gint64 received,
-                        const char *sms_uri, const SmsPart *part)
+static gint64
+add_incoming (SmsStore *self, const char *sender, const char *text, gint64 sent, gint64 received,
+              const char *sms_uri, const SmsPart *part, gboolean read)
 {
   const char *destinations[] = { sender, NULL };
   gint64 conversation_id, sender_id, id = 0;
@@ -518,7 +518,7 @@ sms_store_add_incoming (SmsStore *self, const char *sender, const char *text, gi
   exec (self, "BEGIN", NULL);
   if ((conversation_id = get_conversation (self, destinations)) && (sender_id = participant_id (self, sender)))
     id = add_message (self, conversation_id, sender_id, text, sent, received, MESSAGE_STATUS_INCOMING_COMPLETE,
-                      FALSE, sms_uri, NULL, part);
+                      read, sms_uri, NULL, part);
   /* ReceiveSmsMessageAction: a new message brings an archived conversation back */
   if (id && (unarchive = prepare (self, "UPDATE conversations SET archive_status = 0 WHERE _id = ?")))
     {
@@ -527,6 +527,20 @@ sms_store_add_incoming (SmsStore *self, const char *sender, const char *text, gi
     }
   exec (self, id ? "COMMIT" : "ROLLBACK", NULL);
   return id;
+}
+
+gint64
+sms_store_add_incoming (SmsStore *self, const char *sender, const char *text, gint64 sent, gint64 received,
+                        const char *sms_uri, const SmsPart *part)
+{
+  return add_incoming (self, sender, text, sent, received, sms_uri, part, FALSE);
+}
+
+gint64
+sms_store_add_incoming_read (SmsStore *self, const char *sender, const char *text, gint64 sent, gint64 received,
+                             const char *sms_uri, const SmsPart *part)
+{
+  return add_incoming (self, sender, text, sent, received, sms_uri, part, TRUE);
 }
 
 gint64

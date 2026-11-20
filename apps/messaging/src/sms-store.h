@@ -103,6 +103,9 @@ gint64    sms_store_get_conversation (SmsStore *store, const char * const *desti
 /* a message that came from @sender: into its conversation (made if new), unread and not seen. Its id, or 0 */
 gint64    sms_store_add_incoming (SmsStore *store, const char *sender, const char *text, gint64 sent,
                                   gint64 received, const char *sms_uri, const SmsPart *part);
+/* as sms_store_add_incoming, but already read and seen: a provider's backlog, delivered long after it was sent */
+gint64    sms_store_add_incoming_read (SmsStore *store, const char *sender, const char *text, gint64 sent,
+                                       gint64 received, const char *sms_uri, const SmsPart *part);
 /* a message the owner wrote to @destination elsewhere (a provider's own app on his phone): kept as sent, read and seen,
    by @origin, with the network's id @sms_uri; the conversation's draft stays. Its id, or 0 */
 gint64    sms_store_add_sent (SmsStore *store, const char *destination, const char *text, gint64 sent,

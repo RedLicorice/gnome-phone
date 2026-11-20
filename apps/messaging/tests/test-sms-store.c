@@ -264,6 +264,13 @@ test_typed_part (void)
   g_assert_cmpuint (voice->part->duration, ==, 12000);
   g_assert_cmpuint (g_bytes_get_size (voice->part->thumbnail), ==, sizeof jpeg);
   g_assert_null (((SmsMessage *) messages->pdata[1])->part);
+  /* a backlog is kept already read and seen */
+  {
+    gint64 old = sms_store_add_incoming_read (store, "whatsapp:+491701111111", "ieri", 500, 4000, "WA-0", NULL);
+    g_autoptr(SmsMessage) row = sms_store_get_message (store, old);
+
+    g_assert_true (row->read && row->seen);
+  }
   /* transcribed: the transcript kept, and the text (what every reader of the message gets) with it */
   sms_store_set_transcript (store, id, "ci vediamo", "vocale 0:12: «ci vediamo»");
   {
