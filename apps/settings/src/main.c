@@ -1,6 +1,7 @@
 /* Neo Settings: the phone's settings app, One UI style, in C and GTK4. The main menu groups everything the way a
  * phone does; each entry is one of our own pages (ns-pages.h), or an app (Software). The services the pages
  * follow (NetworkManager, BlueZ, the sound server) are connected at start, in the background. */
+#include "msg-assistant.h"
 #include "ns-bt.h"
 #include "ns-look.h"
 #include "ns-net.h"
@@ -56,7 +57,7 @@ static const Entry entries[] = {
   { "avatar-default-symbolic", "blue", "Accounts", "Online accounts • API keys",
     "google nextcloud email api key token provider endpoint llm secret", ns_page_accounts },
   { NULL },
-  { "face-smile-symbolic", "purple", "Minerva", "Modello • Voce • Prompt • Budget",
+  { "face-smile-symbolic", "purple", "{assistant}", "Modello • Voce • Prompt • Budget",
     "ai agent brain cervello llm opencode piper voice voce wakeword prompt budget cost", ns_page_minerva, NULL,
     NULL, ns_minerva_available },
   { NULL },
@@ -295,10 +296,11 @@ main_page (void)
       g = ns_group (col, NULL);
       g_ptr_array_add (groups, g);
     }
-    GtkWidget *r = ns_row (g, e->icon, e->color, e->title, e->subtitle);
+    g_autofree char *title = msg_assistant_fill (e->title);   /* {assistant}: the node's assistant */
+    GtkWidget *r = ns_row (g, e->icon, e->color, title, e->subtitle);
     gtk_widget_set_visible (r, !e->search_only);
     g_object_set_data (G_OBJECT (r), "ns-search-only", GINT_TO_POINTER (e->search_only));
-    g_autofree char *text = g_strjoin (" ", e->title, e->subtitle, e->keywords, NULL);
+    g_autofree char *text = g_strjoin (" ", title, e->subtitle, e->keywords, NULL);
     g_object_set_data_full (G_OBJECT (r), "ns-search", g_utf8_strdown (text, -1), g_free);
     ns_row_on_activate (r, activate_entry, (gpointer) e);
     g_object_set_data (G_OBJECT (r), "ns-entry", (gpointer) e);
@@ -565,8 +567,9 @@ list_pages (void)
     json_builder_begin_object (b);
     json_builder_set_member_name (b, "id");
     json_builder_add_string_value (b, id);
+    g_autofree char *title = msg_assistant_fill (e->title);
     json_builder_set_member_name (b, "title");
-    json_builder_add_string_value (b, e->title);
+    json_builder_add_string_value (b, title);
     json_builder_set_member_name (b, "subtitle");
     json_builder_add_string_value (b, e->subtitle ? e->subtitle : "");
     json_builder_set_member_name (b, "keywords");

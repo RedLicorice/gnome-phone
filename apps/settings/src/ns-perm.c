@@ -5,6 +5,7 @@
  * permission to control the phone's screen (`status.screen_control`, `screen grant|revoke`): its words, its state and
  * the date it was granted all come from the data, and turning it on asks on the phone's own sheet (Sì, then a finger
  * or the PIN), not here. */
+#include "msg-assistant.h"
 #include "ns-pages.h"
 #include "ns-mc.h"
 #include "ns-ui.h"
@@ -336,9 +337,9 @@ revoke_clicked (GtkButton *b, gpointer data)
   op->ak = ak;
   op->id = g_strdup (id);
   /* the dialog owns the op: a refresh may rebuild the row while the question is open */
-  AdwDialog *d = ns_confirm (GTK_WIDGET (b), "Revoke this rule?",
-                             "Minerva asks again (or the classifier decides) for anything this rule covered.",
-                             "Revoke", TRUE, revoked, op);
+  g_autofree char *again = msg_assistant_fill ("{assistant} asks again (or the classifier decides) for anything this rule "
+                                               "covered.");
+  AdwDialog *d = ns_confirm (GTK_WIDGET (b), "Revoke this rule?", again, "Revoke", TRUE, revoked, op);
   g_object_set_data_full (G_OBJECT (d), "perm-op", op, (GDestroyNotify) op_free);
 }
 
@@ -727,8 +728,8 @@ void
 ns_perm_add_row (GtkWidget *group)
 {
   gboolean there = ns_mc_prog_available ("minerva-perm");
-  GtkWidget *row = ns_row (group, "system-lock-screen-symbolic", "red", "Permissions",
-                           there ? "What Minerva may do without asking" : "Not installed");
+  g_autofree char *what = msg_assistant_fill ("What {assistant} may do without asking");
+  GtkWidget *row = ns_row (group, "system-lock-screen-symbolic", "red", "Permissions", there ? what : "Not installed");
   ns_row_on_activate (row, ns_page_permissions, NULL);
   if (there) {
     static const char *const args[] = { "status", "--json", NULL };
@@ -752,7 +753,9 @@ ns_page_permissions (GtkWidget *row, gpointer data)
   gtk_widget_set_margin_top (ak->msg, 0);
 
   if (!ns_mc_prog_available ("minerva-perm")) {
-    ns_note (c, "Minerva's permissions are not available on this phone: minerva-perm is not installed.");
+    g_autofree char *none = msg_assistant_fill ("{assistant}'s permissions are not available on this phone: minerva-perm "
+                                                "is not installed.");
+    ns_note (c, none);
     ns_push (page);
     return;
   }
@@ -776,17 +779,22 @@ ns_page_permissions (GtkWidget *row, gpointer data)
               "everything.");
 
   ak->gates = ns_group (c, "Always refused");
-  ns_note (c, "Shipped with Minerva and checked first: no rule, mode or model can allow them.");
+  g_autofree char *shipped = msg_assistant_fill ("Shipped with {assistant} and checked first: no rule, mode or model can "
+                                                 "allow them.");
+  ns_note (c, shipped);
 
   ak->base = ns_group (c, "Allowed without asking");
-  ns_note (c, "The safe things: ordinary files, Minerva's own phone tools, read-only shell commands.");
+  g_autofree char *safe = msg_assistant_fill ("The safe things: ordinary files, {assistant}'s own phone tools, read-only "
+                                              "shell commands.");
+  ns_note (c, safe);
 
   ak->rules = ns_group (c, "Your rules");
   ak->rules_none = ns_note (c, "No rules yet. Without a rule, the mode and the classifier decide.");
   gtk_widget_set_visible (ak->rules_none, FALSE);
 
   ak->history = ns_group (c, "History");
-  ak->history_none = ns_note (c, "No decision yet. Every one Minerva makes is recorded here.");
+  g_autofree char *nothing = msg_assistant_fill ("No decision yet. Every one {assistant} makes is recorded here.");
+  ak->history_none = ns_note (c, nothing);
   gtk_widget_set_visible (ak->history_none, FALSE);
   ns_note (c, "Newest first, the last 30. Tap one for its sentence, its reason and the raw request.");
 
@@ -794,8 +802,10 @@ ns_page_permissions (GtkWidget *row, gpointer data)
   ak->model_row = ns_row (g, "system-search-symbolic", "violet", "Model", "");
   ns_row_on_activate (ak->model_row, model_clicked, ak);
   ak->fallbacks = ns_group (c, "Fallbacks");
-  ns_note (c, "The classifier is only used in Auto. When it fails for any reason, Minerva asks you. The fallbacks "
-              "are tried in this order; change them on the Minerva page.");
+  g_autofree char *classifier = msg_assistant_fill ("The classifier is only used in Auto. When it fails for any reason, "
+                                                    "{assistant} asks you. The fallbacks are tried in this order; change "
+                                                    "them on the {assistant} page.");
+  ns_note (c, classifier);
 
   g = ns_group (c, "Reminders");
   ak->rem_count = ns_row_value (g, "Reminders", "", FALSE, rem_count_entered, ak);

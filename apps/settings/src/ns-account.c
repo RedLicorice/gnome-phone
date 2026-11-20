@@ -4,6 +4,7 @@
  * owner enters it at an address on any device (or scans the address as a QR code), and this page asks for the state
  * every two seconds until it is approved. The token stays in the tool's own storage: it is in no output of
  * minerva-config, so this page never sees one. */
+#include "msg-assistant.h"
 #include "ns-pages.h"
 #include "ns-mc.h"
 #include "ns-ui.h"
@@ -275,8 +276,9 @@ disconnect_clicked (GtkWidget *row, gpointer data)
   Det *d = data;
   const char *kl = kind_label (d->acc);
   g_autofree char *heading = g_strdup_printf ("Disconnect %s?", ns_json_str (d->acc, "name"));
-  g_autofree char *body = g_strdup_printf ("This phone signs out of %s. Minerva's agent can no longer use the account "
-                                           "until you connect it again.", kl);
+  g_autofree char *who = msg_assistant_fill ("{assistant}");
+  g_autofree char *body = g_strdup_printf ("This phone signs out of %s. %s's agent can no longer use the account "
+                                           "until you connect it again.", kl, who);
   ns_confirm (row, heading, body, "Disconnect", TRUE, disconnected, d);
 }
 
@@ -402,8 +404,10 @@ det_open (const char *id, JsonObject *acc, GtkWidget *row)
   ns_row_button (d->web, "Manage access on the web…", FALSE, open_docs, d);
   ns_group_set_visible (d->web, FALSE);
 
-  ns_note (c, "The sign-in is kept by the account's own program on this phone, readable by you only; Minerva never "
-              "shows it. The agent asks you before it publishes or changes anything with this account.");
+  g_autofree char *kept = msg_assistant_fill ("The sign-in is kept by the account's own program on this phone, readable "
+                                              "by you only; {assistant} never shows it. The agent asks you before it "
+                                              "publishes or changes anything with this account.");
+  ns_note (c, kept);
 
   if (acc) {
     d->acc = json_object_ref (acc);

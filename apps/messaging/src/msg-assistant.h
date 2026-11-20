@@ -11,5 +11,7 @@ G_BEGIN_DECLS
 const char *msg_assistant_name (void);
 /* her conversation (agent:<name>), or NULL */
 const char *msg_assistant_destination (void);
+/* @text with every "{assistant}" made her name (kept as it is when she has none), newly allocated */
+char *msg_assistant_fill (const char *text);
 
 G_END_DECLS

@@ -1,0 +1,3 @@
+# who this node's assistant is (Minerva's assistant/assistant.conf): her name in the texts ({assistant})
+option('assistant-file', type: 'string', value: '/etc/minerva/assistant.conf',
+       description: 'The node assistant file ([assistant] name)')

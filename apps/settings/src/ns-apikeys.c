@@ -2,6 +2,7 @@
  * `minerva-config` (a shipped list plus the owner's own endpoints); this page names none of them. Everything is
  * read with `providers list --json` and written through `minerva-config` (ns-mc.c); a key travels on its standard
  * input (never in argv) and is shown only as "set, …last4" or "missing". */
+#include "msg-assistant.h"
 #include "ns-pages.h"
 #include "ns-mc.h"
 #include "ns-ui.h"
@@ -459,9 +460,11 @@ provider_form (Ak *ak, const char *edit_id)
   f->models = ns_row_value (g, "Models", ms->str, FALSE, NULL, NULL);
   if (!edit_id)
     f->key = ns_row_value (g, "API key (optional)", "", TRUE, NULL, NULL);
-  ns_note (c, "The address is the API root, for example http://my-pc:8080/v1. Models are found by asking the address "
-              "when the list is left empty. A provider that can chat can then be picked as Minerva's model. A key "
-              "can be added or changed after saving.");
+  g_autofree char *about = msg_assistant_fill ("The address is the API root, for example http://my-pc:8080/v1. Models are "
+                                               "found by asking the address when the list is left empty. A provider "
+                                               "that can chat can then be picked as {assistant}'s model. A key can be "
+                                               "added or changed after saving.");
+  ns_note (c, about);
 
   g = ns_group (c, NULL);
   ns_row_button (g, edit_id ? "Save" : "Add provider", FALSE, form_submit, f);
@@ -594,8 +597,10 @@ ns_page_api_keys (GtkWidget *row, gpointer data)
   ns_row_on_activate (import, import_clicked, ak);
 
   ak->list = ns_group (c, "Providers");
-  ns_note (c, "Tap a provider to set or remove its key. A key is never shown again, only its last four characters. "
-              "Providers that can chat offer their models to Minerva's brain and fallbacks.");
+  g_autofree char *tap = msg_assistant_fill ("Tap a provider to set or remove its key. A key is never shown again, only "
+                                             "its last four characters. Providers that can chat offer their models to "
+                                             "{assistant}'s brain and fallbacks.");
+  ns_note (c, tap);
   GtkWidget *g = ns_group (c, NULL);
   ns_row_button (g, "Add provider", FALSE, add_clicked, ak);
   ns_note (c, "Add an endpoint of your own, such as a model running on your computer.");

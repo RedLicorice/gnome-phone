@@ -47,3 +47,13 @@ msg_assistant_destination (void)
   load ();
   return destination;
 }
+
+char *
+msg_assistant_fill (const char *text)
+{
+  GString *out = g_string_new (text);
+
+  if (msg_assistant_name ())
+    g_string_replace (out, "{assistant}", msg_assistant_name (), 0);
+  return g_string_free (out, FALSE);
+}

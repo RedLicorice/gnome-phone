@@ -28,7 +28,11 @@ executable('neo-settings',
   'src/main.c', 'src/ns-ui.c', 'src/ns-pages.c', 'src/ns-parallax.c', 'src/ns-net.c', 'src/ns-bt.c',
   'src/ns-sound.c', 'src/ns-apps.c', 'src/ns-shell.c', 'src/ns-fprint.c', 'src/ns-pattern.c', 'src/ns-privacy.c', 'src/ns-system.c', 'src/ns-look.c',
   'src/ns-minerva.c', 'src/ns-avatar.c', 'src/ns-avatar-preview.c', 'src/ns-prompt.c', 'src/ns-events.c', 'src/ns-federation.c', 'src/ns-provider.c', 'src/ns-mc.c', 'src/ns-charge.c', 'src/ns-apikeys.c', 'src/ns-account.c', 'src/ns-ssh.c', 'src/ns-perm.c', 'src/ns-agents.c',
+  # the node's assistant ({assistant} in a text), read the way Messaging reads it: its sources, not a copy
+  '../messaging/src/msg-assistant.c', '../messaging/src/sms-provider.c',
   resources,
+  include_directories: include_directories('../messaging/src'),
+  c_args: ['-DASSISTANT_FILE="@0@"'.format(get_option('assistant-file'))],
   dependencies: deps,
   install: true)
 install_data('data/de.yesman.NeoSettings.desktop', install_dir: get_option('datadir') / 'applications')
