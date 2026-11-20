@@ -246,6 +246,8 @@ show_event (Info *info)
   g_clear_pointer (&info->saved_reminders, g_array_unref);
   info->saved_reminders = g_array_copy (event->reminders);
   cal_reminders_set (CAL_REMINDERS (info->reminders), event->reminders);
+  /* a Minerva task has no VALARMs: a reminder is a task of its own (the editor's kind) */
+  writable = writable && !event->minerva;
   gtk_widget_set_visible (info->reminders_header, writable);
   gtk_widget_set_visible (info->reminders, writable);
   gtk_widget_set_visible (info->add_reminder, writable && cal_reminders_count (CAL_REMINDERS (info->reminders))
@@ -397,8 +399,8 @@ on_delete_answer (int index, gpointer data)
 
   if (index >= 0)
     {
-      /* a single event: OK is index 0, and its scope is the whole event */
-      CalScope scope = deleting->event->recurring ? scopes[index] : CAL_SCOPE_ALL;
+      /* a single event or a Minerva task (one task, whatever due time was opened): OK is index 0, the whole of it */
+      CalScope scope = deleting->event->recurring && !deleting->event->minerva ? scopes[index] : CAL_SCOPE_ALL;
 
       cal_store_delete (deleting->store, deleting->event, scope, on_deleted, NULL);
       /* exitWhenDone: back to the views */
@@ -417,7 +419,7 @@ on_delete (NeoPressable *button, Info *info)
   deleting->window = info->window;
   deleting->store = g_object_ref (info->store);
   deleting->event = cal_event_ref (info->event);
-  if (info->event->recurring)
+  if (info->event->recurring && !info->event->minerva)
     {
       static const char *labels[] = { N_("Only this event"), N_("This and future events"), N_("All events") };
       const char *translated[] = { _(labels[0]), _(labels[1]), _(labels[2]) };

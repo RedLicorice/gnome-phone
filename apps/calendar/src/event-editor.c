@@ -47,6 +47,8 @@ typedef struct {
   GtkWidget *availability, *access;
   GtkWidget *scroll, *content;
   GtkWidget *kind;              /* the Minerva calendar's: what the task is (minerva-config schedule ui kinds) */
+  GtkWidget *all_day_line;      /* All day and its switch: an EDS event's only */
+  GtkWidget *guests_helper;     /* "Guests are not sent an invitation", under the guests */
   gboolean saving;
 } Editor;
 
@@ -142,6 +144,13 @@ set_button_text (GtkWidget *button, const char *text)
   gtk_label_set_label (GTK_LABEL (neo_pressable_get_child (NEO_PRESSABLE (button))), text);
 }
 
+/* a task of Minerva's scheduler: one due time, no end, no zone of its own (the scheduler's) */
+static gboolean
+is_minerva (Editor *editor)
+{
+  return g_strcmp0 (editor->calendar, CAL_MINERVA_CALENDAR) == 0;
+}
+
 static void
 show_times (Editor *editor)
 {
@@ -155,14 +164,15 @@ show_times (Editor *editor)
   set_button_text (editor->start_time, start);
   set_button_text (editor->end_time, end);
   gtk_widget_set_visible (editor->start_time, !editor->all_day);
-  gtk_widget_set_visible (editor->end_time, !editor->all_day);
+  gtk_widget_set_visible (editor->end_time, !editor->all_day && !is_minerva (editor));
+  gtk_widget_set_visible (editor->end_date, !is_minerva (editor));
   /* the time zone: hidden with All day (an all-day event has none) */
   if (editor->tz_row)
     {
       /* the GMT part in #888888 (the TZ button's grey text), the sun of summer time in #BFBFBF */
       g_autofree char *zone = cal_tz_label_markup (editor->tzid, start_time (editor), TRUE);
 
-      gtk_widget_set_visible (editor->tz_row, !editor->all_day);
+      gtk_widget_set_visible (editor->tz_row, !editor->all_day && !is_minerva (editor));
       gtk_label_set_markup (GTK_LABEL (neo_pressable_get_child (NEO_PRESSABLE (editor->tz_button))), zone ? zone : "");
     }
 }
@@ -207,7 +217,7 @@ show_row (Editor *editor, GtkWidget *widget, gboolean shown)
 static void
 show_minerva (Editor *editor)
 {
-  gboolean minerva = g_strcmp0 (editor->calendar, CAL_MINERVA_CALENDAR) == 0;
+  gboolean minerva = is_minerva (editor);
   JsonObject *ui = cal_store_minerva_ui (editor->store);
   GtkWidget *eds_only[] = { editor->location, editor->url, editor->guests, editor->tz_row, editor->reminders,
                             editor->add_reminder, editor->availability, editor->access, editor->description };
@@ -218,6 +228,15 @@ show_minerva (Editor *editor)
     if (eds_only[i])
       show_row (editor, eds_only[i], !minerva);
   gtk_widget_set_visible (editor->color_button, !minerva);
+  /* a task is due at a time: All day off (its handler shows the times again), then the line and the end hidden */
+  if (minerva && editor->all_day && editor->all_day_switch)
+    cal_material_switch_set_active (CAL_MATERIAL_SWITCH (editor->all_day_switch), FALSE);
+  if (editor->all_day_line)
+    gtk_widget_set_visible (editor->all_day_line, !minerva);
+  if (editor->guests_helper)
+    gtk_widget_set_visible (editor->guests_helper, !minerva);
+  if (editor->start_date)
+    show_times (editor);
   if (editor->kind)
     show_row (editor, editor->kind, minerva);
   gtk_entry_set_placeholder_text (GTK_ENTRY (editor->title), minerva && ui ? ns_json_str (ui, "text_hint_prompt")
@@ -1022,6 +1041,7 @@ build (Editor *editor)
     gtk_widget_add_css_class (editor->all_day_switch, "cal-edit-all-day-switch");
     gtk_overlay_add_overlay (GTK_OVERLAY (overlay), editor->all_day_switch);
     gtk_box_append (GTK_BOX (content), overlay);
+    editor->all_day_line = overlay;
   }
 
   dates = gtk_grid_new ();
@@ -1084,6 +1104,7 @@ build (Editor *editor)
     neo_label_set_font_padding (helper, 12);
     gtk_widget_add_css_class (helper, "cal-text-helper");
     gtk_box_append (GTK_BOX (content), helper);
+    editor->guests_helper = helper;
   }
 
   /* location, description, URL (one under the other, no space between the boxes' layouts) */
