@@ -1457,7 +1457,7 @@ channels_section (Editor *editor)
       JsonObject *service = json_array_get_object_element (services, i);
       ChannelRow *row = g_new0 (ChannelRow, 1);
       GtkWidget *line = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-      GtkWidget *field;
+      GtkWidget *field, *title;
 
       row->id = g_strdup (ns_json_str (service, "id"));
       row->legacy = g_strdup (channel_legacy (row->id));
@@ -1467,6 +1467,12 @@ channels_section (Editor *editor)
       gtk_widget_set_hexpand (field, TRUE);
       gtk_widget_add_css_class (line, "ct-ed-row");
       gtk_box_append (GTK_BOX (line), field);
+      /* the service's name stays beside the id once the hint is gone, as the read-only IM rows show it */
+      title = ct_label (ns_json_str (service, "title"), "ct-ed-legacy-text", 16);
+      gtk_label_set_ellipsize (GTK_LABEL (title), PANGO_ELLIPSIZE_END);
+      gtk_widget_set_size_request (title, (int) CT_ED_TYPE_LABEL_W_DP, -1);
+      gtk_widget_set_valign (title, GTK_ALIGN_CENTER);
+      gtk_box_append (GTK_BOX (line), title);
       gtk_box_append (GTK_BOX (rows), line);
       g_ptr_array_add (editor->channel_rows, row);
     }
