@@ -34,8 +34,6 @@ struct _CamPipeline {
   guint         first_pending;  /* the generation whose first frame the probe looks out for, 0 none */
   CamFrameFunc  rec_func;
   gpointer      rec_data;
-  GHashTable   *opened;         /* the cameras that were opened by this process (ids), and which was the last */
-  char         *last_opened;
   gboolean      tone_wanted, tone_applied;   /* the Soft ISP's picture tuning, and whether it was ever sent */
   double        tone[3];                     /* gamma, contrast, saturation */
 
@@ -129,17 +127,6 @@ apply_tone (CamPipeline *self)
   for (int i = 0; i < 3; i++)
     if (src_has (self, names[i]))
       g_object_set (self->src, names[i], (float) values[i], NULL);
-}
-
-gboolean
-cam_pipeline_needs_fresh_process (CamPipeline *self, const char *camera_id)
-{
-  gboolean again;
-
-  g_mutex_lock (&self->lock);
-  again = g_hash_table_contains (self->opened, camera_id) && g_strcmp0 (self->last_opened, camera_id);
-  g_mutex_unlock (&self->lock);
-  return again;
 }
 
 void
@@ -252,16 +239,6 @@ run_request (gpointer job, gpointer data)
 
       g_mutex_lock (&self->lock);
       self->first_pending = generation;
-      /* libcamerasrc connects Camera::requestCompleted when it opens the camera, and never disconnects (see
-       * cam_pipeline_needs_fresh_process): from here on this process has opened @camera, whether or not the first
-       * frame comes, a newer request overtakes this one, or the attempt fails. Noting it only on success let a quick
-       * A → B → A (B overtaken before its first frame) open A a second time and abort in requestCompleted. */
-      if (reopen)
-        {
-          g_hash_table_add (self->opened, g_strdup (camera));
-          g_free (self->last_opened);
-          self->last_opened = g_strdup (camera);
-        }
       g_mutex_unlock (&self->lock);
       if (gst_element_set_state (self->pipeline, GST_STATE_PLAYING) != GST_STATE_CHANGE_FAILURE)
         {
@@ -519,8 +496,6 @@ cam_pipeline_finalize (GObject *object)
   CamPipeline *self = CAM_PIPELINE (object);
 
   g_free (self->want_camera);
-  g_hash_table_unref (self->opened);
-  g_free (self->last_opened);
   g_free (self->cur_camera);
   g_free (self->last_error);
   g_slist_free (self->grabs);
@@ -548,7 +523,6 @@ static void
 cam_pipeline_init (CamPipeline *self)
 {
   g_mutex_init (&self->lock);
-  self->opened = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   g_cond_init (&self->cond);
   self->zoom = 1;
 }

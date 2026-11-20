@@ -13,7 +13,6 @@
 #include "cam-pipeline.h"
 #include "cam-qr-sheet.h"
 #include "cam-recorder.h"
-#include "cam-restart.h"
 #include "cam-sensors.h"
 #include "cam-settings.h"
 #include "cam-sounds.h"
@@ -1213,26 +1212,6 @@ preview_cover (CamView *self)
   return self->mode == CAM_MODE_VIDEO || (is_photo_mode (self) && self->wide);
 }
 
-/* The process starts afresh, on the camera the settings now name (see cam_pipeline_needs_fresh_process) */
-static void
-restart_app (CamView *self)
-{
-  g_autofree char *exe = g_file_read_link ("/proc/self/exe", NULL);
-  g_auto(GStrv) argv = cam_restart_argv (exe ? exe : "/proc/self/exe");
-
-  g_message ("camera: %s was opened before; a new process opens it (libcamerasrc cannot open it again after another camera)",
-             self->camera->id);
-  tune_flush (self);
-  if (self->led != CAM_LED_OFF)
-    cam_flash_led_set_sync (CAM_LED_OFF);
-  self->led = CAM_LED_OFF;
-  cam_flash_led_flush ();
-  g_settings_sync ();
-  execv (argv[0], argv);  /* by its own path: the process keeps its name */
-  g_warning ("camera: cannot start a new process: %s", g_strerror (errno));
-  fail (self, _("There was an error while preparing the stream. Please report this to the developers."));
-}
-
 static void
 bind_camera (CamView *self)
 {
@@ -1240,11 +1219,6 @@ bind_camera (CamView *self)
 
   if (!self->running || !self->camera)
     return;
-  if (cam_pipeline_needs_fresh_process (self->pipeline, self->camera->id))
-    {
-      restart_app (self);
-      return;
-    }
   if (!stream_size (self, &width, &height))
     {
       fail (self, _("There was an error while preparing the stream. Please report this to the developers."));
