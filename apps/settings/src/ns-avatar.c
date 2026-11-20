@@ -484,6 +484,7 @@ setting_row (Av *a, JsonObject *s)
     gtk_range_set_round_digits (GTK_RANGE (control), g->integer ? 0 : g->digits);
     gtk_widget_set_hexpand (control, TRUE);
     gtk_widget_set_size_request (control, -1, TOUCH_PX);
+    ns_scale_guard (control);
     gtk_box_append (GTK_BOX (box), control);
     gtk_widget_set_margin_start (box, 12);
     gtk_widget_set_margin_end (box, 12);

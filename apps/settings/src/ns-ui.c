@@ -744,6 +744,7 @@ ns_row_scale (GtkWidget *group, const char *title, const char *icon, double lo, 
   GtkWidget *sc = gtk_scale_new_with_range (GTK_ORIENTATION_HORIZONTAL, lo, hi, step);
   gtk_scale_set_draw_value (GTK_SCALE (sc), FALSE);
   gtk_widget_set_hexpand (sc, TRUE);
+  ns_scale_guard (sc);
   gtk_box_append (GTK_BOX (h), sc);
   *scale = sc;
   return ns_row_widget (group, title, h);
@@ -1324,6 +1325,90 @@ ns_spawn (const char *const *argv)
   g_autoptr (GError) err = NULL;
   if (!g_spawn_async (NULL, (char **) argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &err))
     g_warning ("%s: %s", argv[0], err->message);
+}
+
+/* ---- a slider that a scrolling finger cannot change ----
+ * GtkRange jumps to a tap on its track and follows any drag that starts on it, so on a phone a finger scrolling the
+ * page moves every slider it lands on. The guard takes the slider's pointer and touch events in the capture phase,
+ * before the range's own gestures (the scrolled window above has seen them already, so it still scrolls): a drag
+ * moves the value only once it went slider-slop-px sideways and more sideways than up or down, and then from where
+ * the value was, by the finger's travel over the slider's width; a tap changes nothing. The keyboard is untouched. */
+
+typedef struct {
+  gboolean down, moving;
+  double   x0, y0, value0;
+  GdkEventSequence *seq;
+} Guard;
+
+static double
+guard_slop (void)
+{
+  static double slop = -1;
+  if (slop < 0) {
+    g_autoptr (GSettings) s = ns_settings ("de.yesman.NeoSettings");
+    g_autoptr (GSettingsSchema) sc = NULL;
+    if (s)
+      g_object_get (s, "settings-schema", &sc, NULL);
+    slop = sc && g_settings_schema_has_key (sc, "slider-slop-px") ? g_settings_get_double (s, "slider-slop-px") : 0;
+    if (!sc || !g_settings_schema_has_key (sc, "slider-slop-px"))   /* an older schema installed: no slop at all */
+      g_warning ("de.yesman.NeoSettings has no slider-slop-px: sliders follow any sideways drag");
+  }
+  return slop;
+}
+
+static gboolean
+guard_event (GtkEventControllerLegacy *c, GdkEvent *ev, Guard *g)
+{
+  GtkWidget *w = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (c));
+  GdkEventType type = gdk_event_get_event_type (ev);
+  GtkNative *native = gtk_widget_get_native (w);
+  double sx, sy, nx, ny;
+  graphene_point_t in, out;
+
+  switch (type) {
+  case GDK_BUTTON_PRESS: case GDK_TOUCH_BEGIN: case GDK_MOTION_NOTIFY: case GDK_TOUCH_UPDATE:
+  case GDK_BUTTON_RELEASE: case GDK_TOUCH_END: case GDK_TOUCH_CANCEL:
+    break;
+  default:
+    return FALSE;   /* scroll, keys, crossing: as GTK does them */
+  }
+  if (!gdk_event_get_position (ev, &sx, &sy))
+    return TRUE;
+  gtk_native_get_surface_transform (native, &nx, &ny);
+  in = GRAPHENE_POINT_INIT (sx - nx, sy - ny);
+  if (!gtk_widget_compute_point (GTK_WIDGET (native), w, &in, &out))
+    return TRUE;
+  if (type == GDK_BUTTON_PRESS || type == GDK_TOUCH_BEGIN) {
+    *g = (Guard) { .down = TRUE, .x0 = out.x, .y0 = out.y, .value0 = gtk_range_get_value (GTK_RANGE (w)),
+                   .seq = gdk_event_get_event_sequence (ev) };
+    return TRUE;
+  }
+  if (!g->down || gdk_event_get_event_sequence (ev) != g->seq)
+    return TRUE;
+  if (type == GDK_BUTTON_RELEASE || type == GDK_TOUCH_END || type == GDK_TOUCH_CANCEL) {
+    g->down = g->moving = FALSE;
+    return TRUE;
+  }
+  double dx = out.x - g->x0, dy = out.y - g->y0;
+  if (!g->moving && fabs (dx) >= guard_slop () && fabs (dx) > fabs (dy))
+    g->moving = TRUE;
+  if (g->moving && gtk_widget_get_width (w) > 0) {
+    GtkAdjustment *adj = gtk_range_get_adjustment (GTK_RANGE (w));
+    double span = gtk_adjustment_get_upper (adj) - gtk_adjustment_get_lower (adj);
+    gtk_range_set_value (GTK_RANGE (w), g->value0 + dx / gtk_widget_get_width (w) * span);
+  }
+  return TRUE;
+}
+
+void
+ns_scale_guard (GtkWidget *scale)
+{
+  GtkEventController *c = gtk_event_controller_legacy_new ();
+  Guard *g = g_new0 (Guard, 1);
+
+  gtk_event_controller_set_propagation_phase (c, GTK_PHASE_CAPTURE);
+  g_signal_connect_data (c, "event", G_CALLBACK (guard_event), g, (GClosureNotify) g_free, 0);
+  gtk_widget_add_controller (scale, c);
 }
 
 GSettings *

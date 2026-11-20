@@ -41,6 +41,15 @@
       <summary>Smallest window width (px)</summary>
       <description>The window is never made narrower than this.</description>
     </key>
+    <!-- a slider on a phone: a finger scrolling the page crosses many of them -->
+    <key name="slider-slop-px" type="d">
+      <range min="0" max="200"/>
+      <default>12</default>
+      <summary>How far a finger moves sideways before a slider follows it (px)</summary>
+      <description>A slider changes only when a drag that starts on it moves this far sideways, and more sideways than
+        up or down; then it follows the finger from where it was. A tap does not move it, and a drag up or down
+        scrolls the page.</description>
+    </key>
     <key name="window-min-height" type="i">
       <range min="1" max="10000"/>
       <default>294</default>

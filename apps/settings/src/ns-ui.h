@@ -127,6 +127,8 @@ void       ns_later (AdwNavigationPage *page);
 void       ns_spawn (const char *const *argv);
 /* a settings schema if it is installed, else NULL */
 GSettings *ns_settings (const char *schema);
+/* a slider a finger scrolling the page cannot change: only a deliberate sideways drag moves it (slider-slop-px) */
+void       ns_scale_guard (GtkWidget *scale);
 gboolean   ns_settings_exists (const char *schema);
 /* the same, owned by the page (freed with it) */
 GSettings *ns_page_settings (AdwNavigationPage *page, const char *schema);
