@@ -487,3 +487,20 @@
 .msg-voice-time {
   font-size: 0.85em;
 }
+
+/* the message a reply answers (conversation-view.c), its reactions, and a message deleted for everyone */
+.msg-quote {
+  border-left: 3px solid alpha(currentColor, 0.6);
+  padding-left: 8px;
+  margin-bottom: 4px;
+  opacity: 0.8;
+}
+
+.msg-reactions {
+  margin-top: 2px;
+}
+
+.msg-message-text.deleted {
+  font-style: italic;
+  opacity: 0.7;
+}

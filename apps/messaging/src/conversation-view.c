@@ -150,12 +150,59 @@ status_text (ConversationView *self, const SmsMessage *message, gboolean last_of
       MsgPerson *sender = MESSAGE_STATUS_IS_INCOMING (message->status) && self->people->len > 1
                           ? person_for (self, message->sender) : NULL;
 
-      /* a group's incoming ones say who */
-      return sender ? g_strdup_printf ("%s  %s", sender->name, time) : g_steal_pointer (&time);
+      /* a group's incoming ones say who; a changed one says so */
+      g_autofree char *line = sender ? g_strdup_printf ("%s  %s", sender->name, time) : g_steal_pointer (&time);
+
+      return message->edited ? g_strdup_printf ("%s  %s", line, _("Edited")) : g_steal_pointer (&line);
     }
 }
 
 static void select_message (ConversationView *self, gint64 id);
+
+/* "👍👍❤️" (one emoji per person, as stored) as "👍 2  ❤️": each emoji once, in the order first given */
+static char *
+reactions_line (const char *all)
+{
+  g_autoptr(GString) line = g_string_new (NULL);
+  g_autoptr(GPtrArray) seen = g_ptr_array_new_with_free_func (g_free);
+  g_autoptr(GArray) counts = g_array_new (FALSE, TRUE, sizeof (guint));
+  PangoLogAttr *attrs;
+  int n = g_utf8_strlen (all, -1), start = 0;
+
+  /* an emoji is one grapheme, many code points (a skin tone, a ZWJ sequence): cut at grapheme boundaries */
+  attrs = g_new0 (PangoLogAttr, n + 1);
+  pango_get_log_attrs (all, -1, -1, pango_language_get_default (), attrs, n + 1);
+  for (int i = 1; i <= n; i++)
+    {
+      g_autofree char *one = NULL;
+      guint k;
+
+      if (!attrs[i].is_cursor_position)
+        continue;
+      one = g_utf8_substring (all, start, i);
+      start = i;
+      for (k = 0; k < seen->len && !g_str_equal (seen->pdata[k], one); k++)
+        ;
+      if (k == seen->len)
+        {
+          g_ptr_array_add (seen, g_steal_pointer (&one));
+          g_array_set_size (counts, seen->len);
+        }
+      g_array_index (counts, guint, k)++;
+    }
+  g_free (attrs);
+  for (guint k = 0; k < seen->len; k++)
+    {
+      guint count = g_array_index (counts, guint, k);
+
+      if (line->len)
+        g_string_append (line, "  ");
+      g_string_append (line, seen->pdata[k]);
+      if (count > 1)
+        g_string_append_printf (line, " %u", count);
+    }
+  return g_string_free (g_steal_pointer (&line), FALSE);
+}
 
 static gboolean
 is_sound (const SmsPart *part)
@@ -347,8 +394,22 @@ make_message (ConversationView *self, const SmsMessage *message, gboolean cluste
   gtk_label_set_xalign (GTK_LABEL (text), 0);
   gtk_label_set_selectable (GTK_LABEL (text), FALSE);
   gtk_widget_add_css_class (text, "msg-message-text");
+  /* the message it answers, above it */
+  if (message->part && message->part->quote_text)
+    {
+      GtkWidget *quote = gtk_label_new (message->part->quote_text);
+
+      gtk_label_set_ellipsize (GTK_LABEL (quote), PANGO_ELLIPSIZE_END);
+      gtk_label_set_lines (GTK_LABEL (quote), g_settings_get_uint (self->settings, "quote-lines"));
+      gtk_label_set_wrap (GTK_LABEL (quote), TRUE);
+      gtk_label_set_xalign (GTK_LABEL (quote), 0);
+      gtk_widget_add_css_class (quote, "msg-quote");
+      gtk_box_append (GTK_BOX (content), quote);
+    }
   if (preview)
     gtk_box_append (GTK_BOX (content), preview);
+  if (message->part && g_strcmp0 (message->part->kind, "deleted") == 0)
+    gtk_widget_add_css_class (text, "deleted");
   gtk_box_append (GTK_BOX (content), text);
   {
     g_autofree char *agent = agent_of (message);
@@ -368,6 +429,16 @@ make_message (ConversationView *self, const SmsMessage *message, gboolean cluste
         gtk_box_append (GTK_BOX (content), who);
       }
   }
+  /* who reacted, as WhatsApp shows it: each emoji once, with how many when more than one */
+  if (message->reactions)
+    {
+      g_autofree char *line = reactions_line (message->reactions);
+      GtkWidget *badge = gtk_label_new (line);
+
+      gtk_label_set_xalign (GTK_LABEL (badge), 0);
+      gtk_widget_add_css_class (badge, "msg-reactions");
+      gtk_box_append (GTK_BOX (content), badge);
+    }
   if (status || delivered)
     {
       GtkWidget *meta = NULL;

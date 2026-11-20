@@ -81,6 +81,10 @@ static const char introspection[] =
   "    <method name='SetMedia'><arg name='ext' type='s' direction='in'/><arg name='path' type='s' direction='in'/></method>"
   /* a voice note of the provider's message @ext, transcribed on the phone: its @transcript, and the message's new
    * @text (its label with the transcript) */
+  /* a provider's change to its message @ext: @kind "reaction" (@sender's emoji @text, '' takes it away), "edit" (its
+   * new @text), "revoke" (deleted for everyone: @text what it says now) */
+  "    <method name='Change'><arg name='kind' type='s' direction='in'/><arg name='ext' type='s' direction='in'/>"
+  "      <arg name='sender' type='s' direction='in'/><arg name='text' type='s' direction='in'/></method>"
   "    <method name='SetTranscript'><arg name='ext' type='s' direction='in'/>"
   "      <arg name='transcript' type='s' direction='in'/><arg name='text' type='s' direction='in'/></method>"
   /* a conversation's newest @limit messages, oldest first: (id, written by the owner, text, Unix ms when it came or
@@ -1477,6 +1481,20 @@ on_method_call (GDBusConnection *bus, const char *sender, const char *path, cons
         g_dbus_connection_emit_signal (self->session, NULL, SMS_PATH, SMS_INTERFACE, "MediaWanted",
                                        g_variant_new ("(sss)", conversation->destinations[0], message->sms_uri,
                                                       message->part->mime ? message->part->mime : ""), NULL);
+    }
+  else if (g_str_equal (method, "Change"))
+    {
+      const char *kind, *ext, *who;
+      gint64 conversation;
+
+      g_variant_get (parameters, "(&s&s&s&s)", &kind, &ext, &who, &text);
+      if (!*ext || !(conversation = sms_store_change (self->store, kind, ext, who, text)))
+        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS, "No message %s, or no such change", ext);
+      else
+        {
+          emit_changed (self, conversation);
+          update_notification (self, FALSE);
+        }
     }
   else if (g_str_equal (method, "SetTranscript"))
     {

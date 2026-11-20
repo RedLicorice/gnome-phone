@@ -47,6 +47,14 @@
       <description>The kinds of media whose picture is shown with only its caption, not its label (foto, GIF, sticker)</description>
     </key>
 
+    <!-- a reply shows the message it answers above it, cut after this many lines -->
+    <key name="quote-lines" type="u">
+      <range min="1" max="20"/>
+      <default>2</default>
+      <summary>Lines of a quoted message</summary>
+      <description>How many lines of the message a reply answers are shown above the reply</description>
+    </key>
+
     <!-- agents write Markdown (**bold**, `code`, lists): a message's text is drawn formatted (msg-markdown.c), its
          copy stays the text as written -->
     <key name="markdown" type="b">

@@ -275,6 +275,32 @@ test_typed_part (void)
   sms_store_free (store);
 }
 
+/* a provider's reaction, edit and deletion change the message they point at */
+static void
+test_changes (void)
+{
+  g_autofree char *path = NULL;
+  SmsStore *store = open_store (&path);
+  gint64 id = sms_store_add_incoming (store, "whatsapp:+491701111111", "Ciao", 1000, 2000, "WA-1", NULL);
+  g_autoptr(SmsMessage) changed = NULL, deleted = NULL;
+
+  g_assert_cmpint (sms_store_change (store, "reaction", "WA-1", "anna", "👍"), >, 0);
+  sms_store_change (store, "reaction", "WA-1", "bob", "❤️");
+  sms_store_change (store, "reaction", "WA-1", "anna", "😂");      /* anna's reaction replaced */
+  sms_store_change (store, "reaction", "WA-1", "bob", "");         /* bob's taken away */
+  sms_store_change (store, "edit", "WA-1", "", "Ciao!");
+  g_assert_cmpint (sms_store_change (store, "edit", "WA-404", "", "x"), ==, 0);
+  changed = sms_store_get_message (store, id);
+  g_assert_cmpstr (changed->reactions, ==, "😂");
+  g_assert_cmpstr (changed->text, ==, "Ciao!");
+  g_assert_true (changed->edited);
+  sms_store_change (store, "revoke", "WA-1", "", "messaggio eliminato");
+  deleted = sms_store_get_message (store, id);
+  g_assert_cmpstr (deleted->text, ==, "messaggio eliminato");
+  g_assert_null (deleted->reactions);
+  sms_store_free (store);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -286,5 +312,6 @@ main (int argc, char **argv)
   g_test_add_func ("/sms-store/read-only", test_read_only);
   g_test_add_func ("/sms-store/origin", test_origin);
   g_test_add_func ("/sms-store/typed-part", test_typed_part);
+  g_test_add_func ("/sms-store/changes", test_changes);
   return g_test_run ();
 }

@@ -69,12 +69,20 @@ static const char schema[] =
   "  timestamp INT,"
   "  conversation_id INT NOT NULL REFERENCES conversations(_id) ON DELETE CASCADE"
   ");"
-  "CREATE INDEX IF NOT EXISTS index_parts_message ON parts (message_id);";
+  "CREATE INDEX IF NOT EXISTS index_parts_message ON parts (message_id);"
+  /* a provider's reactions: one emoji per person and message */
+  "CREATE TABLE IF NOT EXISTS reactions ("
+  "  message_id INT NOT NULL REFERENCES messages(_id) ON DELETE CASCADE,"
+  "  sender TEXT NOT NULL,"
+  "  emoji TEXT NOT NULL,"
+  "  UNIQUE (message_id, sender) ON CONFLICT REPLACE"
+  ");";
 
 /* a message's typed part (SmsPart): columns added to bugle_db's parts, where content_type and uri already are */
 static const char *const part_columns[] = {
   "kind TEXT", "caption TEXT", "name TEXT", "size INT", "duration INT", "width INT", "height INT", "thumbnail BLOB",
   "animated INT", "view_once INT", "latitude REAL", "longitude REAL", "url TEXT", "waveform BLOB", "transcript TEXT",
+  "quote_ext TEXT", "quote_text TEXT", "edited INT",
 };
 
 void
@@ -98,6 +106,7 @@ sms_message_free (SmsMessage *message)
   g_free (message->text);
   g_free (message->sms_uri);
   g_free (message->origin);
+  g_free (message->reactions);
   sms_part_free (message->part);
   g_free (message);
 }
@@ -116,6 +125,8 @@ sms_part_free (SmsPart *part)
   g_free (part->uri);
   g_clear_pointer (&part->waveform, g_bytes_unref);
   g_free (part->transcript);
+  g_free (part->quote_ext);
+  g_free (part->quote_text);
   g_free (part);
 }
 
@@ -134,6 +145,8 @@ sms_part_new_from_dict (GVariant *dict)
   g_variant_lookup (dict, "caption", "s", &part->caption);
   g_variant_lookup (dict, "name", "s", &part->name);
   g_variant_lookup (dict, "url", "s", &part->url);
+  g_variant_lookup (dict, "quote-ext", "s", &part->quote_ext);
+  g_variant_lookup (dict, "quote-text", "s", &part->quote_text);
   g_variant_lookup (dict, "size", "t", &part->size);
   g_variant_lookup (dict, "duration", "u", &part->duration);
   g_variant_lookup (dict, "width", "u", &part->width);
@@ -453,8 +466,8 @@ add_message (SmsStore *self, gint64 conversation_id, gint64 sender_id, const cha
   id = sqlite3_last_insert_rowid (self->db);
   part = prepare (self, "INSERT INTO parts (message_id, text, content_type, timestamp, conversation_id, kind, caption,"
                         " name, size, duration, width, height, thumbnail, animated, view_once, latitude, longitude,"
-                        " url, waveform) VALUES (?, ?, IFNULL(?, 'text/plain'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-                        " ?, ?)");
+                        " url, waveform, quote_ext, quote_text) VALUES (?, ?, IFNULL(?, 'text/plain'), ?, ?, ?, ?, ?, ?,"
+                        " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
   if (!part)
     return 0;
   sqlite3_bind_int64 (part, 1, id);
@@ -485,6 +498,8 @@ add_message (SmsStore *self, gint64 conversation_id, gint64 sender_id, const cha
       if (typed->waveform)
         sqlite3_bind_blob (part, 19, g_bytes_get_data (typed->waveform, NULL), g_bytes_get_size (typed->waveform),
                            SQLITE_TRANSIENT);
+      bind_text (part, 20, typed->quote_ext);
+      bind_text (part, 21, typed->quote_text);
     }
   if (!run (self, part))
     return 0;
@@ -603,6 +618,46 @@ sms_store_set_media (SmsStore *self, gint64 message_id, const char *uri)
   bind_text (update, 1, uri);
   sqlite3_bind_int64 (update, 2, message_id);
   run (self, update);
+}
+
+static guint mark (SmsStore *self, const char *sql, gint64 conversation_id);
+
+gint64
+sms_store_change (SmsStore *self, const char *kind, const char *ext, const char *sender, const char *text)
+{
+  gint64 id = sms_store_find_by_uri (self, ext);
+  g_autoptr(SmsMessage) message = id ? sms_store_get_message (self, id) : NULL;
+  sqlite3_stmt *change = NULL;
+
+  if (!message)
+    return 0;
+  if (g_str_equal (kind, "reaction") && text && *text)
+    change = prepare (self, "INSERT INTO reactions (message_id, sender, emoji) VALUES (?1, ?2, ?3)");
+  else if (g_str_equal (kind, "reaction"))
+    change = prepare (self, "DELETE FROM reactions WHERE message_id = ?1 AND sender = ?2 AND ?3 IS NULL");
+  else if (g_str_equal (kind, "edit"))
+    change = prepare (self, "UPDATE parts SET text = ?3, edited = 1 WHERE message_id = ?1 AND ?2 IS NOT NULL");
+  else if (g_str_equal (kind, "revoke"))
+    change = prepare (self, "UPDATE parts SET kind = 'deleted', text = ?3, content_type = 'text/plain', thumbnail = NULL,"
+                            " uri = NULL, caption = NULL, name = NULL, transcript = NULL, waveform = NULL,"
+                            " quote_ext = NULL, quote_text = NULL WHERE message_id = ?1 AND ?2 IS NOT NULL");
+  if (!change)
+    return 0;
+  sqlite3_bind_int64 (change, 1, id);
+  bind_text (change, 2, sender ? sender : "");
+  bind_text (change, 3, text && *text ? text : NULL);
+  exec (self, "BEGIN", NULL);
+  run (self, change);
+  if (g_str_equal (kind, "revoke"))
+    {
+      mark (self, "DELETE FROM reactions WHERE message_id = ?", id);
+      /* deleted for everyone: its media too */
+      if (message->part && message->part->uri)
+        g_unlink (message->part->uri);
+    }
+  refresh_conversation (self, message->conversation_id);
+  exec (self, "COMMIT", NULL);
+  return message->conversation_id;
 }
 
 void
@@ -800,7 +855,9 @@ sms_store_get (SmsStore *self, gint64 conversation_id)
   " (SELECT group_concat(text, '') FROM parts WHERE message_id = m._id)," \
   " m.sent_timestamp, m.received_timestamp, m.message_status, m.read, m.seen, m.sms_message_uri, m.raw_status," \
   " m.origin, t.kind, t.content_type, t.caption, t.name, t.size, t.duration, t.width, t.height, t.thumbnail," \
-  " t.animated, t.view_once, t.latitude, t.longitude, t.url, t.uri, t.waveform, t.transcript" \
+  " t.animated, t.view_once, t.latitude, t.longitude, t.url, t.uri, t.waveform, t.transcript, t.quote_ext, t.quote_text," \
+  " (SELECT MAX(edited) FROM parts WHERE message_id = m._id)," \
+  " (SELECT group_concat(emoji, '') FROM reactions WHERE message_id = m._id)" \
   " FROM messages m LEFT JOIN participants p ON p._id = m.sender_id" \
   " LEFT JOIN parts t ON t.message_id = m._id AND t.kind IS NOT NULL"
 
@@ -834,6 +891,8 @@ part_from_row (sqlite3_stmt *row)
   if ((thumbnail = sqlite3_column_blob (row, 27)))
     part->waveform = g_bytes_new (thumbnail, sqlite3_column_bytes (row, 27));
   part->transcript = column_text (row, 28);
+  part->quote_ext = column_text (row, 29);
+  part->quote_text = column_text (row, 30);
   return part;
 }
 
@@ -872,6 +931,8 @@ list_messages (SmsStore *self, const char *where, gint64 value, guint limit)
       message->raw_status = sqlite3_column_int (select, 10);
       message->origin = column_text (select, 11);
       message->part = part_from_row (select);
+      message->edited = sqlite3_column_int (select, 31);
+      message->reactions = column_text (select, 32);
       g_ptr_array_add (messages, message);
     }
   sqlite3_finalize (select);

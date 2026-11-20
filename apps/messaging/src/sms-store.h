@@ -68,6 +68,7 @@ typedef struct
   char *uri;                    /* the media on this phone, once downloaded, or NULL */
   GBytes *waveform;             /* a voice note's loudness, a byte 0..100 per step, or NULL */
   char *transcript;             /* a voice note's text, once transcribed on the phone, or NULL */
+  char *quote_ext, *quote_text; /* the message it answers: its provider id and what it said, or NULL */
 } SmsPart;
 
 typedef struct
@@ -85,6 +86,8 @@ typedef struct
   char *origin;                 /* who wrote an outgoing one: NULL for the owner, else SendAs's origin ("minerva",
                                  * "agent:<identity>": docs/external-agents-channels.md) */
   SmsPart *part;                /* what it carries besides text, or NULL for a text message */
+  gboolean edited;              /* its sender changed it after sending */
+  char *reactions;              /* the emoji people reacted with, one after the other, or NULL */
 } SmsMessage;
 
 typedef struct _SmsStore SmsStore;
@@ -114,6 +117,9 @@ void      sms_store_set_status (SmsStore *store, gint64 message_id, MessageStatu
 void      sms_store_set_sms_uri (SmsStore *store, gint64 message_id, const char *sms_uri);
 /* the media of the message's typed part is at @uri (a path on this phone) */
 void      sms_store_set_media (SmsStore *store, gint64 message_id, const char *uri);
+/* a provider's change to its message @ext: "reaction" (@sender's emoji @text; "" takes it away), "edit" (its new
+ * @text), "revoke" (deleted for everyone: its media gone, @text what it says now). Its conversation, or 0 */
+gint64    sms_store_change (SmsStore *store, const char *kind, const char *ext, const char *sender, const char *text);
 /* a voice note's transcript, and the message's text with it (what the list, the notification and the agents read) */
 void      sms_store_set_transcript (SmsStore *store, gint64 message_id, const char *transcript, const char *text);
 /* the messages are read (the conversation was shown) and seen (their notification can go); how many changed */
@@ -148,7 +154,7 @@ GHashTable     *sms_store_unread_counts (SmsStore *store);
 void sms_conversation_free (SmsConversation *conversation);
 void sms_message_free (SmsMessage *message);
 /* a part from ReceiveMedia's a{sv} (kind, mime, caption, name, size t, duration u ms, width u, height u, thumbnail ay,
- * animated b, view-once b, latitude d, longitude d, url, waveform ay): NULL without a kind */
+ * animated b, view-once b, latitude d, longitude d, url, waveform ay, quote-ext, quote-text): NULL without a kind */
 SmsPart *sms_part_new_from_dict (GVariant *dict);
 void sms_part_free (SmsPart *part);
 
