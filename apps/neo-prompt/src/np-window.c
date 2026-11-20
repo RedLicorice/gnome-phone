@@ -16,6 +16,15 @@ typedef struct {
   GtkWidget      *files_list, *files_msg, *files_search;
   GtkWidget      *back_btn, *save_btn, *search_btn, *index_btn, *refresh_btn;
   GtkWidget      *mode_source_btn, *mode_rendered_btn;
+  GtkWidget      *edit_btn, *cancel_btn, *sidebar_btn;
+  /* the layout: portrait is the bar, the pages and the bottom bar; landscape is the bar over the rail, the file list
+   * (collapsible, the choice remembered) and the page of the text beside it */
+  GtkWidget      *box, *body, *side, *files_root, *empty_page;
+  GtkWidget      *budget_label, *budget_bar;
+  gboolean        landscape, laid_out;
+  GHashTable     *tokens;        /* doc id -> its estimated tokens (GINT_TO_POINTER (n + 1)) */
+  GHashTable     *rows;          /* doc id -> its row in the file list */
+  guint           token_next, token_gen;
   NpEditor       *editor;
   NpHistory      *history;
   NpContext      *context;
@@ -25,12 +34,27 @@ typedef struct {
 
 static void select_tab (Win *self, guint tab);
 static void back (Win *self);
+static void update_buttons (Win *self);
+static void files_fill (Win *self);
+static void tokens_restart (Win *self);
+
+#define SIDEBAR_FLAG "sidebar_collapsed"
+
+/* the text page is on screen: its own tab, or beside the file list in landscape */
+static gboolean
+in_editor (Win *self)
+{
+  return self->tab == 1 || (self->landscape && self->tab == 0);
+}
 
 static void
 on_saved (gpointer data)
 {
   Win *self = data;
 
+  np_editor_set_editing (self->editor, FALSE);   /* a saved text is read again */
+  files_fill (self);
+  tokens_restart (self);
   if (self->pending_id)
     {
       g_autofree char *id = g_steal_pointer (&self->pending_id);
@@ -50,7 +74,9 @@ on_editor_changed (gpointer data)
 
   text = g_strdup_printf ("%s%s", doc ? doc->title : np_ui (self->store, "editor.title"),
                           np_editor_modified (self->editor) ? " •" : "");
-  gtk_label_set_text (GTK_LABEL (self->title), text);
+  if (in_editor (self))
+    gtk_label_set_text (GTK_LABEL (self->title), text);
+  update_buttons (self);
 }
 
 static void
@@ -263,6 +289,136 @@ file_row_clicked (GtkWidget *row, gpointer data)
   np_window_open_doc (GTK_WIDGET (self->win), g_object_get_data (G_OBJECT (row), "np-id"), NULL);
 }
 
+/* ---- what a row says: the description, the tokens once read, a draft not saved ---- */
+
+static gboolean
+has_draft (Win *self, NpDoc *doc)
+{
+  g_autofree char *path = np_draft_path (self->store, doc);
+
+  return path && g_file_test (path, G_FILE_TEST_EXISTS);
+}
+
+static char *
+row_sub (Win *self, NpDoc *doc)
+{
+  GString *s = g_string_new (doc->description ? doc->description
+                             : doc->path ? np_short_path (doc->path) : doc->source_label ? doc->source_label : "");
+  gpointer known = g_hash_table_lookup (self->tokens, doc->id);
+
+  if (known)
+    {
+      g_autofree char *tokens = g_strdup_printf (np_ui (self->store, "files.tokens"), GPOINTER_TO_INT (known) - 1);
+
+      g_string_append_printf (s, "%s%s", s->len ? np_ui (self->store, "files.separator") : "", tokens);
+    }
+  if (has_draft (self, doc))
+    g_string_append_printf (s, "%s%s", s->len ? np_ui (self->store, "files.separator") : "",
+                            np_ui (self->store, "files.draft"));
+  return g_string_free (s, FALSE);
+}
+
+/* the texts that make the prompt, against its budget (limits.prompt_budget_tokens): an estimate from their length */
+static void
+budget_update (Win *self)
+{
+  int total = 0, budget = self->store->conf.prompt_budget_tokens;
+  gboolean pending = FALSE;
+  g_autofree char *text = NULL;
+
+  if (!self->budget_label || budget <= 0)
+    return;
+  for (guint i = 0; i < self->store->docs->len; i++)
+    {
+      NpDoc *doc = g_ptr_array_index (self->store->docs, i);
+      gpointer known = doc->in_prompt ? g_hash_table_lookup (self->tokens, doc->id) : NULL;
+
+      if (!doc->in_prompt)
+        continue;
+      if (known)
+        total += GPOINTER_TO_INT (known) - 1;
+      else
+        pending = TRUE;
+    }
+  text = pending ? g_strdup (np_ui (self->store, "files.budget_pending"))
+                 : g_strdup_printf (np_ui (self->store, "files.budget"), total, budget);
+  gtk_label_set_text (GTK_LABEL (self->budget_label), text);
+  gtk_level_bar_set_value (GTK_LEVEL_BAR (self->budget_bar), MIN (total, budget));
+  if (!pending && total > budget)
+    gtk_widget_add_css_class (self->budget_bar, "np-over");
+  else
+    gtk_widget_remove_css_class (self->budget_bar, "np-over");
+}
+
+typedef struct {
+  Win   *self;
+  guint  gen;
+  char  *id;
+} TokenLoad;
+
+static void tokens_next (Win *self);
+
+static void
+tokens_loaded (NpAns *ans, gpointer data)
+{
+  TokenLoad *load = data;
+  Win *self = load->self;
+
+  if (load->gen == self->token_gen)
+    {
+      if (ans->ok)
+        {
+          int n = (int) ((g_utf8_strlen (ans->text ? ans->text : "", -1) + self->store->conf.chars_per_token - 1)
+                         / self->store->conf.chars_per_token);
+          GtkWidget *row = g_hash_table_lookup (self->rows, load->id);
+          NpDoc *doc = np_doc_by_id (self->store, load->id, NULL);
+
+          g_hash_table_insert (self->tokens, g_strdup (load->id), GINT_TO_POINTER (n + 1));
+          if (row && doc)
+            {
+              g_autofree char *sub = row_sub (self, doc);
+
+              np_row_set_sub (row, sub);
+            }
+          np_doc_free (doc);
+        }
+      budget_update (self);
+      tokens_next (self);
+    }
+  g_free (load->id);
+  g_free (load);
+}
+
+/* one text at a time, in the background: each read may run minerva-config */
+static void
+tokens_next (Win *self)
+{
+  while (self->token_next < self->store->docs->len)
+    {
+      NpDoc *doc = g_ptr_array_index (self->store->docs, self->token_next++);
+      TokenLoad *load = NULL;
+
+      if (!doc->editable || !doc->listed || doc->needs_person)
+        continue;
+      load = g_new0 (TokenLoad, 1);
+      load->self = self;
+      load->gen = self->token_gen;
+      load->id = g_strdup (doc->id);
+      np_doc_load (self->store, doc, G_OBJECT (self->win), NULL, tokens_loaded, load);
+      return;
+    }
+}
+
+static void
+tokens_restart (Win *self)
+{
+  self->token_gen++;
+  self->token_next = 0;
+  g_hash_table_remove_all (self->tokens);
+  budget_update (self);
+  tokens_next (self);
+}
+
 static void
 files_fill (Win *self)
 {
@@ -275,6 +431,7 @@ files_fill (Win *self)
 
   while (gtk_widget_get_first_child (self->files_list))
     gtk_box_remove (GTK_BOX (self->files_list), gtk_widget_get_first_child (self->files_list));
+  g_hash_table_remove_all (self->rows);
 
   for (guint i = 0; i < self->store->docs->len; i++)
     {
@@ -307,8 +464,10 @@ files_fill (Win *self)
           g_ptr_array_add (order, card);
         }
       {
-        GtkWidget *row = np_row (doc->title, doc->path ? np_short_path (doc->path) : doc->source_label, "np-file-row");
+        g_autofree char *sub = row_sub (self, doc);
+        GtkWidget *row = np_row (doc->title, sub, "np-file-row");
 
+        g_hash_table_insert (self->rows, g_strdup (doc->id), row);
         g_object_set_data_full (G_OBJECT (row), "np-id", g_strdup (doc->id), g_free);
         g_signal_connect (row, "clicked", G_CALLBACK (file_row_clicked), self);
         gtk_box_append (GTK_BOX (card), row);
@@ -351,6 +510,20 @@ files_page (Win *self)
   gtk_widget_set_margin_end (self->files_msg, 16);
   scroll = np_scroller (self->files_list);
   gtk_box_append (GTK_BOX (box), self->files_search);
+  if (self->store->conf.prompt_budget_tokens > 0)
+    {
+      self->budget_label = np_label ("", "np-sub");
+      self->budget_bar = gtk_level_bar_new_for_interval (0, self->store->conf.prompt_budget_tokens);
+      gtk_level_bar_set_mode (GTK_LEVEL_BAR (self->budget_bar), GTK_LEVEL_BAR_MODE_CONTINUOUS);
+      gtk_widget_add_css_class (self->budget_bar, "np-budget");
+      for (GtkWidget **w = (GtkWidget *[]) { self->budget_label, self->budget_bar, NULL }; *w; w++)
+        {
+          gtk_widget_set_margin_start (*w, 16);
+          gtk_widget_set_margin_end (*w, 16);
+          gtk_widget_set_margin_top (*w, 8);
+          gtk_box_append (GTK_BOX (box), *w);
+        }
+    }
   gtk_box_append (GTK_BOX (box), self->files_msg);
   gtk_box_append (GTK_BOX (box), scroll);
   return box;
@@ -366,20 +539,38 @@ update_mode_buttons (Win *self)
   /* a rendered mode is for the texts whose Markdown means something: not JSON, not plain text */
   gboolean can = g_strcmp0 (kind, "markdown") == 0 || g_strcmp0 (kind, "jinja") == 0;
 
-  gtk_widget_set_visible (self->mode_source_btn, self->tab == 1 && can && rendered);
-  gtk_widget_set_visible (self->mode_rendered_btn, self->tab == 1 && can && !rendered);
+  /* the choice of mode is an editing one: reading shows each kind its own way (editor.read.modes) */
+  gboolean editing = in_editor (self) && np_editor_editing (self->editor);
+
+  gtk_widget_set_visible (self->mode_source_btn, editing && can && rendered);
+  gtk_widget_set_visible (self->mode_rendered_btn, editing && can && !rendered);
+}
+
+/* the text's buttons: Edit while it is read, Cancel and Save while it is edited */
+static void
+update_buttons (Win *self)
+{
+  NpDoc *doc = np_editor_doc (self->editor);
+  gboolean shown = in_editor (self) && doc != NULL, editing = shown && np_editor_editing (self->editor);
+
+  gtk_widget_set_visible (self->edit_btn, shown && !editing && doc->editable);
+  gtk_widget_set_visible (self->cancel_btn, editing);
+  gtk_widget_set_visible (self->save_btn, editing);
+  gtk_widget_set_visible (self->search_btn, shown);
+  gtk_widget_set_visible (self->index_btn, shown);
+  gtk_widget_set_visible (self->sidebar_btn, self->landscape && self->tab <= 1);
+  update_mode_buttons (self);
 }
 
 static void
 update_bar (Win *self, guint tab)
 {
   gtk_widget_set_visible (self->back_btn, tab != 0);
-  gtk_widget_set_visible (self->save_btn, tab == 1);
-  gtk_widget_set_visible (self->search_btn, tab == 1);
-  gtk_widget_set_visible (self->index_btn, tab == 1);
   gtk_widget_set_visible (self->refresh_btn, tab == 2);
-  update_mode_buttons (self);
-  if (tab == 0)
+  update_buttons (self);
+  if (in_editor (self) && np_editor_doc (self->editor))
+    on_editor_changed (self);
+  else if (tab == 0)
     gtk_label_set_text (GTK_LABEL (self->title), np_ui (self->store, "app.name"));
   else if (tab == 2)
     gtk_label_set_text (GTK_LABEL (self->title), np_ui (self->store, "context.title"));
@@ -394,8 +585,18 @@ select_tab (Win *self, guint tab)
 {
   static const char *const names[] = { "files", "edit", "context", "history" };
 
+  const char *child = names[tab];
+  gboolean collapsed = np_state_flag (self->store, SIDEBAR_FLAG, FALSE);
+
+  if (self->landscape && tab <= 1)   /* the list is beside: the page is the text, or the hint to pick one */
+    {
+      child = np_editor_doc (self->editor) ? "edit" : "empty";
+      if (tab == 0 && collapsed && self->tab != 0)   /* the Texts item brings the list back */
+        np_state_flag_set (self->store, SIDEBAR_FLAG, collapsed = FALSE);
+    }
   self->tab = tab;
-  gtk_stack_set_visible_child_name (GTK_STACK (self->stack), names[tab]);
+  gtk_stack_set_visible_child_name (GTK_STACK (self->stack), child);
+  gtk_revealer_set_reveal_child (GTK_REVEALER (self->side), self->landscape && tab <= 1 && !collapsed);
   neo_nav_bar_set_selected (NEO_NAV_BAR (self->nav), (int) tab);
   update_bar (self, tab);
   if (tab == 2)
@@ -442,6 +643,113 @@ on_index (GtkWidget *button, gpointer data)
   Win *self = data;
 
   np_editor_index (self->editor, button);
+}
+
+static void
+on_edit (GtkWidget *button, gpointer data)
+{
+  Win *self = data;
+
+  np_editor_set_editing (self->editor, TRUE);
+}
+
+static void
+cancel_answered (NeoDialog *dialog, int response, gpointer data)
+{
+  Win *self = data;
+
+  if (response == 2)
+    np_editor_discard (self->editor);   /* the text as its source has it, read again */
+}
+
+/* Cancel: back to reading; edits are thrown away only after a question */
+static void
+on_cancel (GtkWidget *button, gpointer data)
+{
+  Win *self = data;
+  NeoDialog *dialog = NULL;
+
+  if (!np_editor_modified (self->editor))
+    {
+      np_editor_set_editing (self->editor, FALSE);
+      return;
+    }
+  dialog = neo_dialog_new (np_ui (self->store, "editor.cancel_title"));
+  neo_dialog_set_message (dialog, np_ui (self->store, "editor.cancel_body"));
+  neo_dialog_add_button (dialog, np_ui (self->store, "editor.keep_editing"), NEO_RESPONSE_CANCEL);
+  neo_dialog_add_button (dialog, np_ui (self->store, "editor.discard"), 2);
+  g_signal_connect (dialog, "response", G_CALLBACK (cancel_answered), self);
+  neo_dialog_present (dialog, GTK_WIDGET (self->win));
+}
+
+static void
+on_sidebar (GtkWidget *button, gpointer data)
+{
+  Win *self = data;
+
+  np_state_flag_set (self->store, SIDEBAR_FLAG, !np_state_flag (self->store, SIDEBAR_FLAG, FALSE));
+  select_tab (self, self->tab);
+}
+
+/* ---- the layout, again on every rotation ---- */
+
+static void
+relayout (Win *self, gboolean landscape)
+{
+  GtkWidget *parent = NULL;
+
+  if (self->laid_out && self->landscape == landscape)
+    return;
+  self->laid_out = TRUE;
+  self->landscape = landscape;
+  g_object_ref (self->files_root);
+  parent = gtk_widget_get_parent (self->files_root);
+  if (parent && GTK_IS_REVEALER (parent))
+    gtk_revealer_set_child (GTK_REVEALER (parent), NULL);
+  else if (parent)
+    gtk_stack_remove (GTK_STACK (self->stack), self->files_root);
+  if (landscape)
+    gtk_revealer_set_child (GTK_REVEALER (self->side), self->files_root);
+  else
+    gtk_stack_add_named (GTK_STACK (self->stack), self->files_root, "files");
+  g_object_unref (self->files_root);
+
+  g_object_ref (self->nav);
+  if (gtk_widget_get_parent (self->nav))
+    gtk_box_remove (GTK_BOX (gtk_widget_get_parent (self->nav)), self->nav);
+  neo_nav_bar_set_rail (NEO_NAV_BAR (self->nav), landscape);
+  if (landscape)
+    gtk_box_prepend (GTK_BOX (self->body), self->nav);
+  else
+    gtk_box_append (GTK_BOX (self->box), self->nav);
+  g_object_unref (self->nav);
+  gtk_widget_set_visible (self->side, landscape);
+  select_tab (self, self->tab);
+}
+
+static void
+on_surface_layout (GdkSurface *surface, int width, int height, gpointer data)
+{
+  Win *self = data;
+  double aspect = self->store->conf.landscape_aspect;
+
+  relayout (self, aspect > 0 && height > 0 && width >= height * aspect);
+}
+
+static void
+on_realize (GtkWidget *window, gpointer data)
+{
+  GdkSurface *surface = gtk_native_get_surface (GTK_NATIVE (window));
+
+  g_signal_connect (surface, "layout", G_CALLBACK (on_surface_layout), data);
+}
+
+static void
+win_free (Win *self)
+{
+  g_clear_pointer (&self->tokens, g_hash_table_unref);
+  g_clear_pointer (&self->rows, g_hash_table_unref);
+  g_free (self);
 }
 
 static void
@@ -515,7 +823,10 @@ np_window_new (GtkApplication *app, NpStore *store)
   window = neo_window_new (app);
   gtk_widget_add_css_class (window, "np");
   self->win = GTK_WINDOW (window);
-  g_object_set_data_full (G_OBJECT (window), "np-win", self, g_free);
+  g_object_set_data_full (G_OBJECT (window), "np-win", self, (GDestroyNotify) win_free);
+  self->tokens = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+  self->rows = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+  g_signal_connect (window, "realize", G_CALLBACK (on_realize), self);
   add_back_shortcut (self);
 
   bar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 2);
@@ -527,12 +838,21 @@ np_window_new (GtkApplication *app, NpStore *store)
                                   g_dgettext ("gtk40", "Back"), -1);
   g_signal_connect (self->back_btn, "clicked", G_CALLBACK (on_back), self);
   gtk_box_append (GTK_BOX (bar), self->back_btn);
+  self->sidebar_btn = neo_icon_button_new (np_ui (store, "icons.sidebar"));
+  gtk_accessible_update_property (GTK_ACCESSIBLE (self->sidebar_btn), GTK_ACCESSIBLE_PROPERTY_LABEL,
+                                  np_ui (store, "files.sidebar_hint"), -1);
+  g_signal_connect (self->sidebar_btn, "clicked", G_CALLBACK (on_sidebar), self);
+  gtk_box_append (GTK_BOX (bar), self->sidebar_btn);
   self->title = np_label (np_ui (store, "app.name"), "neo-app-bar-title");
   gtk_widget_set_hexpand (self->title, TRUE);
   gtk_label_set_ellipsize (GTK_LABEL (self->title), PANGO_ELLIPSIZE_END);
   gtk_box_append (GTK_BOX (bar), self->title);
   self->actions = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
   self->save_btn = neo_text_button_new (np_ui (store, "editor.save"));
+  self->edit_btn = neo_text_button_new (np_ui (store, "editor.edit"));
+  self->cancel_btn = neo_text_button_new (np_ui (store, "editor.cancel"));
+  g_signal_connect (self->edit_btn, "clicked", G_CALLBACK (on_edit), self);
+  g_signal_connect (self->cancel_btn, "clicked", G_CALLBACK (on_cancel), self);
   self->mode_source_btn = neo_icon_button_new (np_ui (store, "icons.mode_source"));
   self->mode_rendered_btn = neo_icon_button_new (np_ui (store, "icons.mode_rendered"));
   self->search_btn = neo_icon_button_new (np_ui (store, "icons.search"));
@@ -548,6 +868,8 @@ np_window_new (GtkApplication *app, NpStore *store)
   g_signal_connect (self->search_btn, "clicked", G_CALLBACK (on_search), self);
   g_signal_connect (self->index_btn, "clicked", G_CALLBACK (on_index), self);
   g_signal_connect (self->refresh_btn, "clicked", G_CALLBACK (on_refresh), self);
+  gtk_box_append (GTK_BOX (self->actions), self->edit_btn);
+  gtk_box_append (GTK_BOX (self->actions), self->cancel_btn);
   gtk_box_append (GTK_BOX (self->actions), self->save_btn);
   gtk_box_append (GTK_BOX (self->actions), self->mode_source_btn);
   gtk_box_append (GTK_BOX (self->actions), self->mode_rendered_btn);
@@ -570,8 +892,12 @@ np_window_new (GtkApplication *app, NpStore *store)
 
   if (store->conf.registry && store->ui)
     {
-      gtk_stack_add_named (GTK_STACK (self->stack), files_page (self), "files");
+      self->files_root = files_page (self);
+      gtk_stack_add_named (GTK_STACK (self->stack), self->files_root, "files");
       gtk_stack_add_named (GTK_STACK (self->stack), np_editor_root (self->editor), "edit");
+      self->empty_page = np_label (np_ui (store, "files.choose"), "np-sub");
+      gtk_widget_set_valign (self->empty_page, GTK_ALIGN_CENTER);
+      gtk_stack_add_named (GTK_STACK (self->stack), self->empty_page, "empty");
       gtk_stack_add_named (GTK_STACK (self->stack), np_context_root (self->context), "context");
       gtk_stack_add_named (GTK_STACK (self->stack), np_history_root (self->history), "history");
       files_fill (self);
@@ -587,14 +913,28 @@ np_window_new (GtkApplication *app, NpStore *store)
   g_signal_connect (self->nav, "selected", G_CALLBACK (on_nav), self);
 
   box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+  self->box = box;
+  self->body = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+  gtk_widget_set_vexpand (self->body, TRUE);
+  self->side = gtk_revealer_new ();
+  gtk_revealer_set_transition_type (GTK_REVEALER (self->side), GTK_REVEALER_TRANSITION_TYPE_SLIDE_RIGHT);
+  gtk_widget_set_size_request (self->side, store->conf.sidebar_width, -1);
+  gtk_widget_add_css_class (self->side, "np-side");
+  gtk_widget_set_visible (self->side, FALSE);
+  gtk_widget_set_hexpand (self->stack, TRUE);
+  gtk_box_append (GTK_BOX (self->body), self->side);
+  gtk_box_append (GTK_BOX (self->body), self->stack);
   gtk_box_append (GTK_BOX (box), bar);
-  gtk_box_append (GTK_BOX (box), self->stack);
+  gtk_box_append (GTK_BOX (box), self->body);
   gtk_box_append (GTK_BOX (box), self->nav);
   neo_window_set_content (self->win, box);
   overlay = GTK_WIDGET (neo_window_get_overlay (box));
   if (overlay)
     gtk_overlay_add_overlay (GTK_OVERLAY (overlay), self->snackbar);
 
+  if (!self->files_root)   /* no configuration: the one page is the notice */
+    self->files_root = gtk_stack_get_child_by_name (GTK_STACK (self->stack), "files");
   select_tab (self, 0);
+  tokens_restart (self);
   return window;
 }

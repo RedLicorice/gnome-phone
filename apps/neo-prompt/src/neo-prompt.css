@@ -143,3 +143,25 @@ window.neo.np {
   font-weight: 800;
   color: @neo_on_surface;
 }
+
+/* --- landscape: the file list beside the text */
+
+.np-side {
+  background-color: @neo_surface;
+  border-right: 1px solid @neo_outline_variant;
+}
+
+/* --- the prompt's budget over the file list */
+
+levelbar.np-budget block.filled {
+  background-color: @neo_primary;
+}
+
+levelbar.np-budget block.empty {
+  background-color: @neo_surface_container_highest;
+}
+
+levelbar.np-budget.np-over block.filled {
+  background-color: @neo_error;
+}
+

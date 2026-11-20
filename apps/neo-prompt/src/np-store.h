@@ -18,6 +18,7 @@ typedef struct {
   char     *id;
   char     *group;
   char     *title;
+  char     *description;     /* one line for the file list, or NULL */
   char     *kind;            /* markdown, jinja, json, text: the highlighter and the local check */
   char     *path;            /* the file a {file} source read, expanded; NULL for an argv source */
   char     *source_label;    /* what the registry calls the source, for a row or a block */
@@ -31,6 +32,7 @@ typedef struct {
   gboolean  editable;
   gboolean  history;
   gboolean  listed;          /* in the File tab */
+  gboolean  in_prompt;       /* its text is part of the prompt: counted in the total against the budget */
 } NpDoc;
 
 typedef struct {
@@ -62,6 +64,12 @@ typedef struct {
   int      chars_per_token;
   int      cache_min_tokens;
   int      timeout_s;
+  int      prompt_budget_tokens;  /* the prompt's budget the file list's bar measures against; 0: no bar */
+  JsonObject *read_modes;    /* kind -> the mode a document is READ in (editing uses modes) */
+  int      read_font_px;     /* the text size of the read view */
+  int      edit_font_px;     /* the text size while editing */
+  double   landscape_aspect; /* width / height from which the window is landscape: the master-detail layout */
+  int      sidebar_width;    /* the file list beside the text, landscape */
   JsonObject *block_freq;    /* block id -> "static" | "session" | "turn" (the cache indicator) */
   JsonArray  *block_order;   /* the order of the blocks, as the provider's cache prefix sees them */
 } NpConf;
@@ -93,6 +101,11 @@ const char *np_doc_kind        (NpDoc *doc);
  * default from editor.modes; never NULL ("source"). np_mode_set writes the choice down. */
 char       *np_mode_for        (NpStore *self, const char *kind);
 void        np_mode_set        (NpStore *self, const char *kind, const char *mode);
+/* the mode a document of `kind` is read in (editor.read.modes; "source" when none) */
+char       *np_read_mode_for   (NpStore *self, const char *kind);
+/* a flag of the UI remembered in paths.state (the sidebar collapsed), `fallback` when never set */
+gboolean    np_state_flag      (NpStore *self, const char *key, gboolean fallback);
+void        np_state_flag_set  (NpStore *self, const char *key, gboolean value);
 
 GPtrArray  *np_docs            (NpStore *self);          /* the openable ones (editable) */
 NpDoc      *np_doc_by_id       (NpStore *self, const char *id, const char *person);

@@ -25,6 +25,7 @@ struct _NpEditor {
   guint         highlight_id, draft_id, token;
   int           cursor_line;   /* the line being edited: rendered mode leaves its markers visible */
   gboolean      loading, saving, overwrite;
+  gboolean      editing;       /* FALSE: the text is read (no cursor, no keyboard); TRUE: after Edit */
   GtkTextTag   *t_heading, *t_jinja, *t_code, *t_strong, *t_em, *t_link, *t_comment, *t_quote, *t_hit, *t_mark;
   GtkTextTag   *t_hidden, *t_h[6], *t_chip, *t_list_indent, *t_quote_indent;
   void        (*saved_cb) (gpointer);
@@ -70,6 +71,8 @@ put_text (NpEditor *self, const char *text, gboolean modified)
 void
 np_editor_put_text (NpEditor *self, const char *text)
 {
+  if (!self->editing)   /* a text put back (a snapshot, a draft) is an edit: it is saved through the normal door */
+    np_editor_set_editing (self, TRUE);
   put_text (self, text, TRUE);
   paint (self);
 }
@@ -108,6 +111,8 @@ apply_mode (NpEditor *self)
     gtk_widget_add_css_class (self->view, "np-rendered");
   else
     gtk_widget_remove_css_class (self->view, "np-rendered");
+  gtk_widget_add_css_class (self->view, self->editing ? "np-editing" : "np-reading");
+  gtk_widget_remove_css_class (self->view, self->editing ? "np-reading" : "np-editing");
   paint (self);
 }
 
@@ -120,9 +125,33 @@ np_editor_set_rendered (NpEditor *self, gboolean rendered)
     return;
   g_free (self->mode);
   self->mode = g_strdup (mode);
-  if (self->doc)
+  if (self->doc && self->editing)   /* the choice of mode is remembered for editing; reading has its own (data) */
     np_mode_set (self->store, np_doc_kind (self->doc), mode);
   apply_mode (self);
+}
+
+gboolean
+np_editor_editing (NpEditor *self)
+{
+  return self->editing;
+}
+
+void
+np_editor_set_editing (NpEditor *self, gboolean editing)
+{
+  self->editing = editing;
+  gtk_text_view_set_editable (GTK_TEXT_VIEW (self->view), editing);
+  gtk_text_view_set_cursor_visible (GTK_TEXT_VIEW (self->view), editing);
+  g_free (self->mode);
+  self->mode = !self->doc ? g_strdup ("source")
+               : editing ? np_mode_for (self->store, np_doc_kind (self->doc))
+                         : np_read_mode_for (self->store, np_doc_kind (self->doc));
+  self->cursor_line = -1;
+  apply_mode (self);
+  if (editing)
+    gtk_widget_grab_focus (self->view);   /* the keyboard comes up for the text, and only now */
+  if (self->changed_cb)
+    self->changed_cb (self->changed_data);
 }
 
 /* ---- highlighting: Markdown and Jinja2, line by line ---- */
@@ -754,7 +783,7 @@ on_cursor_moved (GtkTextBuffer *buffer, GParamSpec *pspec, gpointer data)
   GtkTextIter it;
   int line = 0;
 
-  if (!np_editor_rendered (self) || !self->doc)
+  if (!np_editor_rendered (self) || !self->doc || !self->editing)
     return;
   gtk_text_buffer_get_iter_at_mark (buffer, &it, gtk_text_buffer_get_insert (buffer));
   line = gtk_text_iter_get_line (&it);
@@ -1128,11 +1157,8 @@ np_editor_open (NpEditor *self, NpDoc *doc)
   self->overwrite = FALSE;
   self->save_done = NULL;
   self->save_done_data = NULL;
-  self->cursor_line = -1;
-  g_free (self->mode);
-  self->mode = np_mode_for (self->store, np_doc_kind (doc));
-  apply_mode (self);
   gtk_text_buffer_set_modified (self->buffer, FALSE);
+  np_editor_set_editing (self, FALSE);   /* a text opens to be read: Edit makes it writable */
   self->token++;
   open = g_new0 (Open, 1);
   open->self = self;
@@ -1189,6 +1215,8 @@ np_editor_new (NpStore *store, GtkWindow *window, GtkWidget *snackbar)
   self->view = gtk_text_view_new ();
   self->buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (self->view));
   gtk_text_view_set_monospace (GTK_TEXT_VIEW (self->view), TRUE);
+  gtk_text_view_set_editable (GTK_TEXT_VIEW (self->view), FALSE);   /* reading until Edit */
+  gtk_text_view_set_cursor_visible (GTK_TEXT_VIEW (self->view), FALSE);
   gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (self->view), GTK_WRAP_WORD_CHAR);
   gtk_text_view_set_left_margin (GTK_TEXT_VIEW (self->view), 16);
   gtk_text_view_set_right_margin (GTK_TEXT_VIEW (self->view), 16);

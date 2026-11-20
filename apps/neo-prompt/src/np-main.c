@@ -44,12 +44,33 @@ open_uri (GtkApplication *app, const char *uri)
   np_window_open_doc (window, id, person);
 }
 
+/* the text sizes are data (editor.read.font_px, editor.font_px): a stylesheet made from them, over the app's */
+static void
+load_sizes (void)
+{
+  g_autoptr (GString) css = g_string_new ("");
+  GtkCssProvider *provider = NULL;
+
+  if (store->conf.read_font_px > 0)
+    g_string_append_printf (css, ".np-editor.np-reading { font-size: %dpx; }\n", store->conf.read_font_px);
+  if (store->conf.edit_font_px > 0)
+    g_string_append_printf (css, ".np-editor.np-editing { font-size: %dpx; }\n", store->conf.edit_font_px);
+  if (!css->len)
+    return;
+  provider = gtk_css_provider_new ();
+  gtk_css_provider_load_from_string (provider, css->str);
+  gtk_style_context_add_provider_for_display (gdk_display_get_default (), GTK_STYLE_PROVIDER (provider),
+                                              GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 2);
+  g_object_unref (provider);
+}
+
 static void
 on_startup (GApplication *app, gpointer data)
 {
   neo_init ();
   load_style ();
   store = np_store_new (NULL);
+  load_sizes ();
 }
 
 static void

@@ -18,6 +18,9 @@ int        neo_nav_bar_append       (NeoNavBar *self, const char *icon_name, con
 /* selects without emitting "selected" and without the indicator's animation */
 void       neo_nav_bar_set_selected (NeoNavBar *self, int index);
 int        neo_nav_bar_get_selected (NeoNavBar *self);
+/* the rail: the items stacked down the start edge (Material 3's NavigationRail, for a landscape window); FALSE: the
+ * bottom bar again. The items, the selection and the signal stay the same. */
+void       neo_nav_bar_set_rail     (NeoNavBar *self, gboolean rail);
 
 /* Signals: "selected" (int index) */
 

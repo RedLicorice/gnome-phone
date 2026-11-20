@@ -12,6 +12,13 @@
 #define ICON           24
 #define LABEL_TOP      48
 #define INDICATOR_MS   500    /* MDC NavigationBarItemView: motionDurationLong2, emphasized */
+/* the rail (Material 3's NavigationRail, a landscape window): the same items stacked down the start edge in a column
+ * BAR_H wide; a row is the indicator and the label under it (M3 rail: 56 dp destinations, 4 dp from the indicator to
+ * the label), so a phone's landscape height holds four of them under an app bar */
+#define RAIL_TOP       8
+#define RAIL_ROW       64
+#define RAIL_PILL_TOP  4
+#define RAIL_LABEL_TOP 40
 
 typedef struct {
   GtkWidget *icon, *label;
@@ -26,6 +33,7 @@ struct _NeoNavBar {
   GPtrArray *items;
   int        selected;
   int        pressed;          /* the item under the finger, or -1 */
+  gboolean   rail;             /* stacked down the side (neo_nav_bar_set_rail) */
 };
 
 G_DEFINE_FINAL_TYPE (NeoNavBar, neo_nav_bar, GTK_TYPE_WIDGET)
@@ -50,11 +58,24 @@ column_width (NeoNavBar *self)
   return self->items->len ? gtk_widget_get_width (GTK_WIDGET (self)) / (double) self->items->len : 0;
 }
 
+/* the top-left corner of an item's cell: a column of the bar, a row of the rail */
+static graphene_point_t
+cell_origin (NeoNavBar *self, guint index)
+{
+  return self->rail ? GRAPHENE_POINT_INIT (0, RAIL_TOP + RAIL_ROW * index) : GRAPHENE_POINT_INIT (column_width (self) * index, 0);
+}
+
+static double
+cell_width (NeoNavBar *self)
+{
+  return self->rail ? BAR_H : column_width (self);
+}
+
 static graphene_rect_t
 pill_rect (NeoNavBar *self, guint index)
 {
-  double col = column_width (self);
-  return GRAPHENE_RECT_INIT (col * index + (col - PILL_W) / 2, PILL_TOP, PILL_W, PILL_H);
+  graphene_point_t o = cell_origin (self, index);
+  return GRAPHENE_RECT_INIT (o.x + (cell_width (self) - PILL_W) / 2, o.y + (self->rail ? RAIL_PILL_TOP : PILL_TOP), PILL_W, PILL_H);
 }
 
 /* ---- layout and drawing ---------------------------------------------------------------------------------------- */
@@ -64,24 +85,27 @@ neo_nav_bar_measure (GtkWidget *widget, GtkOrientation orientation, int for_size
                      int *minimum, int *natural, int *minimum_baseline, int *natural_baseline)
 {
   NeoNavBar *self = NEO_NAV_BAR (widget);
-  *minimum = *natural = orientation == GTK_ORIENTATION_VERTICAL ? BAR_H : (int) self->items->len * PILL_W;
+  if (self->rail)
+    *minimum = *natural = orientation == GTK_ORIENTATION_HORIZONTAL ? BAR_H : RAIL_TOP + (int) self->items->len * RAIL_ROW;
+  else
+    *minimum = *natural = orientation == GTK_ORIENTATION_VERTICAL ? BAR_H : (int) self->items->len * PILL_W;
 }
 
 static void
 neo_nav_bar_size_allocate (GtkWidget *widget, int width, int height, int baseline)
 {
   NeoNavBar *self = NEO_NAV_BAR (widget);
-  double col = column_width (self);
+  double col = cell_width (self);
   for (guint i = 0; i < self->items->len; i++) {
     Item *item = g_ptr_array_index (self->items, i);
-    double x = col * i;
+    graphene_point_t o = cell_origin (self, i);
     gtk_widget_allocate (item->icon, ICON, ICON, -1,
-                         gsk_transform_translate (NULL, &GRAPHENE_POINT_INIT (x + (col - ICON) / 2,
-                                                                              PILL_TOP + (PILL_H - ICON) / 2)));
+                         gsk_transform_translate (NULL, &GRAPHENE_POINT_INIT (o.x + (col - ICON) / 2,
+                                                                              o.y + (self->rail ? RAIL_PILL_TOP : PILL_TOP) + (PILL_H - ICON) / 2)));
     int label_h, unused;
     gtk_widget_measure (item->label, GTK_ORIENTATION_VERTICAL, (int) col, &label_h, &unused, NULL, NULL);
     gtk_widget_allocate (item->label, (int) col, label_h, -1,
-                         gsk_transform_translate (NULL, &GRAPHENE_POINT_INIT (x, LABEL_TOP)));
+                         gsk_transform_translate (NULL, &GRAPHENE_POINT_INIT (o.x, o.y + (self->rail ? RAIL_LABEL_TOP : LABEL_TOP))));
   }
 }
 
@@ -161,17 +185,17 @@ select_item (NeoNavBar *self, int index, gboolean animate)
 }
 
 static int
-item_at (NeoNavBar *self, double x)
+item_at (NeoNavBar *self, double x, double y)
 {
   double col = column_width (self);
-  int index = col > 0 ? (int) (x / col) : -1;
+  int index = self->rail ? (y >= RAIL_TOP ? (int) ((y - RAIL_TOP) / RAIL_ROW) : -1) : col > 0 ? (int) (x / col) : -1;
   return index >= 0 && index < (int) self->items->len ? index : -1;
 }
 
 static void
 on_pressed (GtkGestureClick *click, int n_press, double x, double y, NeoNavBar *self)
 {
-  self->pressed = item_at (self, x);
+  self->pressed = item_at (self, x, y);
   if (self->pressed < 0)
     return;
   Item *item = g_ptr_array_index (self->items, self->pressed);
@@ -284,4 +308,17 @@ int
 neo_nav_bar_get_selected (NeoNavBar *self)
 {
   return self->selected;
+}
+
+void
+neo_nav_bar_set_rail (NeoNavBar *self, gboolean rail)
+{
+  if (self->rail == !!rail)
+    return;
+  self->rail = !!rail;
+  if (rail)
+    gtk_widget_add_css_class (GTK_WIDGET (self), "neo-nav-rail");
+  else
+    gtk_widget_remove_css_class (GTK_WIDGET (self), "neo-nav-rail");
+  gtk_widget_queue_resize (GTK_WIDGET (self));
 }

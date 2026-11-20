@@ -29,6 +29,10 @@ gboolean    np_editor_saving     (NpEditor *self);
 gboolean    np_editor_rendered   (NpEditor *self);
 /* the mode is a choice per kind of text: the editor remembers it (np_mode_set) and draws the buffer again */
 void        np_editor_set_rendered (NpEditor *self, gboolean rendered);
+/* reading (the default when a text opens: no cursor, no keyboard, the kind's read mode) or editing (after Edit: the
+ * keyboard, the cursor, the mode chosen for editing). A text put back (a draft, a snapshot) switches to editing. */
+gboolean    np_editor_editing    (NpEditor *self);
+void        np_editor_set_editing (NpEditor *self, gboolean editing);
 void        np_editor_save       (NpEditor *self);
 /* a save that says how it ended, for a Back that has somewhere to go only once the text is safe; `ok` is FALSE
  * when nothing was written (the refusal is on screen) and the caller must stay where it is */

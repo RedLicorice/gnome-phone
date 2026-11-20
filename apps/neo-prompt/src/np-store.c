@@ -102,15 +102,49 @@ np_mode_for (NpStore *self, const char *kind)
   return g_strdup (mode && *mode ? mode : "source");
 }
 
+static void state_write (NpStore *self, JsonObject *state);
+
+char *
+np_read_mode_for (NpStore *self, const char *kind)
+{
+  const char *mode = jstr (self->conf.read_modes, kind);
+
+  return g_strdup (mode && *mode ? mode : "source");
+}
+
+gboolean
+np_state_flag (NpStore *self, const char *key, gboolean fallback)
+{
+  g_autoptr(JsonObject) state = state_object (self);
+  JsonObject *flags = object_of (state, "flags");
+
+  return flags && json_object_has_member (flags, key) ? json_object_get_boolean_member (flags, key) : fallback;
+}
+
+void
+np_state_flag_set (NpStore *self, const char *key, gboolean value)
+{
+  g_autoptr(JsonObject) state = NULL;
+  JsonObject *flags = NULL;
+
+  if (!self->conf.state_path || !key)
+    return;
+  state = state_object (self);
+  flags = object_of (state, "flags");
+  if (!flags)
+    {
+      flags = json_object_new ();
+      json_object_set_object_member (state, "flags", flags);
+    }
+  json_object_set_boolean_member (flags, key, value);
+  state_write (self, state);
+}
+
 void
 np_mode_set (NpStore *self, const char *kind, const char *mode)
 {
   g_autoptr(JsonObject) state = NULL;
-  g_autoptr(JsonNode) root = NULL;
-  g_autoptr(JsonGenerator) generator = NULL;
-  g_autofree char *dir = NULL;
   JsonObject *modes = NULL;
-  char *text = NULL;
 
   if (!self->conf.state_path || !kind || !*kind)
     return;
@@ -122,6 +156,18 @@ np_mode_set (NpStore *self, const char *kind, const char *mode)
       json_object_set_object_member (state, "modes", modes);
     }
   json_object_set_string_member (modes, kind, mode && *mode ? mode : "source");
+  state_write (self, state);
+}
+
+/* the state file written whole, private to the user */
+static void
+state_write (NpStore *self, JsonObject *state)
+{
+  g_autoptr(JsonNode) root = NULL;
+  g_autoptr(JsonGenerator) generator = NULL;
+  g_autofree char *dir = NULL;
+  char *text = NULL;
+
   dir = g_path_get_dirname (self->conf.state_path);
   if (g_mkdir_with_parents (dir, 0700) != 0)
     return;
@@ -197,6 +243,7 @@ np_doc_free (NpDoc *doc)
   g_free (doc->id);
   g_free (doc->group);
   g_free (doc->title);
+  g_free (doc->description);
   g_free (doc->kind);
   g_free (doc->path);
   g_free (doc->source_label);
@@ -220,6 +267,8 @@ doc_of (JsonObject *o)
   doc->id = g_strdup (jstr (o, "id"));
   doc->group = g_strdup (jstr (o, "group") ? jstr (o, "group") : "");
   doc->title = g_strdup (jstr (o, "title") ? jstr (o, "title") : doc->id);
+  doc->description = g_strdup (jstr (o, "description"));
+  doc->in_prompt = jbool (o, "in_prompt", FALSE);
   doc->kind = g_strdup (jstr (o, "kind") ? jstr (o, "kind") : "text");
   doc->editable = jbool (o, "editable", TRUE);
   doc->history = jbool (o, "history", TRUE);
@@ -355,7 +404,15 @@ np_store_new (const char *conf_path)
                         && JSON_NODE_HOLDS_ARRAY (json_object_get_member (rendered, "heading_scale"))
                         ? json_object_get_array_member (rendered, "heading_scale") : NULL;
 
+    JsonObject *read = object_of (editor, "read");
+    JsonObject *layout = object_of (conf, "layout");
+
     self->conf.modes = object_of (editor, "modes") ? json_object_ref (object_of (editor, "modes")) : NULL;
+    self->conf.read_modes = object_of (read, "modes") ? json_object_ref (object_of (read, "modes")) : NULL;
+    self->conf.read_font_px = jint (read, "font_px", 0);
+    self->conf.edit_font_px = jint (editor, "font_px", 0);
+    self->conf.landscape_aspect = jdouble (layout, "landscape_aspect", 0);
+    self->conf.sidebar_width = jint (layout, "sidebar_width", 0);
     for (guint i = 0; i < G_N_ELEMENTS (self->conf.render.heading_scale); i++)
       self->conf.render.heading_scale[i] = scales && i < json_array_get_length (scales)
                                            ? json_array_get_double_element (scales, i) : 1.0;
@@ -369,6 +426,7 @@ np_store_new (const char *conf_path)
   self->conf.chars_per_token = jint (limits, "chars_per_token", 4);
   self->conf.cache_min_tokens = jint (limits, "cache_min_tokens", 1024);
   self->conf.timeout_s = jint (limits, "timeout_s", 15);
+  self->conf.prompt_budget_tokens = jint (limits, "prompt_budget_tokens", 0);
   if (self->conf.chars_per_token < 1)
     self->conf.chars_per_token = 1;
   self->conf.block_freq = object_of (conf, "block_freq") ? json_object_ref (object_of (conf, "block_freq")) : NULL;
@@ -418,6 +476,8 @@ np_store_free (NpStore *self)
   g_free (self->conf.state_path);
   if (self->conf.modes)
     json_object_unref (self->conf.modes);
+  if (self->conf.read_modes)
+    json_object_unref (self->conf.read_modes);
   g_free (self->conf.input_tags);
   if (self->conf.block_freq)
     json_object_unref (self->conf.block_freq);
@@ -449,6 +509,8 @@ doc_clone_for_person (NpDoc *doc, const char *person)
   copy->id = g_strdup (doc->id);
   copy->group = g_strdup (doc->group);
   copy->title = g_strdup (doc->title);
+  copy->description = g_strdup (doc->description);
+  copy->in_prompt = doc->in_prompt;
   copy->kind = g_strdup (doc->kind);
   copy->path = g_strdup (doc->path);
   copy->source_label = g_strdup (doc->source_label);
