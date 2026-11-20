@@ -1128,6 +1128,7 @@ static const struct {
   { "prompt", ns_page_prompt },
   { "events", ns_page_events },
   { "messaging", ns_page_messaging },
+  { "federation", ns_page_federation },
   { "budget", ns_page_minerva_budget },
   { "network", ns_page_minerva_network },
   { "kiosk", ns_page_minerva_kiosk },

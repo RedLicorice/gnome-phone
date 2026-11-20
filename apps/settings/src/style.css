@@ -157,3 +157,7 @@ window.ns-ren dialog separator { background-color: alpha(@ns_silver, 0.25); }
 /* the multi-line editors of Minerva > Prompt (system prompt, state template) */
 .ns-editor-box { min-height: 220px; border-radius: 12px; }
 .ns-editor { font-family: monospace; padding: 8px; }
+
+/* Minerva > Federazione: a device's capability chips under its row (not tappable: the row opens its inventory) */
+.ns-chip { border-radius: 999px; padding: 3px 10px; font-size: 13px; font-weight: 500;
+  background-color: alpha(currentColor, 0.08); color: alpha(currentColor, 0.80); }

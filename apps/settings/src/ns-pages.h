@@ -93,6 +93,10 @@ void     ns_prompt_build (GtkWidget *content, GObject *owner, JsonObject *ui);
 /* ns-events.c: Minerva > Eventi (the apps that send events, their channels' levels, the scheduled wake-ups) */
 void ns_page_events (GtkWidget *row, gpointer data);
 
+/* ns-federation.c: Minerva > Federazione (this phone in the federation, its offers and limits, the Minervas and the
+ * devices with their inventories), through `minerva-config federation` */
+void ns_page_federation (GtkWidget *row, gpointer data);
+
 /* ns-provider.c: Minerva > Messaggi (the messaging providers of Messages) and Accounts' Telegram bot token */
 void     ns_page_messaging (GtkWidget *row, gpointer data);
 void     ns_page_provider (GtkWidget *row, gpointer data);
