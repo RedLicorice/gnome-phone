@@ -517,6 +517,26 @@ test_search (void)
   g_assert_true (ct_contact_match (contact, name, "", &match));
 }
 
+/* what a signature covers: an added channel id changes it, a photo or a re-spaced, re-cased value does not */
+static void
+test_signed_text (void)
+{
+  const char *const unsigned_fields[] = { "VERSION", "REV", "PHOTO", "NOTE", "X-EVOLUTION-*", NULL };
+  g_autoptr(EContact) a = e_contact_new_from_vcard ("BEGIN:VCARD\r\nVERSION:3.0\r\nUID:pas-1\r\nFN:Giuseppe\r\n"
+                                                     "TEL:+39 345 1\r\nX-EVOLUTION-FILE-AS:G\r\nEND:VCARD\r\n");
+  g_autoptr(EContact) b = e_contact_duplicate (a);
+  g_autofree char *before = ct_contact_signed_text (a, unsigned_fields), *same = NULL, *changed = NULL;
+
+  e_vcard_append_attribute_with_value (E_VCARD (b), e_vcard_attribute_new (NULL, "NOTE"), "una nota");
+  e_vcard_remove_attributes (E_VCARD (b), NULL, "X-EVOLUTION-FILE-AS");
+  same = ct_contact_signed_text (b, unsigned_fields);
+  g_assert_cmpstr (before, ==, same);
+  ct_contact_set_channel (b, "telegram", "X-TELEGRAM", "25730854");
+  changed = ct_contact_signed_text (b, unsigned_fields);
+  g_assert_cmpstr (before, !=, changed);
+  g_assert_nonnull (strstr (changed, "IMPP:telegram:25730854\n"));
+}
+
 int
 main (int argc, char **argv)
 {
@@ -533,6 +553,7 @@ main (int argc, char **argv)
   g_test_add_func ("/contact/organization", test_organization);
   g_test_add_func ("/contact/dates", test_dates);
   g_test_add_func ("/contact/channels", test_channels);
+  g_test_add_func ("/contact/signed-text", test_signed_text);
   g_test_add_func ("/contact/merge", test_merge);
   g_test_add_func ("/contact/merge-fills", test_merge_fills_what_is_missing);
   g_test_add_func ("/contact/word-prefix", test_word_prefix);

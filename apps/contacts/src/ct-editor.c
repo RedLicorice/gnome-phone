@@ -21,10 +21,12 @@
 #include "ct-editor.h"
 #include "ct-avatar.h"
 #include "ct-dialogs.h"
+#include "ct-mnv.h"
 #include "ct-page.h"
 #include "ct-popup.h"
 #include "ct-ui.h"
 #include "ct-window.h"
+#include "ns-mc.h"
 
 #include <glib/gi18n.h>
 #include <math.h>
@@ -140,7 +142,8 @@ struct _Editor {
   GdkTexture *photo_texture;
   guint32 photo_tint;
 
-  GtkWidget *more_fields, *legacy;
+  GtkWidget *more_fields, *legacy, *channels;
+  GPtrArray *channel_rows;      /* ChannelRow: Minerva's chat channels (people ui im_services), one row each */
   gboolean expanded;            /* "More fields" was tapped */
   char *initial_state;
   char *saved_name;
@@ -148,6 +151,25 @@ struct _Editor {
 };
 
 static void update_section (Section *section);
+
+/* one chat channel's id (an IMPP:<scheme>:<id> row of the card) */
+typedef struct {
+  char *id;                     /* the scheme: the messaging provider's id */
+  char *legacy;                 /* the property an older Contacts wrote it as, "" for none */
+  char *original;               /* the id the card had when the editor opened */
+  GtkWidget *editable;
+} ChannelRow;
+
+static void
+channel_row_free (gpointer data)
+{
+  ChannelRow *row = data;
+
+  g_free (row->id);
+  g_free (row->legacy);
+  g_free (row->original);
+  g_free (row);
+}
 static Row *add_row (Section *section, CtItem *item, gboolean animate);
 static char *editor_state (Editor *editor);
 static void update_more_fields (Editor *editor);
@@ -1379,6 +1401,79 @@ on_legacy_long_pressed (NeoPressable *row, Editor *editor)
   ct_window_toast (editor->window, _("Text copied"));
 }
 
+static gboolean
+channel_row_of (Editor *editor, const char *value)
+{
+  for (guint i = 0; editor->channel_rows && value && *value && i < editor->channel_rows->len; i++)
+    if (g_strcmp0 (((ChannelRow *) editor->channel_rows->pdata[i])->original, value) == 0)
+      return TRUE;
+  return FALSE;
+}
+
+static void
+on_channel_changed (Editor *editor)
+{
+}
+
+/* the legacy property of a channel, from the Minerva section's list (people ui channel_list), "" for none */
+static const char *
+channel_legacy (const char *id)
+{
+  JsonArray *list = ct_mnv_list ("channel_list");
+
+  for (guint i = 0; list && i < json_array_get_length (list); i++)
+    {
+      JsonObject *c = json_array_get_object_element (list, i);
+
+      if (g_strcmp0 (ns_json_str (c, "id"), id) == 0)
+        return ns_json_str (c, "legacy_property");
+    }
+  return "";
+}
+
+/* Minerva's chat channels (WhatsApp, Telegram: the messaging providers, people ui im_services), one row each, written
+ * as IMPP:<scheme>:<id>; only where Minerva's texts are loaded. On a signed card a change is checked at saving. */
+static GtkWidget *
+channels_section (Editor *editor)
+{
+  GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+  GtkWidget *icon_column = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+  GtkWidget *rows = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+  JsonArray *services = ct_mnv_ui_ready () ? ct_mnv_list ("im_services") : NULL;
+  GtkWidget *icon = ct_tinted_icon_new ("ct-message-symbolic", 24, CT_ED_ICON_COLOR);
+
+  editor->channel_rows = g_ptr_array_new_with_free_func (channel_row_free);
+  gtk_widget_add_css_class (box, "ct-ed-section");
+  gtk_widget_set_size_request (icon_column, (int) CT_ED_KIND_ICON_COL_DP, -1);
+  gtk_widget_set_halign (icon, GTK_ALIGN_START);
+  gtk_widget_set_margin_start (icon, (int) CT_ED_KIND_ICON_START_DP);
+  gtk_widget_set_margin_top (icon, (int) CT_ED_KIND_ICON_TOP_DP);
+  gtk_box_append (GTK_BOX (icon_column), icon);
+  gtk_box_append (GTK_BOX (box), icon_column);
+  gtk_widget_set_hexpand (rows, TRUE);
+  gtk_box_append (GTK_BOX (box), rows);
+  for (guint i = 0; services && i < json_array_get_length (services); i++)
+    {
+      JsonObject *service = json_array_get_object_element (services, i);
+      ChannelRow *row = g_new0 (ChannelRow, 1);
+      GtkWidget *line = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+      GtkWidget *field;
+
+      row->id = g_strdup (ns_json_str (service, "id"));
+      row->legacy = g_strdup (channel_legacy (row->id));
+      row->original = ct_contact_get_channel (editor->original, row->id, *row->legacy ? row->legacy : NULL);
+      field = field_new (ns_json_str (service, "title"), row->original, FALSE, GTK_INPUT_PURPOSE_FREE_FORM,
+                         GTK_INPUT_HINT_NONE, G_CALLBACK (on_channel_changed), editor, &row->editable);
+      gtk_widget_set_hexpand (field, TRUE);
+      gtk_widget_add_css_class (line, "ct-ed-row");
+      gtk_box_append (GTK_BOX (line), field);
+      gtk_box_append (GTK_BOX (rows), line);
+      g_ptr_array_add (editor->channel_rows, row);
+    }
+  gtk_widget_set_visible (box, editor->channel_rows->len > 0);
+  return box;
+}
+
 /* "Can't update this info": the IM and SIP rows, which the editor shows but cannot change (§4.18) */
 static GtkWidget *
 legacy_section (Editor *editor)
@@ -1398,7 +1493,12 @@ legacy_section (Editor *editor)
       for (guint i = 0; i < items->len; i++)
         {
           CtItem *item = items->pdata[i];
-          GtkWidget *line = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+          GtkWidget *line;
+
+          /* a chat channel's id is edited in the channels' rows above, not shown again here */
+          if (kinds[k] == CT_KIND_IM && channel_row_of (editor, item->value))
+            continue;
+          line = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
           GtkWidget *row = neo_pressable_new (line);
           GtkWidget *icon = ct_tinted_icon_new (icons[k], 24, CT_ED_ICON_COLOR);
           GtkWidget *value = ct_label (item->value, "ct-ed-legacy-text", 16);
@@ -1477,6 +1577,13 @@ editor_state (Editor *editor)
           g_string_append_c (state, '\n');
         }
     }
+  for (guint i = 0; editor->channel_rows && i < editor->channel_rows->len; i++)
+    {
+      ChannelRow *row = editor->channel_rows->pdata[i];
+      g_autofree char *text = editable_text (row->editable);
+
+      g_string_append_printf (state, "c:%s=%s\n", row->id, g_strstrip (text));
+    }
   for (guint i = 0; i < editor->labels->len; i++)
     g_string_append_printf (state, "l=%s\n", (char *) editor->labels->pdata[i]);
   g_string_append_printf (state, "photo=%p\n", (void *) editor->photo_bytes);
@@ -1552,6 +1659,14 @@ build_contact (Editor *editor)
       ct_contact_set_items (contact, section->kind->kind, items);
     }
 
+  for (guint i = 0; editor->channel_rows && i < editor->channel_rows->len; i++)
+    {
+      ChannelRow *row = editor->channel_rows->pdata[i];
+      g_autofree char *text = g_strstrip (editable_text (row->editable));
+
+      if (g_strcmp0 (text, row->original) != 0)   /* an untouched id keeps its property as it was */
+        ct_contact_set_channel (contact, row->id, *row->legacy ? row->legacy : NULL, text);
+    }
   ct_contact_set_labels (contact, editor->labels);
   if (editor->photo_bytes)
     {
@@ -1673,6 +1788,102 @@ on_saved (const char *uid, const GError *error, gpointer data)
 }
 
 static void
+write_contact (Editor *editor, EContact *contact)
+{
+  /* the name for the toast, from what is saved (a new contact is not in the store yet when the add returns) */
+  g_free (editor->saved_name);
+  editor->saved_name = ct_contact_display_name (contact, ct_display_order (editor->settings));
+  if (editor->profile)
+    {
+      ct_store_save_profile (editor->store, contact, on_saved, editor);
+      return;
+    }
+  if (!editor->book_uid)
+    editor->book_uid = g_strdup (ct_store_default_book (editor->store));
+  ct_store_save (editor->store, editor->book_uid, contact, editor->is_new, on_saved, editor);
+}
+
+/* the save stopped before anything was written: the editor is the user's again */
+static void
+save_stopped (Editor *editor)
+{
+  editor->saving = FALSE;
+  gtk_widget_set_sensitive (editor->content, TRUE);
+  gtk_widget_set_sensitive (editor->save, TRUE);
+}
+
+typedef struct {
+  Editor *editor;
+  EContact *contact;
+} Pending;
+
+static void
+pending_free (Pending *pending)
+{
+  g_object_unref (pending->contact);
+  g_free (pending);
+}
+
+static void
+on_signed_confirmed (int response, gpointer data)
+{
+  Pending *pending = data;
+
+  if (response == CT_DIALOG_OK)
+    write_contact (pending->editor, pending->contact);
+  else
+    save_stopped (pending->editor);
+  pending_free (pending);
+}
+
+static void
+on_owner_refused (int response, gpointer data)
+{
+  Pending *pending = data;
+
+  save_stopped (pending->editor);
+  pending_free (pending);
+}
+
+/* the card's role for Minerva: a change to what its signature covers breaks it (docs/contacts-roles.md, "Editing a
+ * signed field"); the owner's card is never broken from the phone, a signed role's only after the user confirms */
+static void
+on_signed_role (JsonObject *root, const char *err, gpointer data)
+{
+  Pending *pending = data;
+  Editor *editor = pending->editor;
+  const char *state = err ? "" : ns_json_str (ns_json_obj (root, "role"), "state");
+
+  if (g_strcmp0 (state, "owner") == 0)
+    ct_confirm_dialog (editor->window, ct_mnv_text ("signed_heading"), ct_mnv_text ("signed_owner_block"),
+                       ct_mnv_text ("signed_owner_ok"), on_owner_refused, pending);
+  else if (g_strcmp0 (state, "signed") == 0)
+    ct_confirm_dialog (editor->window, ct_mnv_text ("signed_heading"), ct_mnv_text ("signed_role_confirm"),
+                       ct_mnv_text ("signed_role_ok"), on_signed_confirmed, pending);
+  else
+    {
+      write_contact (editor, pending->contact);
+      pending_free (pending);
+    }
+}
+
+/* whether the save changes what a signature over the card covers (people ui unsigned_fields: the token service's) */
+static gboolean
+signed_fields_change (Editor *editor, EContact *contact)
+{
+  JsonArray *list = ct_mnv_list ("unsigned_fields");
+  g_autoptr(GPtrArray) fields = g_ptr_array_new ();
+  g_autofree char *before = NULL, *after = NULL;
+
+  for (guint i = 0; list && i < json_array_get_length (list); i++)
+    g_ptr_array_add (fields, (gpointer) json_array_get_string_element (list, i));
+  g_ptr_array_add (fields, NULL);
+  before = ct_contact_signed_text (editor->original, (const char *const *) fields->pdata);
+  after = ct_contact_signed_text (contact, (const char *const *) fields->pdata);
+  return g_strcmp0 (before, after) != 0;
+}
+
+static void
 save (Editor *editor)
 {
   g_autoptr(EContact) contact = NULL;
@@ -1690,17 +1901,16 @@ save (Editor *editor)
   gtk_widget_set_sensitive (editor->save, FALSE);
   gtk_window_set_focus (GTK_WINDOW (gtk_widget_get_root (editor->page)), NULL);
   contact = build_contact (editor);
-  /* the name for the toast, from what is saved (a new contact is not in the store yet when the add returns) */
-  g_free (editor->saved_name);
-  editor->saved_name = ct_contact_display_name (contact, ct_display_order (editor->settings));
-  if (editor->profile)
+  if (!editor->is_new && !editor->profile && editor->uid && ct_mnv_ui_ready () && signed_fields_change (editor, contact))
     {
-      ct_store_save_profile (editor->store, contact, on_saved, editor);
+      Pending *pending = g_new0 (Pending, 1);
+
+      pending->editor = editor;
+      pending->contact = g_object_ref (contact);
+      ct_mnv_by_contact (G_OBJECT (editor->page), editor->uid, on_signed_role, pending);
       return;
     }
-  if (!editor->book_uid)
-    editor->book_uid = g_strdup (ct_store_default_book (editor->store));
-  ct_store_save (editor->store, editor->book_uid, contact, editor->is_new, on_saved, editor);
+  write_contact (editor, contact);
 }
 
 static void
@@ -1749,6 +1959,7 @@ editor_free (gpointer data)
     g_clear_pointer (&editor->sections[i].row_list, g_ptr_array_unref);
   g_clear_pointer (&editor->name, ct_name_free);
   g_clear_pointer (&editor->labels, g_ptr_array_unref);
+  g_clear_pointer (&editor->channel_rows, g_ptr_array_unref);
   g_clear_pointer (&editor->photo_bytes, g_bytes_unref);
   g_clear_object (&editor->photo_texture);
   g_clear_object (&editor->original);
@@ -1882,6 +2093,8 @@ ct_editor_new (GtkWidget *window, const char *uid, EContact *prefill)
   for (int s = S_NICKNAME; s < S_LABELS; s++)
     gtk_box_append (GTK_BOX (editor->content), section_new (editor, s));
   gtk_box_append (GTK_BOX (editor->content), labels_section (editor));
+  editor->channels = channels_section (editor);
+  gtk_box_append (GTK_BOX (editor->content), editor->channels);
   load_rows (editor, editor->is_new && prefill ? prefill : editor->original,
              !editor->is_new ? prefill : NULL);
 

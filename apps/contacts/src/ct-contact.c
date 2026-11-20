@@ -2047,3 +2047,62 @@ ct_contact_match (EContact *contact, const char *display_name, const char *query
   }
   return FALSE;
 }
+
+/* --- what a signature covers */
+
+static gboolean
+unsigned_field (const char *name, const char *const *unsigned_fields)
+{
+  for (guint i = 0; unsigned_fields && unsigned_fields[i]; i++)
+    {
+      g_autofree char *u = g_ascii_strup (g_strstrip (g_strdup (unsigned_fields[i])), -1);
+      gsize len = strlen (u);
+      gboolean prefix = len && u[len - 1] == '*';
+
+      if (prefix)
+        u[len - 1] = '\0';
+      if (prefix ? g_str_has_prefix (name, u) : g_str_equal (name, u))
+        return TRUE;
+    }
+  return FALSE;
+}
+
+char *
+ct_contact_signed_text (EContact *contact, const char *const *unsigned_fields)
+{
+  g_autoptr(GPtrArray) lines = g_ptr_array_new_with_free_func (g_free);
+  GString *out = g_string_new (NULL);
+
+  for (GList *l = e_vcard_get_attributes (E_VCARD (contact)); l; l = l->next)
+    {
+      g_autofree char *name = g_ascii_strup (e_vcard_attribute_get_name (l->data), -1);
+      g_autoptr(GString) value = g_string_new (NULL);
+
+      if (unsigned_field (name, unsigned_fields))
+        continue;
+      for (GList *v = e_vcard_attribute_get_values (l->data); v; v = v->next)
+        {
+          g_auto(GStrv) words = g_strsplit_set (v->data ? v->data : "", " \t\r\n", -1);
+          g_autofree char *joined = NULL;
+          g_autoptr(GPtrArray) kept = g_ptr_array_new ();
+
+          for (guint w = 0; words[w]; w++)
+            if (*words[w])
+              g_ptr_array_add (kept, words[w]);
+          g_ptr_array_add (kept, NULL);
+          joined = g_strjoinv (" ", (char **) kept->pdata);
+          if (value->len)
+            g_string_append_c (value, ';');
+          g_string_append (value, joined);
+        }
+      {
+        g_autofree char *lower = g_utf8_strdown (value->str, -1);
+
+        g_ptr_array_add (lines, g_strdup_printf ("%s:%s", name, lower));
+      }
+    }
+  g_ptr_array_sort_values (lines, (GCompareFunc) g_strcmp0);
+  for (guint i = 0; i < lines->len; i++)
+    g_string_append_printf (out, "%s\n", (char *) lines->pdata[i]);
+  return g_string_free (out, FALSE);
+}

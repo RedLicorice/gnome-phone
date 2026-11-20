@@ -169,6 +169,11 @@ char *ct_contact_get_channel (EContact *contact, const char *scheme, const char 
  * channel stay, and so does every other IMPP property */
 void  ct_contact_set_channel (EContact *contact, const char *scheme, const char *legacy_property, const char *value);
 
+/* What a signature over the card covers, as one comparable text: every property but the @unsigned_fields (a trailing
+ * '*' matches a prefix, as in the token service's [ownercard] unsigned_fields), each "NAME:value" with the value's
+ * spaces collapsed and lower-cased, sorted. Two cards whose texts differ cannot carry the same signature. */
+char *ct_contact_signed_text (EContact *contact, const char *const *unsigned_fields);
+
 /* --- merging two contacts
  * The rule, which the app shows before it merges: @into is the contact that stays. Its name, photo, company and
  * birthday are kept; where it has none, @from's are taken. Every row that can be many (numbers, emails, addresses,
