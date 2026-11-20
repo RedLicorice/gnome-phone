@@ -530,6 +530,7 @@ static const struct {
   { "minerva-avatar", ns_page_minerva_avatar }, { "avatar", ns_page_minerva_avatar },
   { "events", ns_page_events }, { "eventi", ns_page_events },
   { "messaging", ns_page_messaging }, { "messaggi", ns_page_messaging },
+  { "federation", ns_page_federation }, { "federazione", ns_page_federation },
   { "chat", ns_page_messaging }, { "chats", ns_page_messaging },
   { "permissions", ns_page_permissions }, { "agent-permissions", ns_page_permissions },
 };

@@ -163,12 +163,17 @@ value_entered (const char *text, gpointer data)
   char *end = NULL;
   if (!text || !*text)
     return;
-  g_ascii_strtod (text, &end);
-  if (end && *end) {
+  double n = g_ascii_strtod (text, &end);
+  /* a unit typed after the number ("30 %") is fine; anything else is not a number */
+  const char *unit = str_of (obj_of (ui (fd, "limits"), vc->key), "unit");
+  while (end && *end == ' ')
+    end++;
+  if (end == text || (end && *end && g_strcmp0 (end, unit))) {
     say (fd, label (fd, "error"));
     return;
   }
-  change (fd, "limits", vc->key, text);
+  g_autofree char *num = g_strdup_printf ("%g", n);
+  change (fd, "limits", vc->key, num);
 }
 
 static void
@@ -445,8 +450,9 @@ build (Fd *fd)
     }
   }
 
-  ns_group (fd->content, str_of (sec, "cooperation"));
-  ns_note (fd->content, str_of (notes, "cooperation"));
+  GtkWidget *cg = ns_group (fd->content, str_of (sec, "cooperation"));
+  GtkWidget *cr = ns_row (cg, NULL, NULL, str_of (notes, "cooperation"), NULL);
+  gtk_widget_set_focusable (cr, FALSE);
   fd->minervas_g = ns_group (fd->content, str_of (sec, "minervas"));
   fd->nodes_g = ns_group (fd->content, str_of (sec, "nodes"));
 
@@ -486,7 +492,9 @@ fill (Fd *fd)
   g_hash_table_iter_init (&it, fd->values);
   while (g_hash_table_iter_next (&it, &k, &v)) {
     double n;
-    g_autofree char *t = number_member (obj_of (fd->st, "limits"), k, &n) ? g_strdup_printf ("%g", n) : g_strdup ("");
+    const char *unit = str_of (obj_of (ui (fd, "limits"), k), "unit");
+    g_autofree char *t = number_member (obj_of (fd->st, "limits"), k, &n)
+                           ? g_strdup_printf ("%g%s%s", n, *unit ? " " : "", unit) : g_strdup ("");
     ns_row_value_set (v, t);
   }
 
@@ -502,7 +510,9 @@ fill (Fd *fd)
                                                  : g_strdup (count);
     ns_row_info (fd->minervas_g, *str_of (m, "name") ? str_of (m, "name") : label (fd, "none"), sub);
   }
-  ns_group_set_visible (fd->minervas_g, ms && json_array_get_length (ms));
+  /* the Minervas mean something only inside the federation */
+  ns_group_set_visible (fd->minervas_g, ms && json_array_get_length (ms) &&
+                        json_object_get_boolean_member_with_default (fd->st, "in_federation", FALSE));
 
   /* the devices: a row each (a tap opens its inventory), its chips under it */
   ns_group_clear (fd->nodes_g);
