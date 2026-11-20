@@ -1,0 +1,101 @@
+/* Neo Voice's own rules, over libneo's (neo.css). Colours are libneo's roles, never values: the looks recolor
+ * them. Sizes are dp (one CSS pixel is one dp on the phone); touch targets 44 dp at least. */
+
+window.neo.nv {
+  background-color: @neo_surface;
+}
+
+.nv-side {
+  border-right: 1px solid @neo_outline_variant;
+}
+
+.nv-filters {
+  margin: 4px 12px 8px 12px;
+}
+
+.nv-chip {
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 22px;
+  border: 1px solid @neo_outline_variant;
+  color: @neo_on_surface_variant;
+  font-weight: 700;
+}
+
+.nv-chip.nv-on {
+  background-color: @neo_secondary_container;
+  color: @neo_on_secondary_container;
+  border-color: transparent;
+}
+
+.nv-status {
+  font-size: 12px;
+  font-weight: 700;
+  color: @neo_on_surface_variant;
+  margin: 0 20px 6px 20px;
+}
+
+.nv-card {
+  margin: 0 12px 12px 12px;
+  border-radius: 20px;
+  background-color: @neo_surface_container_low;
+}
+
+.nv-row {
+  min-height: 44px;
+  padding: 10px 16px;
+  border-left: 4px solid transparent;
+}
+
+.nv-row.nv-accepted {
+  border-left-color: @neo_primary;
+}
+
+.nv-row.nv-rejected {
+  border-left-color: @neo_outline;
+}
+
+.nv-row.nv-selected {
+  background-color: @neo_secondary_container;
+}
+
+.nv-row-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: @neo_on_surface;
+}
+
+.nv-sub {
+  font-size: 12px;
+  font-weight: 700;
+  color: @neo_on_surface_variant;
+}
+
+.nv-heard {
+  font-size: 13px;
+  font-style: italic;
+  color: @neo_on_surface;
+}
+
+.nv-empty {
+  margin: 24px;
+}
+
+.nv-detail {
+  margin: 8px 16px 24px 16px;
+}
+
+.nv-title {
+  font-size: 22px;
+  font-weight: 800;
+  color: @neo_on_surface;
+}
+
+.nv-wave {
+  border-radius: 12px;
+  margin: 8px 0;
+}
+
+.nv-labels {
+  margin: 4px 0;
+}

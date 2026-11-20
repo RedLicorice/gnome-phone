@@ -3,6 +3,7 @@
  * config/): `status --json` to read, `set key=value --apply --json` to write. The page keeps no state of its own,
  * and never shows a key: it takes one in a password dialog, hands it to `minerva-config key set` on stdin (never in
  * argv) and shows only "set, …last4" or "missing". */
+#include <gio/gdesktopappinfo.h>
 #include "ns-pages.h"
 #include "ns-mc.h"
 #include "ns-ui.h"
@@ -857,6 +858,31 @@ fill_voiceprint (Mn *m)
     m->poll_id = g_timeout_add_seconds (m->poll_s, poll_tick, m);
 }
 
+static void
+launch_app_row (GtkWidget *row, gpointer data)
+{
+  g_autoptr (GDesktopAppInfo) info = g_desktop_app_info_new (g_object_get_data (G_OBJECT (row), "mn-desktop"));
+  g_autoptr (GError) error = NULL;
+
+  (void) data;
+  if (info && !g_app_info_launch (G_APP_INFO (info), NULL, NULL, &error))
+    g_message ("%s: %s", g_app_info_get_id (G_APP_INFO (info)), error ? error->message : "not launched");
+}
+
+/* a group's "app": {"desktop": id, "help": subtitle}: the app's own row (its name and icon), only when installed */
+static void
+build_app_row (GtkWidget *grp, JsonObject *ap)
+{
+  g_autoptr (GDesktopAppInfo) info = g_desktop_app_info_new (str_of (ap, "desktop"));
+  GtkWidget *row = NULL;
+
+  if (!info)
+    return;
+  row = ns_row_app (grp, G_APP_INFO (info), str_of (ap, "help"));
+  g_object_set_data_full (G_OBJECT (row), "mn-desktop", g_strdup (str_of (ap, "desktop")), g_free);
+  ns_row_on_activate (row, launch_app_row, NULL);
+}
+
 /* the groups of one page: a group of settings_ui.json names its page, the Voice page when it names none */
 static void
 build_groups (Mn *m, const char *page)
@@ -914,6 +940,9 @@ build_groups (Mn *m, const char *page)
     JsonObject *ph = obj_of (g, "phrase");
     if (ph)
       build_phrase (m, grp, ph);
+    JsonObject *ap = obj_of (g, "app");   /* a row that opens an app of the group's subject (Neo Voice) */
+    if (ap)
+      build_app_row (grp, ap);
     const char *nt = str_of (g, "note");
     if (*nt)
       ns_note (m->sg_box, nt);

@@ -1,0 +1,45 @@
+{
+  "_doc": "Neo Voice's settings and every label it shows (apps/neo-voice). The records and their fields are the voice service's (Minerva docs/detection-log.md, voice/minerva_voice/detection_schema.json); this file only names them.",
+  "conf": {
+    "bus_name": "org.minerva.Voice1",
+    "bus_path": "/org/minerva/Voice1",
+    "bus_interface": "org.minerva.Voice1",
+    "call_timeout_ms": 5000,
+    "list_limit": 200,
+    "landscape_aspect": 1.0,
+    "list_width": 380,
+    "wave_height": 120,
+    "handle_grab_px": 28,
+    "default_lang": "en"
+  },
+  "labels_order": ["wake", "false_trigger", "not_wake_speech", "excluded"],
+  "filters_order": ["all", "unlabelled", "accepted", "rejected"],
+  "it": {
+    "app": { "name": "Rilevamenti", "empty": "Nessun rilevamento. Il registro si accende in Impostazioni > Minerva > Voce.", "choose": "Scegli un rilevamento" },
+    "status": "%.1f scatti/ora · falsi %s · da ultimo training: %d giusti, %d falsi",
+    "status_none": "—",
+    "filters": { "all": "Tutti", "unlabelled": "Da etichettare", "accepted": "Accettati", "rejected": "Rifiutati" },
+    "outcome": { "accepted": "accettato", "rejected": "rifiutato" },
+    "engine": { "vosk": "Vosk", "dsp": "DSP" },
+    "band": { "match": "voce tua", "close": "voce simile", "far": "altra voce", "none": "voce non controllata" },
+    "label": { "unlabelled": "da etichettare", "wake": "Giusta", "false_trigger": "Falso scatto", "not_wake_speech": "Non è un wake", "excluded": "Scarta" },
+    "reason": { "not_heard": "parola non sentita", "low_conf": "poco chiara", "speaker_far": "voce non riconosciuta", "speaker_close": "voce quasi tua", "screen_off_voice": "schermo spento", "screen_off_refused": "schermo non acceso", "not_talking": "«Non parlo con te»", "verify": "verifica fallita", "speaker_turn": "voce non confermata", "busy": "occupata", "no_voiceprint": "nessuna impronta vocale", "voice_too_short": "troppo breve", "pin": "chiesto il PIN", "speaker": "voce", "timeout": "verifica in ritardo" },
+    "detail": { "play": "Ascolta", "stop": "Ferma", "no_audio": "Nessuna clip: solo i dati (clip spente nelle impostazioni).", "trim_save": "Salva taglio", "trim_reset": "Clip intera", "note": "Nota", "note_save": "Salva nota", "delete": "Elimina", "heard": "Sentito: «%s»", "level": "%.0f dBFS", "score": "punteggio %s", "turn": "turno: %s" },
+    "confirm": { "delete_title": "Eliminare il rilevamento?", "delete_msg": "La clip e i suoi dati vengono cancellati dal telefono.", "cancel": "Annulla", "delete": "Elimina" },
+    "snack": { "labelled": "Etichetta salvata", "trimmed": "Taglio salvato", "deleted": "Eliminato", "noted": "Nota salvata", "error": "Non riuscito: %s" }
+  },
+  "en": {
+    "app": { "name": "Detections", "empty": "No detections. Turn the log on in Settings > Minerva > Voice.", "choose": "Pick a detection" },
+    "status": "%.1f triggers/h · false %s · since last training: %d right, %d false",
+    "status_none": "—",
+    "filters": { "all": "All", "unlabelled": "Unlabelled", "accepted": "Accepted", "rejected": "Rejected" },
+    "outcome": { "accepted": "accepted", "rejected": "rejected" },
+    "engine": { "vosk": "Vosk", "dsp": "DSP" },
+    "band": { "match": "your voice", "close": "close voice", "far": "another voice", "none": "voice not checked" },
+    "label": { "unlabelled": "unlabelled", "wake": "Right", "false_trigger": "False trigger", "not_wake_speech": "Not a wake", "excluded": "Discard" },
+    "reason": { "not_heard": "word not heard", "low_conf": "unclear", "speaker_far": "voice not recognised", "speaker_close": "voice almost yours", "screen_off_voice": "screen off", "screen_off_refused": "screen not turned on", "not_talking": "\"Not talking to you\"", "verify": "verify failed", "speaker_turn": "voice not confirmed", "busy": "busy", "no_voiceprint": "no voiceprint", "voice_too_short": "too short", "pin": "PIN asked", "speaker": "voice", "timeout": "check late" },
+    "detail": { "play": "Play", "stop": "Stop", "no_audio": "No clip: data only (clips are off in Settings).", "trim_save": "Save trim", "trim_reset": "Whole clip", "note": "Note", "note_save": "Save note", "delete": "Delete", "heard": "Heard: \"%s\"", "level": "%.0f dBFS", "score": "score %s", "turn": "turn: %s" },
+    "confirm": { "delete_title": "Delete the detection?", "delete_msg": "The clip and its data are removed from the phone.", "cancel": "Cancel", "delete": "Delete" },
+    "snack": { "labelled": "Label saved", "trimmed": "Trim saved", "deleted": "Deleted", "noted": "Note saved", "error": "Failed: %s" }
+  }
+}

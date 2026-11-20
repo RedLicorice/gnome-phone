@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/de/yesman/NeoVoice">
+    <file>neo-voice.css</file>
+    <file>neo-voice-ui.json</file>
+  </gresource>
+</gresources>
