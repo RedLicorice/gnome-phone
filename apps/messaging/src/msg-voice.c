@@ -4,6 +4,8 @@
 
 #include <gst/gst.h>
 
+#include "msg-earpiece.h"
+
 /* a bar fills this share of its step of the waveform: the rest is the gap to the next */
 #define BAR_SHARE 0.6
 
@@ -124,6 +126,7 @@ stop (void)
   Voice *voice = current;
 
   current = NULL;
+  msg_earpiece_stop ();
   if (player)
     gst_element_set_state (player, GST_STATE_NULL);
   if (!voice)
@@ -133,6 +136,13 @@ stop (void)
   set_icon (voice, FALSE);
   gtk_widget_queue_draw (voice->wave);
   show_time (voice);
+}
+
+/* a call came while a note played at the ear */
+static void
+stop_for_call (gpointer data)
+{
+  stop ();
 }
 
 static gboolean
@@ -182,6 +192,10 @@ msg_voice_toggle (GtkWidget *widget)
   if (voice == current)
     {
       voice->paused = !voice->paused;
+      if (voice->paused)
+        msg_earpiece_stop ();
+      else
+        msg_earpiece_start (G_CALLBACK (stop_for_call), NULL);
       gst_element_set_state (player, voice->paused ? GST_STATE_PAUSED : GST_STATE_PLAYING);
       set_icon (voice, !voice->paused);
       if (voice->paused)
@@ -194,6 +208,8 @@ msg_voice_toggle (GtkWidget *widget)
   if (!make_player () || !(uri = g_filename_to_uri (voice->path, NULL, NULL)))
     return;
   current = voice;
+  /* held to the ear, from the earpiece: before the first sound */
+  msg_earpiece_start (G_CALLBACK (stop_for_call), NULL);
   g_object_set (player, "uri", uri, NULL);
   gst_element_set_state (player, GST_STATE_PLAYING);
   set_icon (voice, TRUE);
@@ -208,6 +224,7 @@ voice_free (Voice *voice)
     {
       current = NULL;
       gst_element_set_state (player, GST_STATE_NULL);
+      msg_earpiece_stop ();
     }
   g_free (voice->path);
   g_clear_pointer (&voice->waveform, g_bytes_unref);
