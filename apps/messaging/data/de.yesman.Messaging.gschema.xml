@@ -51,17 +51,23 @@
       <description>The Pango weight of **strong** text and headings in formatted messages: from normal to ultraheavy</description>
     </key>
 
-    <!-- an agent's reply can be pages long: a notification (banner, list, lock screen) shows each new message as
-         one line of plain words (its Markdown taken out), cut where it is too long; the conversation shows it whole -->
+    <!-- an agent's reply can be pages long: a notification (banner, list, lock screen) shows the newest messages as
+         plain words (their Markdown taken out), each cut where it is too long, all on one paragraph, so that the shell's
+         own line limit for a notification's body (Phosh: two lines, 2026-11-20) holds; the conversation shows it whole -->
     <key name="notification-lines" type="u">
       <range min="0" max="100"/>
-      <default>3</default>
+      <default>2</default>
       <summary>Messages in a notification</summary>
-      <description>A notification shows the newest this many new messages (or conversations), one line each; 0: all</description>
+      <description>A notification shows the newest this many new messages (or conversations); 0: all</description>
+    </key>
+    <key name="notification-separator" type="s">
+      <default>" · "</default>
+      <summary>Between the messages of a notification</summary>
+      <description>What separates the messages (or conversations) of one notification, which share one paragraph</description>
     </key>
     <key name="notification-chars" type="u">
       <range min="0" max="10000"/>
-      <default>160</default>
+      <default>80</default>
       <summary>Characters of a message in a notification</summary>
       <description>A message in a notification is cut after this many characters, at a whole word, with an ellipsis; 0: whole</description>
     </key>

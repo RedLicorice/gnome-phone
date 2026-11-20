@@ -226,7 +226,7 @@ def run(t):
     # two conversations: one notification for both, newest first
     n = t.wait('two conversations: "2 new messages"', lambda: t.notification('2 new messages'))
     if n:
-        check('a line for each, newest first', n[1]['body'] == '0170 1234567  Are you coming tonight?\n'
+        check('one each, newest first, on one paragraph', n[1]['body'] == '0170 1234567  Are you coming tonight? · '
               '0170 9999999  While you were away', n[1]['body'])
         check('with a heads-up', not n[1]['no-peek'], n)
 
@@ -239,7 +239,7 @@ def run(t):
         check('its text', n[1]['body'] == 'Hello?', n)
     t.incoming(ANNA, 'Call me')
     t.wait('one conversation\'s messages, oldest first',
-           lambda: t.notification('0170 1234567')[1]['body'] == 'Hello?\nCall me')
+           lambda: t.notification('0170 1234567')[1]['body'] == 'Hello? · Call me')
 
     # the conversation open in the app: read at once, nothing notified
     t.service('SetVisible', (anna,), '(x)')
@@ -452,14 +452,14 @@ def run_agents(t):
     n = t.wait('and notified, by the agent\'s name', lambda: t.notification('Minerva'))
     if n:
         check('its text', n[1]['body'] == 'Ciao, sono Minerva', n)
-    # a long reply in Markdown: one line of plain words in the notification, cut at the schema's 160 characters
+    # a long reply in Markdown: plain words in the notification, cut at the schema's 80 characters, one paragraph
     t.service('Inject', (AGENT, '**Fatto**:\n\n- ' + 'parola ' * 40), '(ss)')
-    n = t.wait('a long reply is notified', lambda: (lambda n: n if n and '\n' in n[1]['body'] else None)
+    n = t.wait('a long reply is notified', lambda: (lambda n: n if n and ' · ' in n[1]['body'] else None)
                (t.notification('Minerva')))
     if n:
-        last = n[1]['body'].split('\n')[-1]
-        check('as one plain line, cut with an ellipsis', last.startswith('Fatto: • parola') and last.endswith('…')
-              and len(last) <= 161, n)
+        last = n[1]['body'].split(' · ')[-1]
+        check('as plain words cut with an ellipsis, no line break', last.startswith('Fatto: • parola')
+              and last.endswith('…') and len(last) <= 81 and '\n' not in n[1]['body'], n)
     check('the same conversation for GetConversation',
           t.service('GetConversation', ([AGENT],), '(as)')[0] == minerva)
     check('Inject for a destination that is no agent\'s: InvalidArgs',

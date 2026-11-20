@@ -268,6 +268,18 @@ first_chars (const char *text, glong chars)
 
 /* --- the notifications (spec §5) */
 
+/* a string key of the app's settings; @fallback without them or without the key (an older schema) */
+static char *
+setting_string (Service *self, const char *key, const char *fallback)
+{
+  g_autoptr(GSettingsSchema) schema = NULL;
+
+  if (!self->settings)
+    return g_strdup (fallback);
+  g_object_get (self->settings, "settings-schema", &schema, NULL);
+  return g_settings_schema_has_key (schema, key) ? g_settings_get_string (self->settings, key) : g_strdup (fallback);
+}
+
 /* an unsigned key of the app's settings; 0 (no limit) without them or without the key (an older schema) */
 static guint
 setting_uint (Service *self, const char *key)
@@ -294,6 +306,7 @@ update_notification (Service *self, gboolean alert)
    * does not fill the screen; the conversation shows it whole */
   guint lines = setting_uint (self, "notification-lines");
   guint chars = setting_uint (self, "notification-chars");
+  g_autofree char *separator = setting_string (self, "notification-separator", "\n");
 
   /* the conversations, newest first */
   for (guint i = unseen->len; i > 0; i--)
@@ -329,7 +342,7 @@ update_notification (Service *self, gboolean alert)
           g_autofree char *preview = msg_markdown_preview (message->text ? message->text : "", chars);
 
           if (body->len)
-            g_string_append_c (body, '\n');
+            g_string_append (body, separator);
           if (group)
             {
               g_autofree char *sender = participant_name (self, message->sender);
@@ -356,7 +369,7 @@ update_notification (Service *self, gboolean alert)
             if (((SmsMessage *) unseen->pdata[j - 1])->conversation_id == id)
               text = ((SmsMessage *) unseen->pdata[j - 1])->text ? ((SmsMessage *) unseen->pdata[j - 1])->text : "";
           if (body->len)
-            g_string_append_c (body, '\n');
+            g_string_append (body, separator);
           preview = msg_markdown_preview (text, chars);
           g_string_append_printf (body, "%s  %s", shown, preview);
         }
