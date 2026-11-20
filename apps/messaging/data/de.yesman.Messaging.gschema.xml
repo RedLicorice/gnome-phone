@@ -95,11 +95,12 @@
       <description>A message in a notification is cut after this many characters, at a whole word, with an ellipsis; 0: whole</description>
     </key>
 
-    <!-- the agents' group lists its agents in this order, the others after them by name: never by recency -->
+    <!-- the agents' group lists the node's assistant first (assistant.conf), then its agents in this order, the
+         others after them by name: never by recency -->
     <key name="agents-order" type="as">
-      <default>['agent:Minerva']</default>
+      <default>[]</default>
       <summary>Order of the agents</summary>
-      <description>The agents' conversations (their destinations, agent:Name) listed first, in this order</description>
+      <description>The agents' conversations (their destinations, agent:Name) listed after the node's assistant, in this order</description>
     </key>
 
     <!-- the conversation list's group (a provider's id from messaging.conf; empty: plain SMS), kept for the next start -->

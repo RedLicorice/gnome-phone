@@ -1,5 +1,6 @@
 /* Who a conversation is with (msg-people.h). */
 #include "msg-people.h"
+#include "msg-assistant.h"
 #include "msg-directory.h"
 #include "phone-number.h"
 #include "sms-agent.h"
@@ -100,13 +101,15 @@ self_card (void)
   return *card.name ? &card : NULL;
 }
 
-/* @destination is the conversation of Minerva's own agent ([agent] self) */
+/* @destination is the conversation of the agent that shows her own contact ([agent] self; without the key the node's
+ * assistant, assistant.conf; empty: none) */
 static gboolean
 is_self_agent (const char *destination)
 {
   g_autofree char *self = sms_provider_value ("agent", "self");
+  const char *agent = self ? self : msg_assistant_name ();
 
-  return self && *self && g_strcmp0 (sms_agent_name (destination), self) == 0;
+  return agent && *agent && g_strcmp0 (sms_agent_name (destination), agent) == 0;
 }
 
 MsgPerson *

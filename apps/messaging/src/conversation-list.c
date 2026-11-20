@@ -4,6 +4,7 @@
 #include "sms-agent.h"
 #include "sms-provider.h"
 #include "msg-add-contact.h"
+#include "msg-assistant.h"
 #include "msg-action-bar.h"
 #include "msg-avatar.h"
 #include "msg-dates.h"
@@ -711,12 +712,14 @@ conversation_list_show_group_of (ConversationList *self, gint64 id)
       gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (chip), TRUE);
 }
 
-/* --- the agents: a list of agents only (their group) is in the order of "agents-order", the others after them by
- * name, never by recency: Minerva is where she always is */
+/* --- the agents: a list of agents only (their group) has the node's assistant first, then the order of
+ * "agents-order", the others after them by name, never by recency: she is where she always is */
 
 static int
 agent_rank (char **order, const SmsConversation *conversation)
 {
+  if (!g_strcmp0 (msg_assistant_destination (), conversation->destinations[0]))
+    return -1;
   for (int i = 0; order && order[i]; i++)
     if (!g_strcmp0 (order[i], conversation->destinations[0]))
       return i;

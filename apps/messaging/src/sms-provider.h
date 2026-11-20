@@ -45,5 +45,7 @@ const char *sms_provider_conf_path (void);
 
 /* forget what was read: the next call reads the file again */
 void sms_provider_reload (void);
+/* another of the phone's INI files (``key = value  ; comment``) as a GKeyFile, or NULL */
+GKeyFile *sms_provider_load_ini (const char *path);
 
 G_END_DECLS

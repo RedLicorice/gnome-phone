@@ -77,6 +77,20 @@ strip_comments (const char *raw)
   return g_string_free (out, FALSE);
 }
 
+/* the file is the phone's INI (``key = value  ; comment``): GKeyFile knows only '#' comments */
+GKeyFile *
+sms_provider_load_ini (const char *path)
+{
+  g_autoptr(GKeyFile) file = g_key_file_new ();
+  g_autofree char *raw = NULL;
+  g_autofree char *text = NULL;
+
+  if (!path || !g_file_get_contents (path, &raw, NULL, NULL) || !(text = strip_comments (raw))
+      || !g_key_file_load_from_data (file, text, -1, G_KEY_FILE_NONE, NULL))
+    return NULL;
+  return g_steal_pointer (&file);
+}
+
 static GKeyFile *
 conf (void)
 {
@@ -89,14 +103,10 @@ conf (void)
 
       if (!registry || stamp != registry_stamp)
         {
-          g_autoptr(GKeyFile) file = g_key_file_new ();
-          g_autofree char *raw = NULL;
-          g_autofree char *text = NULL;
+          g_autoptr(GKeyFile) file = NULL;
 
           sms_provider_reload ();
-          /* the file is the phone's INI (``key = value  ; comment``): GKeyFile knows only '#' comments */
-          if (g_file_get_contents (path, &raw, NULL, NULL) && (text = strip_comments (raw))
-              && g_key_file_load_from_data (file, text, -1, G_KEY_FILE_NONE, NULL))
+          if ((file = sms_provider_load_ini (path)))
             {
               registry = g_steal_pointer (&file);
               registry_stamp = stamp;
