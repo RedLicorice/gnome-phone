@@ -2,12 +2,12 @@
 Type=Application
 Name=Detections
 Name[it]=Rilevamenti
-Comment=Minerva's wake word detections: listen, label, trim
-Comment[it]=I rilevamenti della parola di attivazione di Minerva: ascolta, etichetta, taglia
+Comment=@ASSISTANT@'s wake word detections: listen, label, trim
+Comment[it]=I rilevamenti della parola di attivazione di @ASSISTANT@: ascolta, etichetta, taglia
 Exec=neo-voice
 Icon=de.yesman.NeoVoice
 Terminal=false
 StartupNotify=false
 Categories=Utility;AudioVideo;GTK;
-Keywords=Minerva;Voice;Wake;Voce;Rilevamenti;
+Keywords=Minerva;@ASSISTANT@;Voice;Wake;Voce;Rilevamenti;
 X-Purism-FormFactor=Workstation;Mobile;
