@@ -96,6 +96,7 @@ typedef struct {
   gboolean         claimed, enrolling;
   int              stages, passed;
   GtkWidget       *ring, *icon, *title, *hint, *button;
+  AdwNavigationPage *page;        /* the enroll page, which owns this */
 } Enroll;
 
 /* where the phone's sensor is, in the enroll page's words: device data (de.yesman.NeoSettings, a device override) */
@@ -297,8 +298,11 @@ enroll_button (GtkButton *button, Enroll *e)
 {
   if (GPOINTER_TO_INT (g_object_get_data (G_OBJECT (button), "ns-role")) == BUTTON_RETRY && e->claimed)
     enroll_start (e);
-  else
+  else {
+    /* only this button leaves the page: back gestures would cancel a scan by accident */
+    adw_navigation_page_set_can_pop (e->page, TRUE);
     gtk_widget_activate_action (GTK_WIDGET (button), "navigation.pop", NULL);
+  }
 }
 
 static void
@@ -312,6 +316,9 @@ enroll_page (GDBusConnection *bus, const char *device, const char *finger)
   e->device = g_strdup (device);
   e->finger = g_strdup (finger);
   g_object_set_data_full (G_OBJECT (page), "ns-enroll", e, (GDestroyNotify) enroll_free);
+  e->page = page;
+  /* no back button, back swipe or Escape while scanning: the page's own button leaves it */
+  adw_navigation_page_set_can_pop (page, FALSE);
 
   GtkWidget *overlay = gtk_overlay_new ();
   gtk_widget_set_halign (overlay, GTK_ALIGN_CENTER);

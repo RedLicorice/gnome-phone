@@ -322,9 +322,14 @@ go_back (GtkWidget *win, GVariant *args, gpointer data)
 {
   AdwNavigationSplitView *sv = ADW_NAVIGATION_SPLIT_VIEW (split);
   gboolean over_menu = adw_navigation_split_view_get_collapsed (sv) && adw_navigation_split_view_get_show_content (sv);
-  if (over_menu || !adw_navigation_split_view_get_collapsed (sv))
+  if (over_menu || !adw_navigation_split_view_get_collapsed (sv)) {
+    /* a page that cannot be popped (a fingerprint scan) keeps back to itself: it has its own way out */
+    AdwNavigationPage *visible = adw_navigation_view_get_visible_page (ADW_NAVIGATION_VIEW (nav_view));
+    if (visible && !adw_navigation_page_get_can_pop (visible))
+      return TRUE;
     if (adw_navigation_view_pop (ADW_NAVIGATION_VIEW (nav_view)))
       return TRUE;
+  }
   if (over_menu) {
     adw_navigation_split_view_set_show_content (sv, FALSE);
     if (current_row)
