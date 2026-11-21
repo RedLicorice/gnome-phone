@@ -1400,6 +1400,36 @@ layout_group (AdwNavigationPage *page, GtkWidget *c, GSettings *neo)
   layout_show (l);
 }
 
+/* Running apps (Phosh, mobi.phosh.shell max-unpinned-apps): at most that many apps that are not pinned run; the
+ * least recently used closes when one more starts. A card of the overview pulled down pins its app. The row's bounds
+ * are the key's own range in the schema. */
+static void
+running_apps_group (AdwNavigationPage *page, GtkWidget *c)
+{
+  GSettings *shell = ns_page_settings (page, "mobi.phosh.shell");
+  if (!shell || !ns_has_key (shell, "max-unpinned-apps"))
+    return;
+  GSettingsSchema *schema = NULL;
+  g_object_get (shell, "settings-schema", &schema, NULL);
+  g_autoptr (GSettingsSchemaKey) key = g_settings_schema_get_key (schema, "max-unpinned-apps");
+  g_settings_schema_unref (schema);
+  g_autoptr (GVariant) range = g_settings_schema_key_get_range (key);
+  const char *type = NULL;
+  g_autoptr (GVariant) bounds = NULL;
+  g_variant_get (range, "(&sv)", &type, &bounds);
+  int lo = 0, hi = 0;
+  if (g_strcmp0 (type, "range") == 0)
+    g_variant_get (bounds, "(ii)", &lo, &hi);
+  GtkWidget *g = ns_group (c, "Running apps");
+  GtkWidget *hint = gtk_label_new ("Apps that are not pinned beyond this limit close, the least recently used first. "
+                                   "Pull an app's card down to pin it. 0: no limit.");
+  gtk_label_set_wrap (GTK_LABEL (hint), TRUE);
+  gtk_label_set_xalign (GTK_LABEL (hint), 0);
+  gtk_widget_add_css_class (hint, "ns-sub");
+  ns_row_widget (g, NULL, hint);
+  ns_row_spin (g, "Running apps not pinned", shell, "max-unpinned-apps", lo, hi);
+}
+
 /* The home screen is neo-launcher. It follows de.yesman.neo live: the layout keys (main.c layout_read: the grid,
  * the icons' sizes, app names, the drawer's columns and search pill) lay it out again, a smaller grid moving the icons
  * it has no cell for to the next free one (model.c model_set_grid), and the icon keys (icons.c) draw its icons again
@@ -1434,6 +1464,7 @@ ns_page_home (GtkWidget *row, gpointer data)
   g_object_set_data_full (G_OBJECT (page), "packs", values, (GDestroyNotify) g_strfreev);
   g_object_set_data_full (G_OBJECT (page), "pack-labels", labels, (GDestroyNotify) g_strfreev);
   layout_group (page, c, neo);
+  running_apps_group (page, c);
   GtkWidget *g = ns_group (c, "Icons");
   ns_row_choice (g, "Icon pack", neo, "icon-pack", (const char *const *) values, (const char *const *) labels);
   ns_row_choice (g, "Icon shape", neo, "icon-shape", shape_values, shape_labels);
