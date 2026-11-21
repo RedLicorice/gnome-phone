@@ -89,6 +89,7 @@ ns_page_connections (GtkWidget *row, gpointer data)
   page_row (g, "network-wireless-hotspot-symbolic", "green", "Mobile hotspot", "Share the mobile data",
             ns_page_hotspot);
   page_row (g, "network-wired-symbolic", "violet", "Network and VPN", "VPN • USB • Proxy", ns_page_network);
+  ns_minerva_embed (page, c, "connections");   /* Rete intelligente: how Minerva picks Wi-Fi or mobile data */
   g = ns_group (c, NULL);
   page_row (g, "emblem-shared-symbolic", "orange", "Sharing", "Phone name • Visibility", ns_page_sharing);
   /* printing needs CUPS, which a phone rarely has: GNOME Settings' page, only when it is there */
@@ -741,6 +742,7 @@ ns_page_display (GtkWidget *row, gpointer data)
     g = ns_group (c, NULL);
     ns_row_switch (g, "Double tap to wake", "Wake the screen with a double tap", neo, "double-tap-wake");
   }
+  ns_minerva_embed (page, c, "display");   /* the dock that keeps the screen on, the states that hold it on */
   ns_push (page);
 }
 

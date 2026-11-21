@@ -145,6 +145,8 @@ ns_page_lock_screen (GtkWidget *row, gpointer data)
               "fingerprint unlock, never after a restart, and only for your voiceprint. A recording of your voice can "
               "fool it: turn it on only if the convenience is worth that. Every attempt is in Security > History.");
 
+  ns_minerva_embed (page, c, "lock_screen");   /* the owner's window after the PIN, the voiceprint's page */
+
   g = ns_group (c, "On the lock screen");
   GSettings *n = ns_page_settings (page, "org.gnome.desktop.notifications");
   ns_row_switch (g, "Notifications", "Their apps' icons below the clock", n, "show-in-lock-screen");

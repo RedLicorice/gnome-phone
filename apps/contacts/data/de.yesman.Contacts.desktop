@@ -13,3 +13,9 @@ Keywords=Contacts;People;Address;Book;vCard;Friends;
 MimeType=text/vcard;text/x-vcard;text/directory;
 X-GNOME-UsesNotifications=true
 X-Purism-FormFactor=Workstation;Mobile;
+Actions=minerva-settings;
+
+# Settings › Minerva › Memoria › Fiducia: the people's rules (trust, forgetting strangers), the app's own page
+[Desktop Action minerva-settings]
+Name=Minerva settings
+Exec=gapplication action de.yesman.Contacts minerva-settings

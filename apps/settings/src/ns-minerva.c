@@ -10,18 +10,26 @@
 
 #include <json-glib/json-glib.h>
 
+/* the Contacts app and its action that opens the people's Minerva settings (its desktop file's Actions) */
+#define CONTACTS_DESKTOP "de.yesman.Contacts.desktop"
+#define CONTACTS_TRUST_ACTION "minerva-settings"
+
 #define str_of ns_json_str
 #define obj_of ns_json_obj
 #define arr_of ns_json_arr
 
 typedef struct Mn Mn;
 
-/* which of Minerva's pages this is: the index and the four pages it lists. Each builds only the cards it has, so a
- * refresh fills what is there and skips the rest. */
-typedef enum { MN_INDEX, MN_BRAIN, MN_VOICE, MN_PROMPT, MN_BUDGET, MN_NETWORK, MN_KIOSK } MnKind;
+/* which of Minerva's pages this is: the index and the pages it lists. Each builds only the cards it has, so a
+ * refresh fills what is there and skips the rest. MN_GROUPS is a page made only of data: the setting groups and the
+ * link rows that name its id (`gpage`), Minerva's own (Memoria, Rete intelligente) or a system page's (Display,
+ * Connessioni...) that takes them in (ns_minerva_embed). */
+typedef enum { MN_INDEX, MN_BRAIN, MN_VOICE, MN_PROMPT, MN_BUDGET, MN_GROUPS } MnKind;
 
 struct Mn {
   MnKind     kind;
+  char      *gpage;                     /* MN_GROUPS: the page id its groups and links name */
+  gboolean   embedded;                  /* MN_GROUPS inside a system page: the page's title is the system page's */
   AdwNavigationPage *page;
   GtkWidget *content;                   /* the page's column: its cards are appended here */
   GtkWidget *msg;                       /* the last result: saved, restarted, or the error */
@@ -883,15 +891,16 @@ build_app_row (GtkWidget *grp, JsonObject *ap)
   ns_row_on_activate (row, launch_app_row, NULL);
 }
 
-/* the groups of one page: a group of settings_ui.json names its page, the Voice page when it names none */
+/* the groups of one page: a group of settings_ui.json names its page, the Voice page when it names none; `after`
+ * takes the ones placed after the page's own cards ("place": "after_engines": the Voice page's Comandi, Avanzate) */
 static void
-build_groups (Mn *m, const char *page)
+build_groups (Mn *m, const char *page, gboolean after)
 {
   JsonArray *gs = arr_of (m->st, "setting_groups");
   for (guint i = 0; gs && i < json_array_get_length (gs); i++) {
     JsonObject *g = json_array_get_object_element (gs, i);
     const char *gp = str_of (g, "page");
-    if (g_strcmp0 (*gp ? gp : "voice", page))
+    if (g_strcmp0 (*gp ? gp : "voice", page) || (*str_of (g, "place") != '\0') != after)
       continue;
     GtkWidget *grp = ns_group (m->sg_box, str_of (g, "title"));
     JsonArray *rows = arr_of (g, "rows");
@@ -1101,6 +1110,7 @@ mn_free (Mn *m)
   g_free (m->claude_hint);
   g_free (m->ph_help);
   g_free (m->ph_remote);
+  g_free (m->gpage);
   g_free (m);
 }
 
@@ -1119,6 +1129,31 @@ open_self_notebook (GtkWidget *row, gpointer data)
   ns_prompt_open ("self-notebook", NULL);
 }
 
+/* the people's rules (trust, when strangers are forgotten) are the Contacts app's own page: its action opens it */
+static void
+open_contacts_trust (GtkWidget *row, gpointer data)
+{
+  (void) row;
+  (void) data;
+  g_autoptr (GDesktopAppInfo) info = g_desktop_app_info_new (CONTACTS_DESKTOP);
+  if (info)
+    g_desktop_app_info_launch_action (info, CONTACTS_TRUST_ACTION, NULL);
+}
+
+/* an opener of another app's page: shown only while that app is there (a row that does nothing is worse than none) */
+static gboolean
+opener_available (const char *id)
+{
+  if (!g_strcmp0 (id, "self_notebook"))
+    return ns_prompt_installed ();
+  if (!g_strcmp0 (id, "contacts_trust")) {
+    g_autoptr (GDesktopAppInfo) info = g_desktop_app_info_new (CONTACTS_DESKTOP);
+    const char *const *actions = info ? g_desktop_app_info_list_actions (info) : NULL;
+    return actions && g_strv_contains (actions, CONTACTS_TRUST_ACTION);
+  }
+  return TRUE;
+}
+
 static const struct {
   const char *id;
   NsActivate  page;
@@ -1130,16 +1165,27 @@ static const struct {
   { "messaging", ns_page_messaging },
   { "federation", ns_page_federation },
   { "budget", ns_page_minerva_budget },
-  { "network", ns_page_minerva_network },
-  { "kiosk", ns_page_minerva_kiosk },
+  { "memory", ns_page_minerva_memory },
+  { "smart_network", ns_page_minerva_smart_network },
   { "avatar", ns_page_minerva_avatar },
   { "self_notebook", open_self_notebook },
+  { "contacts_trust", open_contacts_trust },
 };
+
+static NsActivate
+page_opener (const char *id)
+{
+  for (guint k = 0; k < G_N_ELEMENTS (minerva_pages); k++)
+    if (!g_strcmp0 (minerva_pages[k].id, id))
+      return opener_available (id) ? minerva_pages[k].page : NULL;
+  return NULL;
+}
 
 static JsonObject *
 mn_ui_page (Mn *m, const char *id)
 {
-  return obj_of (obj_of (mn_ui (m), "pages"), id);
+  JsonObject *p = obj_of (obj_of (mn_ui (m), "pages"), id);
+  return p ? p : obj_of (obj_of (mn_ui (m), "subpages"), id);   /* a page of its own that is no index entry */
 }
 
 /* a sub-page's title, from the data (it arrives with the status: the page opens with a blank one) */
@@ -1180,14 +1226,9 @@ index_build (Mn *m)
   for (guint i = 0; order && i < json_array_get_length (order); i++) {
     const char *id = json_array_get_string_element (order, i);
     JsonObject *p = obj_of (pages, id);
-    NsActivate page = NULL;
-    for (guint k = 0; k < G_N_ELEMENTS (minerva_pages); k++)
-      if (!g_strcmp0 (minerva_pages[k].id, id))
-        page = minerva_pages[k].page;
+    NsActivate page = page_opener (id);
     if (!page || !*str_of (p, "title"))
       continue;   /* a page this build does not have */
-    if (!g_strcmp0 (id, "self_notebook") && !ns_prompt_installed ())
-      continue;   /* the row opens Neo Prompt: without it the row would do nothing */
     if (!eg)
       eg = ns_group (m->content, NULL);
     GtkWidget *r = ns_row (eg, str_of (p, "icon"), str_of (p, "color"), str_of (p, "title"), str_of (p, "subtitle"));
@@ -1230,34 +1271,55 @@ voice_build (Mn *m)
 {
   JsonObject *p = mn_ui_page (m, "voice"), *s = obj_of (p, "sections"), *n = obj_of (p, "notes");
   page_title (m, "voice");
-  m->voice_g = ns_group (m->content, ui_title (s, "engine"));
+  m->sg_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);   /* the wake word (the voiceprint), the reply */
+  gtk_box_append (GTK_BOX (m->content), m->sg_box);
+  build_groups (m, "voice", FALSE);
+  m->voice_g = ns_group (m->content, ui_title (s, "engine"));   /* the engines */
   m->stt = ns_group (m->content, ui_title (s, "stt"));
   GtkWidget *sg = ns_group (m->content, NULL);
   m->stt_timeout = field_row (m, sg, "Cloud time limit (seconds)", "voice.stt_timeout_s");
   note_if (n, "stt", m->content);
-  m->sg_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);   /* the wake word, the reply, the voiceprint */
+  m->sg_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);   /* the commands, the advanced groups */
   gtk_box_append (GTK_BOX (m->content), m->sg_box);
-  build_groups (m, "voice");
+  build_groups (m, "voice", TRUE);
   const char *const stt_args[] = { "stt-status", "--json", NULL };
   mn_run (m, stt_args, stt_status_done, NULL);   /* the Claude CLI's login, a second or so: shown when it comes */
 }
 
+/* the link rows minerva_ui.json's "links" gives page `id`: each opens a page or another app's (page_opener), its
+ * title, subtitle, icon and colour its own or that page's */
 static void
-network_build (Mn *m)
+build_links (Mn *m, const char *id)
 {
-  page_title (m, "network");
-  m->sg_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);   /* the link, the internet check, the repair ladder */
-  gtk_box_append (GTK_BOX (m->content), m->sg_box);
-  build_groups (m, "network");
+  JsonArray *links = arr_of (obj_of (mn_ui (m), "links"), id);
+  GtkWidget *g = NULL;
+  for (guint i = 0; links && i < json_array_get_length (links); i++) {
+    JsonObject *l = json_array_get_object_element (links, i), *target = mn_ui_page (m, str_of (l, "open"));
+    NsActivate open = page_opener (str_of (l, "open"));
+    if (!open)
+      continue;
+#define LINK_FIELD(f) (*str_of (l, f) ? str_of (l, f) : str_of (target, f))
+    if (!g)
+      g = ns_group (m->sg_box, NULL);
+    GtkWidget *r = ns_row (g, LINK_FIELD ("icon"), LINK_FIELD ("color"), LINK_FIELD ("title"), LINK_FIELD ("subtitle"));
+#undef LINK_FIELD
+    ns_row_on_activate (r, open, NULL);
+  }
 }
 
+/* a page of data only: its groups, then its links (Memoria; Rete intelligente; a system page's part) */
 static void
-kiosk_build (Mn *m)
+groups_build (Mn *m)
 {
-  page_title (m, "kiosk");
-  m->sg_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);   /* the orientation, the dock */
+  if (!m->embedded) {
+    page_title (m, m->gpage);
+    note_if (mn_ui_page (m, m->gpage), "note", m->content);
+  }
+  m->sg_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
   gtk_box_append (GTK_BOX (m->content), m->sg_box);
-  build_groups (m, "kiosk");
+  build_groups (m, m->gpage, FALSE);
+  build_groups (m, m->gpage, TRUE);
+  build_links (m, m->gpage);
 }
 
 static void
@@ -1285,8 +1347,7 @@ build_page (Mn *m)
   case MN_BRAIN: brain_build (m); break;
   case MN_VOICE: voice_build (m); break;
   case MN_BUDGET: budget_build (m); break;
-  case MN_NETWORK: network_build (m); break;
-  case MN_KIOSK: kiosk_build (m); break;
+  case MN_GROUPS: groups_build (m); break;
   case MN_PROMPT: prompt_build (m); break;
   default: break;
   }
@@ -1320,6 +1381,39 @@ mn_page_open (MnKind kind)
   ns_push (m->page);
 }
 
+static void
+mn_groups_open (const char *id)
+{
+  GtkWidget *c;
+  Mn *m = mn_new (MN_GROUPS, &c);
+  m->gpage = g_strdup (id);
+  mn_refresh (m);
+  ns_push (m->page);
+}
+
+/* Minerva's part of a system page (Connessioni, Display, Blocco schermo, Notifiche, Rete mobile): the setting groups
+ * and link rows of minerva_ui.json and settings_ui.json that name `id`, appended to `content` when the status comes.
+ * The same rows as Minerva's own pages, reading and writing the same keys; nothing when Minerva is not there. */
+void
+ns_minerva_embed (AdwNavigationPage *page, GtkWidget *content, const char *id)
+{
+  if (!ns_minerva_available ())
+    return;
+  Mn *m = g_new0 (Mn, 1);
+  m->kind = MN_GROUPS;
+  m->gpage = g_strdup (id);
+  m->embedded = TRUE;
+  m->page = page;
+  m->content = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+  gtk_box_append (GTK_BOX (content), m->content);
+  g_object_set_data_full (G_OBJECT (page), "mn-embed", m, (GDestroyNotify) mn_free);
+  m->msg = ns_note (m->content, "");
+  gtk_widget_set_visible (m->msg, FALSE);
+  m->srows = g_ptr_array_new ();
+  m->vp_actions = g_ptr_array_new ();
+  mn_refresh (m);
+}
+
 /* Minerva (`--page minerva`): the index. Model in use and this month's spend, then the pages */
 void
 ns_page_minerva (GtkWidget *row, gpointer data)
@@ -1348,18 +1442,20 @@ ns_page_minerva_budget (GtkWidget *row, gpointer data)
   mn_page_open (MN_BUDGET);
 }
 
-/* Minerva > Rete (`--page network`): Wi-Fi first, mobile data, the internet check, the repair ladder */
+/* Minerva > Memoria (`--page memory`): what she learns, her recall, her notebook (Neo Prompt), the people's trust
+ * (Contacts) */
 void
-ns_page_minerva_network (GtkWidget *row, gpointer data)
+ns_page_minerva_memory (GtkWidget *row, gpointer data)
 {
-  mn_page_open (MN_NETWORK);
+  mn_groups_open ("memory");
 }
 
-/* Minerva > Kiosk (`--page minerva-kiosk`): how the face app turns with the phone, and the dock that keeps the screen on */
+/* Connessioni > Rete intelligente (`--page smart-network`): Wi-Fi first, mobile data, the internet check, the repair
+ * ladder (minerva-net) */
 void
-ns_page_minerva_kiosk (GtkWidget *row, gpointer data)
+ns_page_minerva_smart_network (GtkWidget *row, gpointer data)
 {
-  mn_page_open (MN_KIOSK);
+  mn_groups_open ("smart_network");
 }
 
 /* Minerva > Prompt (`--page prompt`): the system prompt and the state template (ns-prompt.c) */

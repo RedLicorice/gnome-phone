@@ -183,6 +183,7 @@ ns_page_notifications (GtkWidget *row, gpointer data)
    * Besides the power key and a double tap, only a full-screen app (an incoming call, a ringing alarm: service.js
    * LaunchFullScreen) turns it on. */
   alerts_row (g);
+  ns_minerva_embed (page, c, "notifications");   /* the events that reach the assistant: Minerva > Eventi */
 
   g = ns_group (c, "App notifications");
   g_auto (GStrv) kids = g_settings_get_strv (n, "application-children");

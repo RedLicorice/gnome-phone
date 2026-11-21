@@ -1280,6 +1280,7 @@ ns_page_mobile (GtkWidget *row, gpointer data)
                             G_VARIANT_TYPE ("(a{oa{sa{sv}}})"), G_DBUS_CALL_FLAGS_NONE, 5000, NULL, modems_got,
                             g_object_ref (page));
   with_client (page, mobile_first);
+  ns_minerva_embed (page, c, "mobile");   /* the APN Minerva's mobile data uses */
   ns_push (page);
 }
 

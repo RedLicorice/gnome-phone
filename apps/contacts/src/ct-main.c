@@ -17,10 +17,13 @@
  *                             ("" anything, "phone" or "email"). The answer is that action, activated on the
  *                             caller the same way, with (ss): the contact's UID and its vCard, or ("", "") when
  *                             the picker was left without a pick.
+ *   minerva-settings          the people's Minerva settings: trust, when strangers are forgotten (Settings opens
+ *                             it from Minerva › Memoria › Fiducia; the desktop file's action of the same name)
  *
  * Calls and texts go out the other way, as tel: and sms: URIs to the apps that take them (ct-ui.c). */
 #include "ct-dialogs.h"
 #include "ct-editor.h"
+#include "ct-minerva-pages.h"
 #include "ct-picker.h"
 #include "ct-settings.h"
 #include "ct-store.h"
@@ -175,6 +178,16 @@ on_edit_contact (GSimpleAction *action, GVariant *parameter, gpointer app)
 
   gtk_window_present (GTK_WINDOW (window));
   when_ready (window, edit_contact, g_variant_get_string (parameter, NULL));
+}
+
+/* the Minerva settings of the people (trust, when strangers are forgotten): Settings › Minerva › Memoria opens them */
+static void
+on_minerva_settings (GSimpleAction *action, GVariant *parameter, gpointer app)
+{
+  GtkWidget *window = contacts_window (app);
+
+  gtk_window_present (GTK_WINDOW (window));
+  ct_window_push (window, ct_minerva_settings_new (window));
 }
 
 /* the fields another app sends: a name, a number, an email address (Intents.Insert.NAME, PHONE, EMAIL) */
@@ -342,6 +355,7 @@ main (int argc, char **argv)
     { .name = "insert", .activate = on_insert, .parameter_type = "a{sv}" },
     { .name = "insert-or-edit", .activate = on_insert_or_edit, .parameter_type = "a{sv}" },
     { .name = "pick-contact", .activate = on_pick_contact, .parameter_type = "(sss)" },
+    { .name = "minerva-settings", .activate = on_minerva_settings },
   };
 
   setlocale (LC_ALL, "");
