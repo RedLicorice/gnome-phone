@@ -404,6 +404,7 @@ ns_row (GtkWidget *group, const char *icon, const char *color, const char *title
   GtkWidget *s = gtk_label_new (subtitle);
   gtk_label_set_xalign (GTK_LABEL (s), 0);
   gtk_label_set_wrap (GTK_LABEL (s), TRUE);
+  gtk_label_set_wrap_mode (GTK_LABEL (s), PANGO_WRAP_WORD_CHAR);   /* a value without spaces (a list) breaks too */
   gtk_widget_add_css_class (s, "ns-sub");
   gtk_widget_set_visible (s, subtitle && *subtitle);
   gtk_box_append (GTK_BOX (v), s);
