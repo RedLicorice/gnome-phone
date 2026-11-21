@@ -100,6 +100,8 @@ static const char introspection[] =
   "      <arg name='destination' type='s'/><arg name='text' type='s'/><arg name='origin' type='s'/></signal>"
   "    <method name='Delivered'><arg name='message' type='x' direction='in'/>"
   "      <arg name='ok' type='b' direction='in'/></method>"
+  /* the agent has it (its turn started): a message Delivered took shows as delivered */
+  "    <method name='Reached'><arg name='message' type='x' direction='in'/></method>"
   /* Send, naming who wrote it: 'owner' (Giuseppe, in Messages) or 'minerva' (the agent, through a tool). Only a
    * provider's daemon reads it, to apply its write scope to Minerva alone */
   "    <method name='SendAs'><arg name='conversation' type='x' direction='in'/>"
@@ -1473,6 +1475,19 @@ on_method_call (GDBusConnection *bus, const char *sender, const char *path, cons
                      id);
       else
         agent_delivered (self, message, flag);
+    }
+  else if (g_str_equal (method, "Reached"))
+    {
+      g_autoptr(SmsMessage) message = NULL;
+
+      g_variant_get (parameters, "(x)", &id);
+      message = sms_store_get_message (self->store, id);
+      if (!message || message->status != MESSAGE_STATUS_OUTGOING_COMPLETE
+          || !is_delivery_conversation (self, message->conversation_id))
+        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS, "No sent message to an agent %" G_GINT64_FORMAT,
+                     id);
+      else
+        set_status (self, message, MESSAGE_STATUS_OUTGOING_DELIVERED, 0, 0);
     }
   else if (g_str_equal (method, "MarkRead"))
     {

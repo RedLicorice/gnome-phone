@@ -132,7 +132,16 @@ status_words (ConversationView *self, const SmsMessage *message, gboolean last_o
   const char *live = live_state (message);
 
   *failed = FALSE;
-  /* a live one says where the voice is with it; sent and delivered show as any other message */
+  /* a live one says where it is in the words of messaging.conf [live] (the owner's language, as the rest of
+   * Minerva's texts there), else in the app's own; sent and delivered show as any other message */
+  if (live && !g_str_equal (live, "sent") && !g_str_equal (live, "delivered"))
+    {
+      g_autofree char *words = sms_provider_text ("live", live);
+
+      *failed = g_str_equal (live, "failed");
+      if (words && *words)
+        return g_steal_pointer (&words);
+    }
   if (g_strcmp0 (live, "dictating") == 0)
     return g_strdup (_("Dictating…"));
   if (g_strcmp0 (live, "confirming") == 0)
