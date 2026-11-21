@@ -442,6 +442,18 @@ Description: Round icon pack for the Neo launcher
  Installing it makes it the launcher's icon pack; Neo Settings' Home screen
  switches packs.
 
+Package: neo-icon-themes
+Architecture: all
+Depends: ${misc:Depends},
+         adwaita-icon-theme,
+         hicolor-icon-theme,
+Description: GNOME Phone's icon packs as icon themes
+ The Renaissance (night, day; glyph night, glyph day) and Round icon packs
+ as freedesktop icon themes (neo-renaissance-night, neo-round, ...): the
+ stock setting org.gnome.desktop.interface icon-theme, or Neo Settings'
+ Appearance page, selects one, and the shell's app grid and every GTK
+ program use it. Names a theme lacks come from Adwaita and hicolor.
+
 Package: neo-parallax-solar-system
 Architecture: all
 Depends: ${misc:Depends},

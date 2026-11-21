@@ -1,0 +1,5 @@
+{
+ "_doc": "The icon name an app's desktop file asks for (its Icon= key), where it is not the desktop id without '.desktop' (make-icon-theme.py's rule). Desktop id -> icon name.",
+ "de.yesman.NeoBrowser.desktop": "de.yesman.Browser",
+ "Waydroid.desktop": "waydroid"
+}

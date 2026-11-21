@@ -1082,6 +1082,8 @@ picture_changed (GSettings *bg, const char *key, GtkWidget *row)
   ns_row_set_subtitle (row, base);
 }
 
+static void icon_theme_row (GtkWidget *group, AdwNavigationPage *page, GSettings *iface);
+
 void
 ns_page_wallpaper (GtkWidget *row, gpointer data)
 {
@@ -1132,6 +1134,7 @@ ns_page_wallpaper (GtkWidget *row, gpointer data)
   }
   dark_row (g, iface);
   ns_row_widget (g, "Accent colour", accent_picker (iface));
+  icon_theme_row (g, page, iface);
 
   /* the font families and the size are one decision: they sit together here, and Font size keeps its Display row too */
   g = ns_group (c, "Fonts");
@@ -1209,6 +1212,66 @@ icon_packs (void)
   }
   g_ptr_array_sort (packs, pack_name_cmp);
   return packs;
+}
+
+/* the icon themes installed (freedesktop: icons/<theme>/index.theme in the user's data dir, ~/.icons, then each system
+ * data dir, the first of a name winning), as org.gnome.desktop.interface icon-theme names them: a theme with icon
+ * directories (not a cursor theme), not Hidden, or the setting's own default (Adwaita marks itself Hidden); named by
+ * its index.theme's Name */
+static GPtrArray *
+icon_themes (GSettings *iface)
+{
+  GPtrArray *themes = g_ptr_array_new_with_free_func ((GDestroyNotify) pack_name_free);
+  g_autoptr (GHashTable) seen = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+  g_autoptr (GVariant) def = g_settings_get_default_value (iface, "icon-theme");
+  const char *fallback = def ? g_variant_get_string (def, NULL) : NULL;
+  g_autoptr (GStrvBuilder) db = g_strv_builder_new ();
+  g_strv_builder_take (db, g_build_filename (g_get_user_data_dir (), "icons", NULL));
+  g_strv_builder_take (db, g_build_filename (g_get_home_dir (), ".icons", NULL));
+  for (const char *const *s = g_get_system_data_dirs (); *s; s++)
+    g_strv_builder_take (db, g_build_filename (*s, "icons", NULL));
+  g_auto (GStrv) dirs = g_strv_builder_end (db);
+
+  for (guint i = 0; dirs[i]; i++) {
+    g_autoptr (GDir) d = g_dir_open (dirs[i], 0, NULL);
+    for (const char *n; d && (n = g_dir_read_name (d));) {
+      g_autofree char *index = g_build_filename (dirs[i], n, "index.theme", NULL);
+      g_autoptr (GKeyFile) kf = g_key_file_new ();
+      if (g_hash_table_contains (seen, n) || !g_key_file_load_from_file (kf, index, G_KEY_FILE_NONE, NULL))
+        continue;
+      g_hash_table_add (seen, g_strdup (n));
+      g_autofree char *icon_dirs = g_key_file_get_string (kf, "Icon Theme", "Directories", NULL);
+      gboolean hidden = g_key_file_get_boolean (kf, "Icon Theme", "Hidden", NULL);
+      if (!icon_dirs || !*icon_dirs || (hidden && g_strcmp0 (n, fallback) != 0))
+        continue;
+      g_autofree char *title = g_key_file_get_locale_string (kf, "Icon Theme", "Name", NULL, NULL);
+      PackName *p = g_new0 (PackName, 1);
+      p->id = g_strdup (n);
+      p->title = g_strdup (title && *title ? title : n);
+      g_ptr_array_add (themes, p);
+    }
+  }
+  g_ptr_array_sort (themes, pack_name_cmp);
+  return themes;
+}
+
+/* the Icon theme row: every installed theme (icon_themes); the shell's app grid and the apps follow the setting live */
+static void
+icon_theme_row (GtkWidget *group, AdwNavigationPage *page, GSettings *iface)
+{
+  g_autoptr (GPtrArray) themes = icon_themes (iface);
+  GStrvBuilder *vb = g_strv_builder_new (), *lb = g_strv_builder_new ();
+  for (guint i = 0; i < themes->len; i++) {
+    PackName *p = themes->pdata[i];
+    g_strv_builder_add (vb, p->id);
+    g_strv_builder_add (lb, p->title);
+  }
+  char **values = g_strv_builder_end (vb), **labels = g_strv_builder_end (lb);
+  g_strv_builder_unref (vb);
+  g_strv_builder_unref (lb);
+  g_object_set_data_full (G_OBJECT (page), "icon-themes", values, (GDestroyNotify) g_strfreev);
+  g_object_set_data_full (G_OBJECT (page), "icon-theme-labels", labels, (GDestroyNotify) g_strfreev);
+  ns_row_choice (group, "Icon theme", iface, "icon-theme", (const char *const *) values, (const char *const *) labels);
 }
 
 /* ---- Home screen: the layout ---- */
