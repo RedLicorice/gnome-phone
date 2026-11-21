@@ -57,7 +57,7 @@ static const Entry entries[] = {
   { "avatar-default-symbolic", "blue", "Accounts", "Online accounts • API keys",
     "google nextcloud email api key token provider endpoint llm secret", ns_page_accounts },
   { NULL },
-  { "face-smile-symbolic", "purple", "{assistant}", "Modello • Voce • Prompt • Budget",
+  { "face-smile-symbolic", "purple", "Minerva", "Modello • Voce • Prompt • Budget",   /* the platform's page */
     "ai agent brain cervello llm opencode piper voice voce wakeword prompt budget cost", ns_page_minerva, NULL,
     NULL, ns_minerva_available },
   { NULL },
@@ -296,7 +296,7 @@ main_page (void)
       g = ns_group (col, NULL);
       g_ptr_array_add (groups, g);
     }
-    g_autofree char *title = msg_assistant_fill (e->title);   /* {assistant}: the node's assistant */
+    g_autofree char *title = msg_assistant_fill (e->title);   /* {assistant} in a title: the node's assistant */
     GtkWidget *r = ns_row (g, e->icon, e->color, title, e->subtitle);
     gtk_widget_set_visible (r, !e->search_only);
     g_object_set_data (G_OBJECT (r), "ns-search-only", GINT_TO_POINTER (e->search_only));

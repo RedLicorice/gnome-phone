@@ -779,9 +779,7 @@ ns_page_permissions (GtkWidget *row, gpointer data)
               "everything.");
 
   ak->gates = ns_group (c, "Always refused");
-  g_autofree char *shipped = msg_assistant_fill ("Shipped with {assistant} and checked first: no rule, mode or model can "
-                                                 "allow them.");
-  ns_note (c, shipped);
+  ns_note (c, "Shipped with Minerva and checked first: no rule, mode or model can allow them.");   /* the platform */
 
   ak->base = ns_group (c, "Allowed without asking");
   g_autofree char *safe = msg_assistant_fill ("The safe things: ordinary files, {assistant}'s own phone tools, read-only "
@@ -804,7 +802,7 @@ ns_page_permissions (GtkWidget *row, gpointer data)
   ak->fallbacks = ns_group (c, "Fallbacks");
   g_autofree char *classifier = msg_assistant_fill ("The classifier is only used in Auto. When it fails for any reason, "
                                                     "{assistant} asks you. The fallbacks are tried in this order; change "
-                                                    "them on the {assistant} page.");
+                                                    "them on the Minerva page.");   /* the platform's page */
   ns_note (c, classifier);
 
   g = ns_group (c, "Reminders");
