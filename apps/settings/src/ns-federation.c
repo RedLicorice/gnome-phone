@@ -4,7 +4,9 @@
  * texts (federation_ui.json, in the phone's language), this node, its choices, the nodes with their tags and
  * inventories. A change of this phone's choices is `minerva-config federation set SECTION.KEY VALUE`, which asks the
  * node's root service (org.minerva.Inventory1); the owner may be asked on the device first, so the answer can take a
- * while. Other devices are shown read-only: only a device itself changes its offers and limits. */
+ * while. Other devices are shown read-only: only a device itself changes its offers and limits. Adding a phone is
+ * Bluetooth LE: `federation candidates` lists the phones nearby that ask to join, `federation admit FINGERPRINT`
+ * starts the owner's approval here; a phone not in the federation asks with `federation join`. */
 #include "ns-pages.h"
 #include "ns-mc.h"
 #include "ns-ui.h"
@@ -379,6 +381,165 @@ node_subtitle (Fd *fd, JsonObject *node)
   return g_strdup (s->str);
 }
 
+/* ---- adding a phone nearby (Bluetooth LE pairing: docs/federation-ble.md of Minerva) ---- */
+
+/* the "add" page: the phones nearby that ask to join, read again every scan_interval_s while the page lives */
+typedef struct {
+  Fd                *fd;
+  AdwNavigationPage *page;
+  GtkWidget         *group, *msg;
+  guint              timer;
+} Add;
+
+static void add_refresh (Add *a);
+
+static void
+add_free (Add *a)
+{
+  if (a->timer)
+    g_source_remove (a->timer);
+  g_free (a);
+}
+
+static void
+add_say (Add *a, const char *text)
+{
+  gtk_label_set_text (GTK_LABEL (a->msg), text);
+  gtk_widget_set_visible (a->msg, text && *text);
+}
+
+static void
+admit_done (JsonObject *root, const char *err, gpointer data)
+{
+  Add *a = data;
+  JsonObject *t = ui (a->fd, "add");
+  if (root && json_object_get_boolean_member_with_default (root, "ok", FALSE))
+    add_say (a, str_of (t, "started"));
+  else {
+    g_autofree char *m = g_strdup_printf ("%s: %s", label (a->fd, "error"), err ? err : str_of (root, "error"));
+    add_say (a, m);
+  }
+}
+
+static void
+admit_clicked (GtkButton *b, gpointer data)
+{
+  Add *a = data;
+  const char *fp = g_object_get_data (G_OBJECT (b), "ns-fd-fp");
+  const char *const args[] = { "federation", "admit", fp, "--json", NULL };
+  gtk_widget_set_sensitive (GTK_WIDGET (b), FALSE);
+  ns_mc_run (G_OBJECT (a->page), args, NULL, admit_done, a);
+}
+
+static gboolean
+add_tick (gpointer data)
+{
+  add_refresh (data);
+  return G_SOURCE_CONTINUE;
+}
+
+static void
+candidates_done (JsonObject *root, const char *err, gpointer data)
+{
+  Add *a = data;
+  JsonObject *t = ui (a->fd, "add");
+  if (!root || !json_object_get_boolean_member_with_default (root, "ok", FALSE)) {
+    g_autofree char *m = g_strdup_printf ("%s: %s", label (a->fd, "error"), err ? err : str_of (root, "error"));
+    add_say (a, m);
+    return;
+  }
+  if (!a->timer) {   /* the refresh period is data of minerva-config ([federation] scan_interval_s) */
+    gint64 every = json_object_get_int_member_with_default (root, "scan_interval_s", 0);
+    if (every > 0)
+      a->timer = g_timeout_add_seconds ((guint) every, add_tick, a);
+  }
+  ns_group_clear (a->group);
+  JsonArray *cs = arr_of (root, "candidates");
+  guint n = cs ? json_array_get_length (cs) : 0;
+  if (!n) {
+    GtkWidget *r = ns_row (a->group, NULL, NULL, str_of (t, "none"), NULL);
+    gtk_widget_set_focusable (r, FALSE);
+    return;
+  }
+  for (guint i = 0; i < n; i++) {
+    JsonObject *c = json_array_get_object_element (cs, i);
+    double m = 0;
+    number_member (c, "metres", &m);
+    g_autofree char *num = g_strdup_printf ("%.1f", m);
+    g_autofree char *title = subst (str_of (t, "key"), "fingerprint", str_of (c, "fingerprint"));
+    g_autofree char *dist = subst (str_of (t, "metres"), "metres", num);
+    gboolean done = bool_member (c, "admitted", FALSE);
+    g_autofree char *sub = done ? g_strdup_printf ("%s • %s", dist, str_of (t, "admitted")) : g_strdup (dist);
+    GtkWidget *r = ns_row (a->group, "phone-symbolic", done ? "green" : "blue", title, sub);
+    gtk_widget_set_focusable (r, FALSE);
+    if (!done) {
+      GtkWidget *b = gtk_button_new_with_label (str_of (t, "admit"));
+      gtk_widget_set_valign (b, GTK_ALIGN_CENTER);
+      gtk_widget_add_css_class (b, "suggested-action");
+      g_object_set_data_full (G_OBJECT (b), "ns-fd-fp", g_strdup (str_of (c, "fingerprint")), g_free);
+      g_signal_connect (b, "clicked", G_CALLBACK (admit_clicked), a);
+      ns_row_suffix (r, b);
+    }
+  }
+}
+
+static void
+add_refresh (Add *a)
+{
+  static const char *const args[] = { "federation", "candidates", "--json", NULL };
+  ns_mc_run (G_OBJECT (a->page), args, NULL, candidates_done, a);
+}
+
+static void
+join_done (JsonObject *root, const char *err, gpointer data)
+{
+  Add *a = data;
+  if (root && json_object_get_boolean_member_with_default (root, "ok", FALSE))
+    add_say (a, str_of (ui (a->fd, "add"), "join_started"));
+  else {
+    g_autofree char *m = g_strdup_printf ("%s: %s", label (a->fd, "error"), err ? err : str_of (root, "error"));
+    add_say (a, m);
+  }
+}
+
+static void
+join_asked (GtkWidget *row, gpointer data)
+{
+  (void) row;
+  Add *a = data;
+  static const char *const args[] = { "federation", "join", "--json", NULL };
+  ns_mc_run (G_OBJECT (a->page), args, NULL, join_done, a);
+}
+
+/* a member lists the phones nearby and admits one (the owner approves on this device, and on the new one); a phone
+ * not in the federation yet asks to join instead */
+static void
+add_open (GtkWidget *row, gpointer data)
+{
+  (void) row;
+  Fd *fd = data;
+  JsonObject *t = ui (fd, "add");
+  Add *a = g_new0 (Add, 1);
+  a->fd = fd;
+  GtkWidget *content;
+  a->page = ns_page_new (str_of (t, "title"), &content);
+  g_object_set_data_full (G_OBJECT (a->page), "ns-fd-add", a, (GDestroyNotify) add_free);
+  a->msg = ns_note (content, "");
+  gtk_widget_set_visible (a->msg, FALSE);
+  if (json_object_get_boolean_member_with_default (fd->st, "in_federation", FALSE)) {
+    a->group = ns_group (content, str_of (t, "heading"));
+    GtkWidget *r = ns_row (a->group, NULL, NULL, str_of (t, "scanning"), NULL);
+    gtk_widget_set_focusable (r, FALSE);
+    ns_push (a->page);
+    add_refresh (a);
+    return;
+  }
+  GtkWidget *g = ns_group (content, NULL);
+  GtkWidget *jr = ns_row (g, "bluetooth-symbolic", "blue", str_of (t, "join_title"), str_of (t, "join_subtitle"));
+  ns_row_on_activate (jr, join_asked, a);
+  ns_push (a->page);
+}
+
 /* ---- the page ---- */
 
 static void
@@ -459,7 +620,7 @@ build (Fd *fd)
   GtkWidget *mg = ns_group (fd->content, str_of (sec, "manage"));
   JsonObject *add = ui (fd, "add"), *leave = ui (fd, "leave");
   GtkWidget *ar = ns_row (mg, "list-add-symbolic", "blue", str_of (add, "title"), str_of (add, "subtitle"));
-  gtk_widget_set_focusable (ar, FALSE);
+  ns_row_on_activate (ar, add_open, fd);
   if (json_object_get_boolean_member_with_default (fd->st, "in_federation", FALSE))
     ns_row_button (mg, str_of (leave, "title"), TRUE, leave_ask, fd);
   fd->built = TRUE;
