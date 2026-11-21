@@ -98,6 +98,14 @@ typedef struct {
   GtkWidget       *ring, *icon, *title, *hint, *button;
 } Enroll;
 
+/* where the phone's sensor is, in the enroll page's words: device data (de.yesman.NeoSettings, a device override) */
+static char *
+sensor_text (const char *key)
+{
+  g_autoptr (GSettings) s = ns_settings ("de.yesman.NeoSettings");
+  return s ? g_settings_get_string (s, key) : g_strdup ("");
+}
+
 static void
 enroll_free (Enroll *e)
 {
@@ -207,9 +215,10 @@ status (GDBusConnection *bus, const char *sender, const char *path, const char *
     enroll_fail (e, "Sensor disconnected", NULL);
   } else if (done) {
     /* enroll-failed, enroll-unknown-error: the driver gives up after two minutes without a touch */
-    if (e->passed == 0)
-      enroll_fail (e, "No touch detected",
-                   "The sensor didn't register a finger. Press the power key with the pad of your finger.");
+    if (e->passed == 0) {
+      g_autofree char *hint = sensor_text ("fingerprint-no-touch-hint");
+      enroll_fail (e, "No touch detected", hint);
+    }
     else
       enroll_fail (e, "That didn't work", "Start again.");
   }
@@ -231,8 +240,9 @@ started (GObject *source, GAsyncResult *res, gpointer data)
     enroll_fail (e, "Couldn't start", text);
     return;
   }
-  enroll_show (e, "Press the power key", "Put your finger on the sensor in the power key, then lift it. Repeat "
-               "until the circle is full.", BUTTON_CANCEL);
+  g_autofree char *title = sensor_text ("fingerprint-press-title");
+  g_autofree char *hint = sensor_text ("fingerprint-press-hint");
+  enroll_show (e, title, hint, BUTTON_CANCEL);
 }
 
 static void

@@ -57,6 +57,24 @@
       <description>The window is never made lower than this.</description>
     </key>
 
+    <!-- the Fingerprints page's enroll prompts name where the sensor is: device data (a vendor override per phone);
+         the defaults are a side sensor in the power key -->
+    <key name="fingerprint-press-title" type="s">
+      <default>'Press the power key'</default>
+      <summary>Enroll prompt: the title</summary>
+      <description>Shown while an enrolment waits for a touch.</description>
+    </key>
+    <key name="fingerprint-press-hint" type="s">
+      <default>'Put your finger on the sensor in the power key, then lift it. Repeat until the circle is full.'</default>
+      <summary>Enroll prompt: how to touch the sensor</summary>
+      <description>Shown under the title while an enrolment waits for a touch.</description>
+    </key>
+    <key name="fingerprint-no-touch-hint" type="s">
+      <default>'The sensor didn\'t register a finger. Press the power key with the pad of your finger.'</default>
+      <summary>Enroll failure without a single touch: what to do</summary>
+      <description>Shown when an enrolment ends before the sensor saw a finger.</description>
+    </key>
+
     <key name="last-page" type="s">
       <default>''</default>
       <summary>The menu page opened last</summary>
