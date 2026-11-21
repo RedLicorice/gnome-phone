@@ -8,9 +8,13 @@ bindir = get_option('prefix') / get_option('bindir')
 datadir = get_option('prefix') / get_option('datadir')
 resources = gnome.compile_resources('neo-prompt-resources', 'src/neo-prompt.gresource.xml', source_dir: 'src')
 
+# the configuration layers (Minerva's docs/packaging.md, "Configuration"): Minerva's own reader, vendored
+layers = static_library('layers', '../../common/minerva-layers.c', dependencies: [dependency('glib-2.0')],
+                        c_args: ['-DMINERVA_LAYERS_FILE="@0@"'.format(get_option('layers-file'))])
 executable('neo-prompt',
   'src/np-main.c', 'src/np-window.c', 'src/np-store.c', 'src/np-editor.c', 'src/np-context.c',
   'src/np-history.c', 'src/np-diff.c', 'src/np-ui.c', resources,
+  link_with: layers, include_directories: include_directories('../../common'),
   install: true,
   dependencies: [gtk, dependency('json-glib-1.0'), dependency('neo-1')])
 

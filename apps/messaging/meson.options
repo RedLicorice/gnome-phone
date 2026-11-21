@@ -1,3 +1,6 @@
 # the root-owned callers file of the one rule (Minerva's docs/who-may-call.md; agentic-phosh's option of the same name)
 option('callers-file', type: 'string', value: '/etc/phosh/callers.ini',
        description: 'Root-owned file naming the programs that may call each restricted method')
+# the configuration layers' folders (Minerva's docs/packaging.md, "Configuration"; minerva-base installs the file)
+option('layers-file', type: 'string', value: '/usr/lib/minerva/layers.conf',
+       description: 'The file naming the configuration layer folders, lowest first')

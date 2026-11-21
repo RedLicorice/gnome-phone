@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 
 #include "sms-agent.h"
+#include "minerva-layers.h"
 
 /* the sections of the file that are not providers */
 static const char *NOT_A_PROVIDER[] = { "providers", "scopes", "limits", "defaults", "events", "agents", "agent-refusals",
@@ -19,23 +20,70 @@ sms_provider_conf_path (void)
   return path && *path ? path : NULL;
 }
 
-static char *
-user_path (void)
-{
-  const char *set = sms_provider_conf_path ();
+#define MESSAGING_CONF "messaging.conf"
 
-  return set ? g_strdup (set) : g_build_filename (g_get_user_config_dir (), "minerva", "messaging.conf", NULL);
+/* the files read, lowest first: MINERVA_MESSAGING_CONF alone (a test's file), else every configuration layer of
+ * messaging.conf (Minerva's docs/packaging.md, "Configuration": the package's defaults, the device's, /etc, the
+ * owner's changed keys), their folders read from the layers' file once; on a phone without that file (no minerva-base
+ * yet) the owner's file alone, as before the layers. with_missing: also the paths that do not exist (to notice one
+ * that comes) */
+static GStrv
+conf_files (gboolean with_missing)
+{
+  static gsize once = 0;
+  static GStrv layers = NULL;
+  const char *set = sms_provider_conf_path ();
+  g_autoptr(GStrvBuilder) out = g_strv_builder_new ();
+
+  if (g_once_init_enter (&once))
+    {
+      g_autofree char *owner = minerva_layers_user_file (MESSAGING_CONF);
+
+      layers = owner ? minerva_layers_paths (MESSAGING_CONF, TRUE) : NULL;
+      if (!layers)
+        {
+          const char *one[] = { NULL, NULL };
+          g_autofree char *path = g_build_filename (g_get_user_config_dir (), "minerva", MESSAGING_CONF, NULL);
+
+          one[0] = path;
+          layers = g_strdupv ((char **) one);
+        }
+      g_once_init_leave (&once, 1);
+    }
+  if (set)
+    {
+      g_strv_builder_add (out, set);
+      return g_strv_builder_end (out);
+    }
+  for (guint i = 0; layers[i]; i++)
+    if (with_missing || g_file_test (layers[i], G_FILE_TEST_EXISTS))
+      g_strv_builder_add (out, layers[i]);
+  return g_strv_builder_end (out);
 }
 
-/* the parsed file, kept until its mtime or size changes */
+/* the parsed layers, kept until one of them changes (its mtime or size, or a layer that comes or goes) */
 static GKeyFile *registry = NULL;
-static gint64 registry_stamp = 0;
+static char *registry_stamp = NULL;
+
+static char *
+conf_stamp (void)
+{
+  g_auto(GStrv) paths = conf_files (TRUE);
+  GString *stamp = g_string_new (NULL);
+  struct stat info;
+
+  for (guint i = 0; paths[i]; i++)
+    if (!stat (paths[i], &info))
+      g_string_append_printf (stamp, "%u:%" G_GINT64_FORMAT ":%" G_GINT64_FORMAT ";", i, (gint64) info.st_mtime,
+                              (gint64) info.st_size);
+  return g_string_free (stamp, FALSE);
+}
 
 void
 sms_provider_reload (void)
 {
   g_clear_pointer (&registry, g_key_file_free);
-  registry_stamp = 0;
+  g_clear_pointer (&registry_stamp, g_free);
 }
 
 static gboolean
@@ -77,35 +125,55 @@ strip_comments (const char *raw)
   return g_string_free (out, FALSE);
 }
 
+/* one layer's keys over the ones already in into; the file is the phone's INI (``key = value  ; comment``), and
+ * GKeyFile knows only '#' comments */
+static gboolean
+layer_over (GKeyFile *into, const char *path)
+{
+  g_autoptr(GKeyFile) file = g_key_file_new ();
+  g_autofree char *raw = NULL;
+  g_autofree char *text = NULL;
+  g_auto(GStrv) groups = NULL;
+
+  if (!g_file_get_contents (path, &raw, NULL, NULL) || !(text = strip_comments (raw))
+      || !g_key_file_load_from_data (file, text, -1, G_KEY_FILE_NONE, NULL))
+    return FALSE;
+  groups = g_key_file_get_groups (file, NULL);
+  for (guint g = 0; groups[g]; g++)
+    {
+      g_auto(GStrv) keys = g_key_file_get_keys (file, groups[g], NULL, NULL);
+
+      for (guint k = 0; keys && keys[k]; k++)
+        {
+          g_autofree char *value = g_key_file_get_value (file, groups[g], keys[k], NULL);
+
+          g_key_file_set_value (into, groups[g], keys[k], value);
+        }
+    }
+  return TRUE;
+}
+
 static GKeyFile *
 conf (void)
 {
-  g_autofree char *path = user_path ();
-  struct stat info;
+  g_autofree char *stamp = conf_stamp ();
 
-  if (!stat (path, &info))
+  if (!registry || g_strcmp0 (stamp, registry_stamp) != 0)
     {
-      gint64 stamp = (gint64) info.st_mtime * G_GINT64_CONSTANT (1000000000) + (gint64) info.st_size;
+      g_auto(GStrv) files = conf_files (FALSE);
+      g_autoptr(GKeyFile) merged = g_key_file_new ();
+      gboolean any = FALSE;
 
-      if (!registry || stamp != registry_stamp)
-        {
-          g_autoptr(GKeyFile) file = g_key_file_new ();
-          g_autofree char *raw = NULL;
-          g_autofree char *text = NULL;
-
-          sms_provider_reload ();
-          /* the file is the phone's INI (``key = value  ; comment``): GKeyFile knows only '#' comments */
-          if (g_file_get_contents (path, &raw, NULL, NULL) && (text = strip_comments (raw))
-              && g_key_file_load_from_data (file, text, -1, G_KEY_FILE_NONE, NULL))
-            {
-              registry = g_steal_pointer (&file);
-              registry_stamp = stamp;
-            }
-        }
-      return registry;
+      sms_provider_reload ();
+      for (guint i = 0; files[i]; i++)
+        any |= layer_over (merged, files[i]);
+      /* no layer: the registry is empty, and the agent's prefix stays the only one known */
+      if (!any)
+        return NULL;
+      registry = g_steal_pointer (&merged);
+      registry_stamp = g_steal_pointer (&stamp);
     }
-  /* no file: the registry is empty, and the agent's prefix stays the only one known */
-  return NULL;
+  return registry;
 }
 
 static char *
