@@ -301,6 +301,35 @@ test_changes (void)
   sms_store_free (store);
 }
 
+/* a live message (dictated by voice): one row per ext, its words, state and deadline updated; its state's start kept
+ * while only its words change */
+static void
+test_live (void)
+{
+  g_autofree char *path = NULL;
+  SmsStore *store = open_store (&path);
+  g_autoptr(SmsMessage) first = NULL, words = NULL, confirming = NULL;
+  gint64 id = sms_store_add_sent (store, "agent:Minerva", "", 1000, "voice-1", NULL, NULL);
+
+  sms_store_set_live (store, id, "dictating", "Che", 1000, 0);
+  first = sms_store_get_message (store, id);
+  g_assert_cmpstr (first->live, ==, "dictating");
+  g_assert_cmpint (first->live_since, ==, 1000);
+  sms_store_set_live (store, id, "dictating", "Che ore sono", 1300, 0);
+  words = sms_store_get_message (store, id);
+  g_assert_cmpstr (words->text, ==, "Che ore sono");
+  g_assert_cmpint (words->live_since, ==, 1000);
+  sms_store_set_live (store, id, "confirming", "", 2000, 5000);
+  confirming = sms_store_get_message (store, id);
+  g_assert_cmpstr (confirming->live, ==, "confirming");
+  g_assert_cmpstr (confirming->text, ==, "Che ore sono");
+  g_assert_cmpint (confirming->live_since, ==, 2000);
+  g_assert_cmpint (confirming->live_until, ==, 5000);
+  g_assert_cmpint (sms_store_find_by_uri (store, "voice-1"), ==, id);
+  g_assert_cmpuint (count (sms_store_list_messages (store, confirming->conversation_id)), ==, 1);
+  sms_store_free (store);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -313,5 +342,6 @@ main (int argc, char **argv)
   g_test_add_func ("/sms-store/origin", test_origin);
   g_test_add_func ("/sms-store/typed-part", test_typed_part);
   g_test_add_func ("/sms-store/changes", test_changes);
+  g_test_add_func ("/sms-store/live", test_live);
   return g_test_run ();
 }

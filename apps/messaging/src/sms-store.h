@@ -88,6 +88,10 @@ typedef struct
   SmsPart *part;                /* what it carries besides text, or NULL for a text message */
   gboolean edited;              /* its sender changed it after sending */
   char *reactions;              /* the emoji people reacted with, one after the other, or NULL */
+  char *live;                   /* an owner's message to an agent shown as he dictates it by voice: its state word
+                                 * ("dictating", "confirming", ... sms_live_status), or NULL for any other message */
+  gint64 live_since;            /* Unix ms: when that state began */
+  gint64 live_until;            /* Unix ms: when that state ends (a confirmation's deadline), 0 for no end */
 } SmsMessage;
 
 typedef struct _SmsStore SmsStore;
@@ -122,6 +126,12 @@ void      sms_store_set_media (SmsStore *store, gint64 message_id, const char *u
 gint64    sms_store_change (SmsStore *store, const char *kind, const char *ext, const char *sender, const char *text);
 /* a voice note's transcript, and the message's text with it (what the list, the notification and the agents read) */
 void      sms_store_set_transcript (SmsStore *store, gint64 message_id, const char *transcript, const char *text);
+/* a live message's state word @state (NULL: no longer live) since @since (kept when the word is the one it had), its
+ * deadline @until (0 none), and its text @text (NULL or "": the one it has), in one transaction */
+void      sms_store_set_live (SmsStore *store, gint64 message_id, const char *state, const char *text, gint64 since,
+                              gint64 until);
+/* the status a live message's state word stands for, or MESSAGE_STATUS_UNKNOWN for a word that is none */
+MessageStatus sms_live_status (const char *state);
 /* the messages are read (the conversation was shown) and seen (their notification can go); how many changed */
 guint     sms_store_mark_read (SmsStore *store, gint64 conversation_id);
 guint     sms_store_mark_seen (SmsStore *store, gint64 conversation_id);

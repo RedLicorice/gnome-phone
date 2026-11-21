@@ -117,11 +117,32 @@ clusters (const SmsMessage *a, const SmsMessage *b)
   return ABS (delta) <= CLUSTER_MS;
 }
 
+/* a live message's state word (what the owner is saying to an agent by voice, sms-store.h), while its status is still
+ * the one the word stands for (a tap on a failed one sends it again: then its status says what happens); else NULL */
+static const char *
+live_state (const SmsMessage *message)
+{
+  return message->live && sms_live_status (message->live) == message->status ? message->live : NULL;
+}
+
 /* the status line: what is happening to it, else its time (only under a cluster's last) */
 static char *
-status_text (ConversationView *self, const SmsMessage *message, gboolean last_of_cluster, gboolean *failed)
+status_words (ConversationView *self, const SmsMessage *message, gboolean last_of_cluster, gboolean *failed)
 {
+  const char *live = live_state (message);
+
   *failed = FALSE;
+  /* a live one says where the voice is with it; sent and delivered show as any other message */
+  if (g_strcmp0 (live, "dictating") == 0)
+    return g_strdup (_("Dictating…"));
+  if (g_strcmp0 (live, "confirming") == 0)
+    return g_strdup (_("Sending soon…"));
+  if (g_strcmp0 (live, "unheard") == 0)
+    return g_strdup (_("Not understood"));
+  if (g_strcmp0 (live, "cancelled") == 0)
+    return g_strdup (_("Cancelled"));
+  if (g_strcmp0 (live, "command") == 0)
+    return g_strdup (_("Voice command"));
   switch (message->status)
     {
     case MESSAGE_STATUS_OUTGOING_YET_TO_SEND:
@@ -155,6 +176,18 @@ status_text (ConversationView *self, const SmsMessage *message, gboolean last_of
 
       return message->edited ? g_strdup_printf ("%s  %s", line, _("Edited")) : g_steal_pointer (&line);
     }
+}
+
+/* a live message names the way it came (its origin: the channel, as the bridge labels it, "voce", "Telegram") before
+ * its status, on every one of them: a cluster mixes channels */
+static char *
+status_text (ConversationView *self, const SmsMessage *message, gboolean last_of_cluster, gboolean *failed)
+{
+  g_autofree char *words = status_words (self, message, last_of_cluster, failed);
+
+  if (!message->live || !message->origin || !*message->origin)
+    return g_steal_pointer (&words);
+  return words ? g_strdup_printf ("%s · %s", message->origin, words) : g_strdup (message->origin);
 }
 
 static void select_message (ConversationView *self, gint64 id);
@@ -322,6 +355,36 @@ withdrawable (ConversationView *self, const SmsMessage *message)
   return seconds > 0 && g_get_real_time () / 1000 - message->sent <= seconds * 1000;
 }
 
+/* a confirming message's bar: from full when its state began to empty at its deadline, then it stops (its tick goes
+ * with the bar) */
+static gboolean
+on_live_tick (GtkWidget *bar, GdkFrameClock *clock, gpointer data)
+{
+  gint64 since = *(gint64 *) g_object_get_data (G_OBJECT (bar), "since");
+  gint64 until = *(gint64 *) g_object_get_data (G_OBJECT (bar), "until");
+  double left = (double) (until - g_get_real_time () / 1000) / (double) (until - since);
+
+  gtk_progress_bar_set_fraction (GTK_PROGRESS_BAR (bar), CLAMP (left, 0, 1));
+  return left > 0 ? G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
+}
+
+/* what a message's row shows, to tell whether a Changed changed it (update_rows) */
+static char *
+row_signature (ConversationView *self, const SmsMessage *message, gboolean clustered_above, gboolean clustered_below)
+{
+  const SmsPart *part = message->part;
+
+#define OR_EMPTY(s) ((s) ? (s) : "")
+  return g_strdup_printf ("%d %d %d %d %" G_GINT64_FORMAT " %d %s %" G_GINT64_FORMAT " %" G_GINT64_FORMAT
+                          "\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s",
+                          clustered_above, clustered_below, message->id == self->selected, message->status,
+                          message->sent, message->edited, OR_EMPTY (message->live), message->live_since,
+                          message->live_until, OR_EMPTY (message->text), OR_EMPTY (message->reactions),
+                          part ? OR_EMPTY (part->kind) : "", part ? OR_EMPTY (part->uri) : "",
+                          part ? OR_EMPTY (part->transcript) : "", part ? OR_EMPTY (part->caption) : "");
+#undef OR_EMPTY
+}
+
 static GtkWidget *
 make_message (ConversationView *self, const SmsMessage *message, gboolean clustered_above,
               gboolean clustered_below)
@@ -337,7 +400,7 @@ make_message (ConversationView *self, const SmsMessage *message, gboolean cluste
   GtkWidget *content = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
   GtkWidget *text = gtk_label_new (NULL);
   g_autofree char *weight = g_settings_get_string (self->settings, "markdown-strong-weight");
-  g_autofree char *markup = message->text && g_settings_get_boolean (self->settings, "markdown") ?
+  g_autofree char *markup = message->text && *message->text && g_settings_get_boolean (self->settings, "markdown") ?
                             msg_markdown_to_pango (message->text, weight) : NULL;
   g_auto(GStrv) unlabelled = g_settings_get_strv (self->settings, "media-unlabelled");
   GtkWidget *bubble, *pressable, *preview = NULL;
@@ -387,8 +450,11 @@ make_message (ConversationView *self, const SmsMessage *message, gboolean cluste
     }
   else if (markup)
     gtk_label_set_markup (GTK_LABEL (text), markup);
-  else if (message->text)
+  else if (message->text && *message->text)
     gtk_label_set_text (GTK_LABEL (text), message->text);
+  /* dictated, no word of it heard yet */
+  else if (g_strcmp0 (live_state (message), "dictating") == 0)
+    gtk_label_set_text (GTK_LABEL (text), "…");
   gtk_label_set_wrap (GTK_LABEL (text), TRUE);
   gtk_label_set_wrap_mode (GTK_LABEL (text), PANGO_WRAP_WORD_CHAR);
   gtk_label_set_xalign (GTK_LABEL (text), 0);
@@ -470,6 +536,18 @@ make_message (ConversationView *self, const SmsMessage *message, gboolean cluste
       gtk_widget_set_margin_top (meta, META_TOP);
       gtk_box_append (GTK_BOX (content), meta);
     }
+  /* about to be sent: the time left to stop it, running out */
+  if (g_strcmp0 (live_state (message), "confirming") == 0 && message->live_until > message->live_since)
+    {
+      GtkWidget *bar = gtk_progress_bar_new ();
+
+      g_object_set_data_full (G_OBJECT (bar), "since", g_memdup2 (&message->live_since, sizeof (gint64)), g_free);
+      g_object_set_data_full (G_OBJECT (bar), "until", g_memdup2 (&message->live_until, sizeof (gint64)), g_free);
+      gtk_widget_add_css_class (bar, "msg-live-progress");
+      if (on_live_tick (bar, NULL, NULL))
+        gtk_widget_add_tick_callback (bar, on_live_tick, NULL, NULL);
+      gtk_box_append (GTK_BOX (content), bar);
+    }
   gtk_widget_set_margin_start (content, TEXT_PAD_SIDE);
   gtk_widget_set_margin_end (content, TEXT_PAD_SIDE);
   gtk_widget_set_margin_top (content, TEXT_PAD_TOP);
@@ -530,6 +608,12 @@ make_message (ConversationView *self, const SmsMessage *message, gboolean cluste
   gtk_widget_set_margin_start (row, ROW_SIDE_PADDING);
   gtk_widget_set_margin_end (row, ROW_SIDE_PADDING);
   gtk_widget_set_margin_top (row, clustered_above ? GAP_CLUSTERED : GAP);
+  /* dictated, then called off: there, but dimmed */
+  if (g_strcmp0 (live_state (message), "cancelled") == 0)
+    gtk_widget_add_css_class (pressable, "msg-live-cancelled");
+  g_object_set_data_full (G_OBJECT (row), "id", g_memdup2 (&message->id, sizeof message->id), g_free);
+  g_object_set_data_full (G_OBJECT (row), "signature",
+                          row_signature (self, message, clustered_above, clustered_below), g_free);
   return row;
 }
 
@@ -860,12 +944,59 @@ reload (ConversationView *self)
     }
 }
 
+/* a Changed that changed only messages already shown (a live message's words, every few hundred ms while the owner
+ * dictates; a status): only their rows made again, in place, so nothing else is rebuilt and what is in sight stays.
+ * FALSE when the messages shown are no longer the same ones */
+static gboolean
+update_rows (ConversationView *self)
+{
+  SmsStore *store = sms_client_get_store (self->client);
+  g_autoptr(GPtrArray) messages = NULL;
+  GtkWidget *child;
+  guint i, first;
+
+  if (!store)
+    return FALSE;
+  messages = sms_store_list_last_messages (store, self->id, self->shown + 1);
+  if ((messages->len > self->shown) != self->has_older)
+    return FALSE;
+  first = self->has_older ? 1 : 0;
+  for (i = first, child = gtk_widget_get_first_child (self->messages); i < messages->len && child;
+       i++, child = gtk_widget_get_next_sibling (child))
+    if (*(gint64 *) g_object_get_data (G_OBJECT (child), "id") != ((SmsMessage *) messages->pdata[i])->id)
+      return FALSE;
+  if (i < messages->len || child)
+    return FALSE;
+  for (i = first, child = gtk_widget_get_first_child (self->messages); i < messages->len; i++)
+    {
+      SmsMessage *message = messages->pdata[i];
+      gboolean above = i > 0 && clusters (message, messages->pdata[i - 1]);
+      gboolean below = i + 1 < messages->len && clusters (message, messages->pdata[i + 1]);
+      g_autofree char *signature = row_signature (self, message, above, below);
+      GtkWidget *next = gtk_widget_get_next_sibling (child);
+
+      if (g_strcmp0 (signature, g_object_get_data (G_OBJECT (child), "signature")) != 0)
+        {
+          gtk_box_insert_child_after (GTK_BOX (self->messages), make_message (self, message, above, below), child);
+          gtk_box_remove (GTK_BOX (self->messages), child);
+        }
+      child = next;
+    }
+  return TRUE;
+}
+
 static void
 on_changed (SmsClient *client, gint64 conversation, gpointer data)
 {
   ConversationView *self = data;
+  SmsStore *store = sms_client_get_store (client);
 
-  if (conversation == 0 || conversation == self->id)
+  if (conversation != 0 && conversation != self->id)
+    return;
+  /* the same messages: only the ones that changed; else (one came, one went, the conversation went) all again */
+  g_clear_pointer (&self->conversation, sms_conversation_free);
+  self->conversation = store ? sms_store_get (store, self->id) : NULL;
+  if (!self->conversation || !update_rows (self))
     reload (self);
 }
 
