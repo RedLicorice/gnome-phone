@@ -29,10 +29,11 @@ executable('neo-settings',
   'src/ns-sound.c', 'src/ns-apps.c', 'src/ns-shell.c', 'src/ns-fprint.c', 'src/ns-pattern.c', 'src/ns-privacy.c', 'src/ns-system.c', 'src/ns-look.c',
   'src/ns-minerva.c', 'src/ns-avatar.c', 'src/ns-avatar-preview.c', 'src/ns-prompt.c', 'src/ns-events.c', 'src/ns-federation.c', 'src/ns-provider.c', 'src/ns-mc.c', 'src/ns-charge.c', 'src/ns-apikeys.c', 'src/ns-account.c', 'src/ns-ssh.c', 'src/ns-perm.c', 'src/ns-agents.c',
   # the node's assistant ({assistant} in a text), read the way Messaging reads it: its sources, not a copy
-  '../messaging/src/msg-assistant.c', '../messaging/src/sms-provider.c',
+  '../messaging/src/msg-assistant.c', '../messaging/src/sms-provider.c', '../../common/minerva-layers.c',
   resources,
-  include_directories: include_directories('../messaging/src'),
-  c_args: ['-DASSISTANT_FILE="@0@"'.format(get_option('assistant-file'))],
+  include_directories: include_directories('../messaging/src', '../../common'),
+  c_args: ['-DASSISTANT_FILE="@0@"'.format(get_option('assistant-file')),
+           '-DMINERVA_LAYERS_FILE="@0@"'.format(get_option('layers-file'))],
   dependencies: deps,
   install: true)
 install_data('data/de.yesman.NeoSettings.desktop', install_dir: get_option('datadir') / 'applications')
