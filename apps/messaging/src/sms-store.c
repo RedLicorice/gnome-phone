@@ -56,7 +56,10 @@ static const char schema[] =
   "  sms_message_uri TEXT,"
   "  raw_status INT DEFAULT 0,"
   "  retry_start_timestamp INT DEFAULT 0,"
-  "  origin TEXT"
+  "  origin TEXT,"
+  "  live TEXT,"
+  "  live_since INT DEFAULT 0,"
+  "  live_until INT DEFAULT 0"
   ");"
   "CREATE INDEX IF NOT EXISTS index_messages_sort ON messages (conversation_id, received_timestamp);"
   "CREATE INDEX IF NOT EXISTS index_messages_status_seen ON messages (message_status, seen);"
@@ -85,6 +88,31 @@ static const char *const part_columns[] = {
   "quote_ext TEXT", "quote_text TEXT", "edited INT",
 };
 
+/* a live message's (SmsMessage.live): columns added to bugle_db's messages */
+static const char *const live_columns[] = { "live TEXT", "live_since INT DEFAULT 0", "live_until INT DEFAULT 0" };
+
+/* a live message's state words and the statuses they stand for (sms_live_status) */
+static const struct { const char *state; MessageStatus status; } live_states[] = {
+  { "dictating", MESSAGE_STATUS_OUTGOING_DRAFT },
+  { "confirming", MESSAGE_STATUS_OUTGOING_YET_TO_SEND },
+  { "sending", MESSAGE_STATUS_OUTGOING_SENDING },
+  { "sent", MESSAGE_STATUS_OUTGOING_COMPLETE },
+  { "delivered", MESSAGE_STATUS_OUTGOING_DELIVERED },
+  { "failed", MESSAGE_STATUS_OUTGOING_FAILED },
+  { "unheard", MESSAGE_STATUS_OUTGOING_FAILED },
+  { "cancelled", MESSAGE_STATUS_OUTGOING_COMPLETE },
+  { "command", MESSAGE_STATUS_OUTGOING_COMPLETE },
+};
+
+MessageStatus
+sms_live_status (const char *state)
+{
+  for (guint i = 0; state && i < G_N_ELEMENTS (live_states); i++)
+    if (g_str_equal (state, live_states[i].state))
+      return live_states[i].status;
+  return MESSAGE_STATUS_UNKNOWN;
+}
+
 void
 sms_conversation_free (SmsConversation *conversation)
 {
@@ -107,6 +135,7 @@ sms_message_free (SmsMessage *message)
   g_free (message->sms_uri);
   g_free (message->origin);
   g_free (message->reactions);
+  g_free (message->live);
   sms_part_free (message->part);
   g_free (message);
 }
@@ -216,6 +245,29 @@ column_text (sqlite3_stmt *row, int column)
   return g_strdup ((const char *) sqlite3_column_text (row, column));
 }
 
+/* the @columns ("name TYPE") a store made before them lacks, added to @table */
+static void
+add_columns (SmsStore *self, const char *table, const char *const *columns, guint n)
+{
+  for (guint i = 0; i < n; i++)
+    {
+      g_autofree char *name = g_strndup (columns[i], strcspn (columns[i], " "));
+      sqlite3_stmt *has = prepare (self, "SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?");
+
+      if (has)
+        {
+          sqlite3_bind_text (has, 1, table, -1, SQLITE_TRANSIENT);
+          sqlite3_bind_text (has, 2, name, -1, SQLITE_TRANSIENT);
+        }
+      if (query_int (self, has, 1) == 0)
+        {
+          g_autofree char *add = g_strconcat ("ALTER TABLE ", table, " ADD COLUMN ", columns[i], NULL);
+
+          exec (self, add, NULL);
+        }
+    }
+}
+
 SmsStore *
 sms_store_open (const char *path, gboolean read_only, GError **error)
 {
@@ -251,20 +303,9 @@ sms_store_open (const char *path, gboolean read_only, GError **error)
   if (query_int (self, prepare (self, "SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'origin'"), 1) == 0)
     exec (self, "ALTER TABLE messages ADD COLUMN origin TEXT", NULL);
   /* a store made before typed parts: their columns added, every older part a text one */
-  for (guint i = 0; i < G_N_ELEMENTS (part_columns); i++)
-    {
-      g_autofree char *name = g_strndup (part_columns[i], strcspn (part_columns[i], " "));
-      sqlite3_stmt *has = prepare (self, "SELECT COUNT(*) FROM pragma_table_info('parts') WHERE name = ?");
-
-      if (has)
-        sqlite3_bind_text (has, 1, name, -1, SQLITE_TRANSIENT);
-      if (query_int (self, has, 1) == 0)
-        {
-          g_autofree char *add = g_strconcat ("ALTER TABLE parts ADD COLUMN ", part_columns[i], NULL);
-
-          exec (self, add, NULL);
-        }
-    }
+  add_columns (self, "parts", part_columns, G_N_ELEMENTS (part_columns));
+  /* a store made before live messages: their columns added, every older message not live */
+  add_columns (self, "messages", live_columns, G_N_ELEMENTS (live_columns));
   if (user_version == 0)
     {
       g_autofree char *set = g_strdup_printf ("PRAGMA user_version=%d", SCHEMA_VERSION);
@@ -598,15 +639,44 @@ gint64
 sms_store_find_by_uri (SmsStore *self, const char *sms_uri)
 {
   sqlite3_stmt *find = sms_uri && *sms_uri ? prepare (self, "SELECT _id FROM messages WHERE sms_message_uri = ?") : NULL;
-  gint64 id = 0;
 
   if (!find)
     return 0;
   sqlite3_bind_text (find, 1, sms_uri, -1, SQLITE_TRANSIENT);
-  if (sqlite3_step (find) == SQLITE_ROW)
-    id = sqlite3_column_int64 (find, 0);
-  sqlite3_reset (find);
-  return id;
+  /* finalized there: a live message looks itself up at each word dictated */
+  return query_int (self, find, 0);
+}
+
+void
+sms_store_set_live (SmsStore *self, gint64 message_id, const char *state, const char *text, gint64 since,
+                    gint64 until)
+{
+  sqlite3_stmt *live = prepare (self, "UPDATE messages SET live_since = CASE WHEN live IS ?1 THEN live_since ELSE ?2 END,"
+                                      " live = ?1, live_until = ?3 WHERE _id = ?4");
+  sqlite3_stmt *words = text && *text ? prepare (self, "UPDATE parts SET text = ? WHERE message_id = ?") : NULL;
+  g_autoptr(SmsMessage) message = sms_store_get_message (self, message_id);
+
+  if (!live || !message)
+    {
+      sqlite3_finalize (live);
+      sqlite3_finalize (words);
+      return;
+    }
+  bind_text (live, 1, state);
+  sqlite3_bind_int64 (live, 2, state ? since : 0);
+  sqlite3_bind_int64 (live, 3, state ? until : 0);
+  sqlite3_bind_int64 (live, 4, message_id);
+  exec (self, "BEGIN", NULL);
+  run (self, live);
+  if (words)
+    {
+      sqlite3_bind_text (words, 1, text, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_int64 (words, 2, message_id);
+      run (self, words);
+    }
+  /* its words are the conversation's snippet when it is the newest */
+  refresh_conversation (self, message->conversation_id);
+  exec (self, "COMMIT", NULL);
 }
 
 void
@@ -871,7 +941,8 @@ sms_store_get (SmsStore *self, gint64 conversation_id)
   " m.origin, t.kind, t.content_type, t.caption, t.name, t.size, t.duration, t.width, t.height, t.thumbnail," \
   " t.animated, t.view_once, t.latitude, t.longitude, t.url, t.uri, t.waveform, t.transcript, t.quote_ext, t.quote_text," \
   " (SELECT MAX(edited) FROM parts WHERE message_id = m._id)," \
-  " (SELECT group_concat(emoji, '') FROM reactions WHERE message_id = m._id)" \
+  " (SELECT group_concat(emoji, '') FROM reactions WHERE message_id = m._id)," \
+  " m.live, m.live_since, m.live_until" \
   " FROM messages m LEFT JOIN participants p ON p._id = m.sender_id" \
   " LEFT JOIN parts t ON t.message_id = m._id AND t.kind IS NOT NULL"
 
@@ -947,6 +1018,9 @@ list_messages (SmsStore *self, const char *where, gint64 value, guint limit)
       message->part = part_from_row (select);
       message->edited = sqlite3_column_int (select, 31);
       message->reactions = column_text (select, 32);
+      message->live = column_text (select, 33);
+      message->live_since = sqlite3_column_int64 (select, 34);
+      message->live_until = sqlite3_column_int64 (select, 35);
       g_ptr_array_add (messages, message);
     }
   sqlite3_finalize (select);
@@ -982,7 +1056,8 @@ sms_store_list_unseen (SmsStore *self)
 GPtrArray *
 sms_store_list_unsent (SmsStore *self)
 {
-  return list_messages (self, "m.message_status IN (4, 5, 6, 7)", 0, 0);
+  /* a live message (dictated by voice) is the voice's to send: never sent again from here */
+  return list_messages (self, "m.message_status IN (4, 5, 6, 7) AND m.live IS NULL", 0, 0);
 }
 
 GHashTable *

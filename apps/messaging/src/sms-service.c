@@ -100,6 +100,8 @@ static const char introspection[] =
   "      <arg name='destination' type='s'/><arg name='text' type='s'/><arg name='origin' type='s'/></signal>"
   "    <method name='Delivered'><arg name='message' type='x' direction='in'/>"
   "      <arg name='ok' type='b' direction='in'/></method>"
+  /* the agent has it (its turn started): a message Delivered took shows as delivered */
+  "    <method name='Reached'><arg name='message' type='x' direction='in'/></method>"
   /* Send, naming who wrote it: 'owner' (Giuseppe, in Messages) or 'minerva' (the agent, through a tool). Only a
    * provider's daemon reads it, to apply its write scope to Minerva alone */
   "    <method name='SendAs'><arg name='conversation' type='x' direction='in'/>"
@@ -139,6 +141,14 @@ static const char introspection[] =
    * (made if new) without Outgoing: it reached the agent already, nothing is delivered */
   "    <method name='Record'><arg name='destination' type='s' direction='in'/>"
   "      <arg name='text' type='s' direction='in'/><arg name='message' type='x' direction='out'/></method>"
+  /* what the owner is saying to an agent ('agent:<name>') by voice, shown live in its conversation (made if new) as
+   * one message per @ext (the voice's id for it; a second call updates it): its @state (dictating, confirming,
+   * sending, sent, delivered, failed, unheard, cancelled, command), its @text so far ('' keeps it), the state's
+   * deadline @until (Unix ms, 0 none) and who wrote it, @origin ('' the owner). No Outgoing, no notification */
+  "    <method name='Live'><arg name='destination' type='s' direction='in'/>"
+  "      <arg name='ext' type='s' direction='in'/><arg name='state' type='s' direction='in'/>"
+  "      <arg name='text' type='s' direction='in'/><arg name='until' type='x' direction='in'/>"
+  "      <arg name='origin' type='s' direction='in'/><arg name='message' type='x' direction='out'/></method>"
   /* a message from an agent ('agent:<name>'), kept as one that came into its conversation (made if new) */
   "    <method name='Inject'><arg name='destination' type='s' direction='in'/>"
   "      <arg name='text' type='s' direction='in'/><arg name='message' type='x' direction='out'/></method>"
@@ -1347,6 +1357,45 @@ on_method_call (GDBusConnection *bus, const char *sender, const char *path, cons
         }
       return;
     }
+  if (g_str_equal (method, "Live"))
+    {
+      const char *destination, *ext, *state, *origin;
+      gint64 until, now = g_get_real_time () / 1000, message = 0;
+      g_autoptr(SmsMessage) row = NULL;
+      MessageStatus status;
+
+      g_variant_get (parameters, "(&s&s&s&sx&s)", &destination, &ext, &state, &text, &until, &origin);
+      const char *const one[] = { destination, NULL };
+      status = sms_live_status (state);
+      if (!sms_agent_name (destination) || !*ext || status == MESSAGE_STATUS_UNKNOWN)
+        {
+          g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                                                 "Not an agent's destination, no ext or no such state");
+          return;
+        }
+      /* the first word of it: kept as the owner's (or @origin's), read and seen, the conversation's draft left alone */
+      if (!(id = sms_store_get_conversation (self->store, one))
+          || (!(message = sms_store_find_by_uri (self->store, ext))
+              && !(message = sms_store_add_sent (self->store, destination, text, now, ext, *origin ? origin : NULL,
+                                                 NULL)))
+          || !(row = sms_store_get_message (self->store, message)))
+        {
+          g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR, G_DBUS_ERROR_FAILED, "Not kept");
+          return;
+        }
+      /* an id another conversation's message has (a provider's) is not this one's */
+      if (row->conversation_id != id)
+        {
+          g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                                                 "Message %s is not in the agent's conversation", ext);
+          return;
+        }
+      sms_store_set_live (self->store, message, state, text, now, until);
+      /* the status last, through set_status: one Changed shows the state and the words together; sent is its time */
+      set_status (self, row, status, 0, g_str_equal (state, "sent") ? now : 0);
+      g_dbus_method_invocation_return_value (invocation, g_variant_new ("(x)", message));
+      return;
+    }
   if (g_str_equal (method, "Sent") || g_str_equal (method, "SentMedia"))
     {
       const char *destination, *ext, *origin;
@@ -1439,6 +1488,19 @@ on_method_call (GDBusConnection *bus, const char *sender, const char *path, cons
                      id);
       else
         agent_delivered (self, message, flag);
+    }
+  else if (g_str_equal (method, "Reached"))
+    {
+      g_autoptr(SmsMessage) message = NULL;
+
+      g_variant_get (parameters, "(x)", &id);
+      message = sms_store_get_message (self->store, id);
+      if (!message || message->status != MESSAGE_STATUS_OUTGOING_COMPLETE
+          || !is_delivery_conversation (self, message->conversation_id))
+        g_set_error (&error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS, "No sent message to an agent %" G_GINT64_FORMAT,
+                     id);
+      else
+        set_status (self, message, MESSAGE_STATUS_OUTGOING_DELIVERED, 0, 0);
     }
   else if (g_str_equal (method, "MarkRead"))
     {

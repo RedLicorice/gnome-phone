@@ -484,6 +484,17 @@ def run_agents(t):
     check('Record for a destination that is no agent\'s: InvalidArgs',
           t.error('Record', (ANNA, 'Hello'), '(ss)') == invalid)
 
+    # what the owner is dictating, live: one message per voice id, its state ending as sent; no Outgoing
+    live = [t.service('Live', (AGENT, 'voice-1', state, words, until, ''), '(ssssxs)')[0]
+            for state, words, until in (('dictating', 'Che', 0), ('confirming', 'Che tempo fa?', 1), ('sent', '', 0))]
+    check('Live: one message per voice id, sent with its last words, no Outgoing',
+          len(set(live)) == 1 and t.status(live[0]) == COMPLETE and not t.outgoing
+          and t.query('SELECT p.text, m.live FROM messages m JOIN parts p ON p.message_id = m._id'
+                      ' WHERE m.sms_message_uri = ?', 'voice-1') == [('Che tempo fa?', 'sent')],
+          (live, t.status(live[0]), t.outgoing))
+    check('Live with a state that is none: InvalidArgs',
+          t.error('Live', (AGENT, 'voice-1', 'shouting', '', 0, ''), '(ssssxs)') == invalid)
+
     # sending, with no modem
     message = t.service('Send', (minerva, 'Come stai?'), '(xs)')[0]
     t.wait('Send with no modem: Outgoing, with its ids', lambda: (message, minerva, AGENT, 'Come stai?', 'owner') in t.outgoing)

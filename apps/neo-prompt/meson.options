@@ -1,0 +1,3 @@
+# the configuration layers' folders (Minerva's docs/packaging.md, "Configuration"; minerva-base installs the file)
+option('layers-file', type: 'string', value: '/usr/lib/minerva/layers.conf',
+       description: 'The file naming the configuration layer folders, lowest first')

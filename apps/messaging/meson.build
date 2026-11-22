@@ -14,6 +14,12 @@ datadir = get_option('prefix') / get_option('datadir')
 # Dialer share them through the platform): built from its sources, not copied
 dialer = include_directories('../dialer/src')
 store = static_library('store', 'src/sms-store.c', dependencies: [gio, sqlite])
+# the configuration layers (Minerva's docs/packaging.md, "Configuration"): shipped defaults, the device's, /etc, the
+# owner's changed keys; the reader is Minerva's own (common/minerva-layers.c, vendored)
+layers = static_library('layers', '../../common/minerva-layers.c', dependencies: [gio],
+                        c_args: ['-DMINERVA_LAYERS_FILE="@0@"'.format(get_option('layers-file'))])
+provider = static_library('provider', 'src/sms-provider.c', link_with: layers,
+                          include_directories: include_directories('../../common'), dependencies: [gio])
 phone = static_library('phone', '../dialer/src/phone-number.c', '../dialer/src/contacts.c', '../dialer/src/phone.c',
                        '../dialer/src/notifier.c', '../dialer/src/blocked-numbers.c', include_directories: dialer,
                        dependencies: [gio, ebook, sqlite],
@@ -21,9 +27,9 @@ phone = static_library('phone', '../dialer/src/phone-number.c', '../dialer/src/c
 
 # the service: the messages with the app closed, taking them off the modem, sending, the notifications
 md4c = dependency('md4c')
-executable('neo-messaging-sms', 'src/sms-service.c', 'src/sms-modem.c', 'src/sms-provider.c', 'src/msg-markdown.c',
+executable('neo-messaging-sms', 'src/sms-service.c', 'src/sms-modem.c', 'src/msg-markdown.c',
            'src/msg-callers.c', c_args: ['-DCALLERS_FILE="@0@"'.format(get_option('callers-file'))],
-           link_with: [store, phone], include_directories: dialer, dependencies: [gio, ebook, md4c], install: true)
+           link_with: [store, phone, provider], include_directories: dialer, dependencies: [gio, ebook, md4c], install: true)
 
 # the app: the conversation list, a conversation, the contact picker
 gnome = import('gnome')
@@ -33,10 +39,10 @@ executable('neo-messaging', 'src/messaging-main.c', 'src/messaging-window.c', 's
            'src/blocked-contacts.c', 'src/people-options.c', 'src/msg-settings.c', 'src/msg-directory.c', 'src/msg-sound.c',
            'src/conversation-list.c', 'src/conversation-view.c', 'src/contact-picker.c', 'src/msg-action-bar.c',
            'src/msg-add-contact.c', 'src/msg-avatar.c', 'src/msg-bubble.c', 'src/msg-dates.c', 'src/msg-image.c',
-           'src/msg-markdown.c', 'src/msg-media.c', 'src/msg-voice.c', 'src/msg-earpiece.c', 'src/msg-people.c', 'src/msg-assistant.c', 'src/sms-provider.c', 'src/msg-swipe.c', 'src/sms-client.c',
+           'src/msg-markdown.c', 'src/msg-media.c', 'src/msg-voice.c', 'src/msg-earpiece.c', 'src/msg-people.c', 'src/msg-assistant.c', 'src/msg-swipe.c', 'src/sms-client.c',
            'src/sms-segments.c',
            '../dialer/src/popup-menu.c', '../dialer/src/contacts-app.c', '../dialer/src/app-action.c', resources,
-           link_with: [store, phone],
+           link_with: [store, phone, provider],
            include_directories: dialer, install: true,
            c_args: ['-DSOUNDS_DIR="@0@"'.format(datadir / 'neo-messaging/sounds'),
                     '-DASSISTANT_FILE="@0@"'.format(get_option('assistant-file'))],
@@ -58,14 +64,15 @@ install_data('data/sounds/message_sent.wav', install_dir: datadir / 'neo-messagi
 gnome.post_install(glib_compile_schemas: true, gtk_update_icon_cache: true, update_desktop_database: true)
 
 # a try on the phone, not a test (tests/try-earpiece.py): the earpiece by proximity with the real call audio
-executable('try-earpiece', 'tests/try-earpiece.c', 'src/msg-earpiece.c', 'src/sms-provider.c',
+executable('try-earpiece', 'tests/try-earpiece.c', 'src/msg-earpiece.c', link_with: provider,
            dependencies: [gio])
 test('sms-store', executable('test-sms-store', 'tests/test-sms-store.c', link_with: store, dependencies: [gio]))
 test('sms-segments', executable('test-sms-segments', 'tests/test-sms-segments.c', 'src/sms-segments.c',
                                 dependencies: [gio]))
 test('msg-markdown', executable('test-msg-markdown', 'tests/test-msg-markdown.c', 'src/msg-markdown.c',
                                  include_directories: 'src', dependencies: [gio, md4c]))
-test('sms-group', executable('test-sms-group', 'tests/test-sms-group.c', 'src/sms-provider.c', dependencies: [gio]))
+test('sms-group', executable('test-sms-group', 'tests/test-sms-group.c', link_with: provider, dependencies: [gio]))
+test('sms-layers', executable('test-sms-layers', 'tests/test-sms-layers.c', link_with: provider, dependencies: [gio]))
 # the message flows end to end, against a mock modem and notification server on buses of their own
 test('sms-flow', find_program('python3'), timeout: 120,
      args: [files('tests/test-sms.py'), meson.current_build_dir(), meson.current_source_dir()])

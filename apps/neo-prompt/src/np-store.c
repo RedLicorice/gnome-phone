@@ -4,7 +4,14 @@
 #include <string.h>
 #include <glib/gstdio.h>
 
+#include "minerva-layers.h"
+
 #define CONF_DEFAULT "~/.config/minerva/neo-prompt.json"
+/* "{assistant}" in the registry's and the texts' files is her name, from assistant.conf (Minerva's own file) */
+#define ASSISTANT_TOKEN    "{assistant}"
+#define ASSISTANT_CONF     "assistant.conf"
+#define ASSISTANT_GROUP    "assistant"
+#define ASSISTANT_NAME_KEY "name"
 
 static const char *
 jstr (JsonObject *o, const char *key)
@@ -58,6 +65,112 @@ json_file_object (const char *path)
   if (!JSON_NODE_HOLDS_OBJECT (json_parser_get_root (parser)))
     return NULL;
   return json_object_ref (json_node_get_object (json_parser_get_root (parser)));
+}
+
+/* src's members over dst's, objects merged recursively, anything else replaced (minerva_layers.read_json) */
+static void
+merge_objects (JsonObject *dst, JsonObject *src)
+{
+  g_autoptr(GList) members = json_object_get_members (src);
+
+  for (GList *l = members; l; l = l->next)
+    {
+      JsonNode *value = json_object_get_member (src, l->data);
+
+      if (JSON_NODE_HOLDS_OBJECT (value) && json_object_has_member (dst, l->data)
+          && JSON_NODE_HOLDS_OBJECT (json_object_get_member (dst, l->data)))
+        merge_objects (json_object_get_object_member (dst, l->data), json_node_get_object (value));
+      else
+        json_object_set_member (dst, l->data, json_node_copy (value));
+    }
+}
+
+/* the file at path, read in its configuration layers when it is the owner's file of one of Minerva's names
+ * (Minerva's docs/packaging.md, "Configuration": the package's defaults, the device's, /etc, the owner's changed
+ * keys), else that file alone (NEO_PROMPT_CONF, a path of the configuration's own) */
+static JsonObject *
+layered_object (const char *path)
+{
+  g_autofree char *expanded = np_path_expand (path);
+  g_autofree char *name = expanded ? g_path_get_basename (expanded) : NULL;
+  g_autofree char *owner = name ? minerva_layers_user_file (name) : NULL;
+  g_auto(GStrv) files = NULL;
+  JsonObject *merged = NULL;
+
+  if (!owner || g_strcmp0 (owner, expanded) != 0)
+    return json_file_object (path);
+  files = minerva_layers_files (name, TRUE);
+  for (guint i = 0; files[i]; i++)
+    {
+      g_autoptr(JsonObject) layer = json_file_object (files[i]);
+
+      if (!layer)
+        continue;
+      if (!merged)
+        merged = json_object_ref (layer);
+      else
+        merge_objects (merged, layer);
+    }
+  return merged;
+}
+
+/* every string of node with "{assistant}" as her name (assistant.conf [assistant] name, in its layers) */
+static void
+fill_assistant (JsonNode *node, const char *assistant)
+{
+  if (JSON_NODE_HOLDS_OBJECT (node))
+    {
+      g_autoptr(GList) members = json_object_get_members (json_node_get_object (node));
+
+      for (GList *l = members; l; l = l->next)
+        fill_assistant (json_object_get_member (json_node_get_object (node), l->data), assistant);
+    }
+  else if (JSON_NODE_HOLDS_ARRAY (node))
+    {
+      JsonArray *array = json_node_get_array (node);
+
+      for (guint i = 0; i < json_array_get_length (array); i++)
+        fill_assistant (json_array_get_element (array, i), assistant);
+    }
+  else if (JSON_NODE_HOLDS_VALUE (node) && json_node_get_value_type (node) == G_TYPE_STRING
+           && strstr (json_node_get_string (node), ASSISTANT_TOKEN))
+    {
+      g_autoptr(GString) text = g_string_new (json_node_get_string (node));
+
+      g_string_replace (text, ASSISTANT_TOKEN, assistant, 0);
+      json_node_set_string (node, text->str);
+    }
+}
+
+/* her name for "{assistant}": assistant.conf [assistant] name in its layers; NULL leaves the token */
+static char *
+assistant_name (void)
+{
+  g_auto(GStrv) files = minerva_layers_files (ASSISTANT_CONF, TRUE);
+  g_autoptr(GKeyFile) conf = minerva_layers_load ((const char *const *) files);
+  g_autofree char *name = conf ? g_key_file_get_value (conf, ASSISTANT_GROUP, ASSISTANT_NAME_KEY, NULL) : NULL;
+  char *cut;
+
+  /* the value as configparser reads it: an inline ";" comment is not part of it */
+  if (name && (cut = strstr (name, " ;")))
+    *cut = '\0';
+  return name && *g_strstrip (name) ? g_steal_pointer (&name) : NULL;
+}
+
+/* a layered file whose texts name her */
+static JsonObject *
+named_object (const char *path)
+{
+  JsonObject *o = layered_object (path);
+  g_autofree char *assistant = o ? assistant_name () : NULL;
+
+  if (o && assistant)
+    {
+      g_autoptr(JsonNode) node = json_node_init_object (json_node_alloc (), o);
+
+      fill_assistant (node, assistant);
+    }
+  return o;
 }
 
 const char *
@@ -378,7 +491,7 @@ np_store_new (const char *conf_path)
   g_autofree char *path = np_path_expand (conf_path && *conf_path ? conf_path
                                           : g_getenv ("NEO_PROMPT_CONF") ? g_getenv ("NEO_PROMPT_CONF")
                                           : CONF_DEFAULT);
-  g_autoptr(JsonObject) conf = json_file_object (path);
+  g_autoptr(JsonObject) conf = layered_object (path);
   JsonObject *paths = object_of (conf, "paths");
   JsonObject *limits = object_of (conf, "limits");
 
@@ -433,14 +546,14 @@ np_store_new (const char *conf_path)
   self->conf.block_order = conf && json_object_has_member (conf, "block_order")
                            && JSON_NODE_HOLDS_ARRAY (json_object_get_member (conf, "block_order"))
                            ? json_array_ref (json_object_get_array_member (conf, "block_order")) : NULL;
-  self->ui = self->conf.ui_path ? json_file_object (self->conf.ui_path) : NULL;
+  self->ui = self->conf.ui_path ? named_object (self->conf.ui_path) : NULL;
   if (!self->ui)
     self->ui = json_object_new ();
 
   self->docs = g_ptr_array_new_with_free_func ((GDestroyNotify) np_doc_free);
   if (self->conf.registry)
     {
-      g_autoptr(JsonObject) registry = json_file_object (self->conf.registry);
+      g_autoptr(JsonObject) registry = named_object (self->conf.registry);
       JsonArray *docs = registry ? json_object_get_array_member (registry, "docs") : NULL;
 
       for (guint i = 0; docs && i < json_array_get_length (docs); i++)

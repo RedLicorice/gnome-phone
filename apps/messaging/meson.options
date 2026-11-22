@@ -4,3 +4,6 @@ option('callers-file', type: 'string', value: '/etc/phosh/callers.ini',
 # who this node's assistant is (Minerva's assistant/assistant.conf): her conversation is listed first, and shows her contact
 option('assistant-file', type: 'string', value: '/etc/minerva/assistant.conf',
        description: 'The node assistant file ([assistant] name)')
+# the configuration layers' folders (Minerva's docs/packaging.md, "Configuration"; minerva-base installs the file)
+option('layers-file', type: 'string', value: '/usr/lib/minerva/layers.conf',
+       description: 'The file naming the configuration layer folders, lowest first')

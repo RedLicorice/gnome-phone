@@ -504,3 +504,22 @@
   font-style: italic;
   opacity: 0.7;
 }
+
+/* a message dictated to an agent (conversation-view.c): the thin bar of the time left before it goes, and one called
+ * off */
+.msg-live-progress {
+  margin-top: 4px;
+}
+
+.msg-live-progress trough,
+.msg-live-progress progress {
+  min-height: 2px;
+}
+
+.outgoing .msg-live-progress progress {
+  background-color: rgba(50, 50, 50, 0.6);
+}
+
+.msg-live-cancelled {
+  opacity: 0.5;
+}
