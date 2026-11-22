@@ -39,11 +39,11 @@ executable('neo-messaging', 'src/messaging-main.c', 'src/messaging-window.c', 's
            'src/blocked-contacts.c', 'src/people-options.c', 'src/msg-settings.c', 'src/msg-directory.c', 'src/msg-sound.c',
            'src/conversation-list.c', 'src/conversation-view.c', 'src/contact-picker.c', 'src/msg-action-bar.c',
            'src/msg-add-contact.c', 'src/msg-avatar.c', 'src/msg-bubble.c', 'src/msg-dates.c', 'src/msg-image.c',
-           'src/msg-markdown.c', 'src/msg-media.c', 'src/msg-voice.c', 'src/msg-earpiece.c', 'src/msg-people.c', 'src/msg-assistant.c', 'src/msg-swipe.c', 'src/sms-client.c',
+           'src/msg-markdown.c', 'src/msg-media.c', 'src/msg-voice.c', 'src/msg-agent-output.c', 'src/msg-people.c', 'src/msg-assistant.c', 'src/msg-swipe.c', 'src/sms-client.c',
            'src/sms-segments.c',
            '../dialer/src/popup-menu.c', '../dialer/src/contacts-app.c', '../dialer/src/app-action.c', resources,
            link_with: [store, phone, provider],
-           include_directories: dialer, install: true,
+           include_directories: [dialer, include_directories('../../common')], install: true,
            c_args: ['-DSOUNDS_DIR="@0@"'.format(datadir / 'neo-messaging/sounds'),
                     '-DASSISTANT_FILE="@0@"'.format(get_option('assistant-file'))],
            dependencies: [gio, ebook, gtk, dependency('json-glib-1.0'), dependency('neo-1'), dependency('spongy-gtk-1'),
@@ -63,9 +63,6 @@ install_data('data/de.yesman.Messaging.gschema.xml', install_dir: datadir / 'gli
 install_data('data/sounds/message_sent.wav', install_dir: datadir / 'neo-messaging/sounds')
 gnome.post_install(glib_compile_schemas: true, gtk_update_icon_cache: true, update_desktop_database: true)
 
-# a try on the phone, not a test (tests/try-earpiece.py): the earpiece by proximity with the real call audio
-executable('try-earpiece', 'tests/try-earpiece.c', 'src/msg-earpiece.c', link_with: provider,
-           dependencies: [gio])
 test('sms-store', executable('test-sms-store', 'tests/test-sms-store.c', link_with: store, dependencies: [gio]))
 test('sms-segments', executable('test-sms-segments', 'tests/test-sms-segments.c', 'src/sms-segments.c',
                                 dependencies: [gio]))

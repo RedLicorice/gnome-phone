@@ -4,7 +4,7 @@
 
 #include <gst/gst.h>
 
-#include "msg-earpiece.h"
+#include "msg-agent-output.h"
 
 /* a bar fills this share of its step of the waveform: the rest is the gap to the next */
 #define BAR_SHARE 0.6
@@ -126,7 +126,6 @@ stop (void)
   Voice *voice = current;
 
   current = NULL;
-  msg_earpiece_stop ();
   if (player)
     gst_element_set_state (player, GST_STATE_NULL);
   if (!voice)
@@ -139,12 +138,6 @@ stop (void)
 }
 
 /* a call came while a note played at the ear */
-static void
-stop_for_call (gpointer data)
-{
-  stop ();
-}
-
 static gboolean
 on_bus (GstBus *bus, GstMessage *message, gpointer data)
 {
@@ -160,10 +153,27 @@ on_bus (GstBus *bus, GstMessage *message, gpointer data)
   return G_SOURCE_CONTINUE;
 }
 
+/* the note that starts plays where the agents' audio does (msg-agent-output.h), the owner's choice read now */
+static void
+route (void)
+{
+  g_autoptr(GstElement) sink = NULL;
+  GstStructure *props;
+
+  g_object_get (player, "audio-sink", &sink, NULL);
+  if (!sink || !g_object_class_find_property (G_OBJECT_GET_CLASS (sink), "stream-properties"))
+    return;
+  props = msg_agent_output_props ();
+  g_object_set (sink, "stream-properties", props, NULL);
+  if (props)
+    gst_structure_free (props);
+}
+
 static gboolean
 make_player (void)
 {
   g_autoptr(GstBus) bus = NULL;
+  GstElement *sink;
 
   if (player)
     return TRUE;
@@ -172,6 +182,9 @@ make_player (void)
   if (!(player = gst_element_factory_make ("playbin", NULL)))
     return FALSE;
   gst_util_set_object_arg (G_OBJECT (player), "flags", "audio");
+  /* a pulsesink of its own: the note's stream carries the agents' properties (route) */
+  if ((sink = gst_element_factory_make ("pulsesink", NULL)))
+    g_object_set (player, "audio-sink", sink, NULL);
   bus = gst_element_get_bus (player);
   gst_bus_add_watch (bus, on_bus, NULL);
   return TRUE;
@@ -192,10 +205,6 @@ msg_voice_toggle (GtkWidget *widget)
   if (voice == current)
     {
       voice->paused = !voice->paused;
-      if (voice->paused)
-        msg_earpiece_stop ();
-      else
-        msg_earpiece_start (G_CALLBACK (stop_for_call), NULL);
       gst_element_set_state (player, voice->paused ? GST_STATE_PAUSED : GST_STATE_PLAYING);
       set_icon (voice, !voice->paused);
       if (voice->paused)
@@ -208,8 +217,7 @@ msg_voice_toggle (GtkWidget *widget)
   if (!make_player () || !(uri = g_filename_to_uri (voice->path, NULL, NULL)))
     return;
   current = voice;
-  /* held to the ear, from the earpiece: before the first sound */
-  msg_earpiece_start (G_CALLBACK (stop_for_call), NULL);
+  route ();
   g_object_set (player, "uri", uri, NULL);
   gst_element_set_state (player, GST_STATE_PLAYING);
   set_icon (voice, TRUE);
@@ -224,7 +232,6 @@ voice_free (Voice *voice)
     {
       current = NULL;
       gst_element_set_state (player, GST_STATE_NULL);
-      msg_earpiece_stop ();
     }
   g_free (voice->path);
   g_clear_pointer (&voice->waveform, g_bytes_unref);
