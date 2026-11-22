@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Telecomando
+Comment=Il telefono come telecomando a infrarossi: TV e altri apparecchi, tasti e macro
+Exec=neo-remote
+Icon=de.yesman.NeoRemote
+Terminal=false
+StartupNotify=false
+Categories=Utility;GTK;
+Keywords=Telecomando;Infrarossi;IR;TV;Remote;
+X-Purism-FormFactor=Workstation;Mobile;

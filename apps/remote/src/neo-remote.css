@@ -1,0 +1,121 @@
+/* Neo Remote's own rules, over libneo's (neo.css). Colours are libneo's roles, never values: the looks recolor them.
+ * Sizes are dp (one CSS pixel is one dp on the phone). */
+
+window.neo.nr {
+  background-color: @neo_surface;
+}
+
+.nr-card {
+  margin: 6px 16px 12px 16px;
+  border-radius: 20px;
+  padding: 4px 0;
+}
+
+.nr-group {
+  font-size: 13px;
+  font-weight: 800;
+  color: @neo_on_surface_variant;
+  margin: 10px 16px 2px 20px;
+}
+
+.nr-row {
+  padding: 12px 16px;
+}
+
+.nr-row-title {
+  font-size: 16px;
+  font-weight: 800;
+  color: @neo_on_surface;
+}
+
+.nr-sub {
+  font-size: 13px;
+  font-weight: 700;
+  color: @neo_on_surface_variant;
+}
+
+.nr-empty {
+  margin: 32px 24px;
+}
+
+/* --- the button grid of a remote */
+
+.nr-grid {
+  margin: 12px;
+}
+
+.nr-key {
+  min-height: 64px;
+  border-radius: 20px;
+  background-color: @neo_surface_container_highest;
+  margin: 6px;
+}
+
+.nr-key label {
+  font-size: 15px;
+  font-weight: 800;
+  color: @neo_on_surface;
+  margin: 8px;
+}
+
+.nr-key.nr-power {
+  background-color: @neo_error_container;
+}
+
+.nr-key.nr-power label {
+  color: @neo_white;
+}
+
+.nr-recording {
+  color: @neo_error;
+}
+
+/* --- the scan */
+
+.nr-scan {
+  margin: 24px;
+}
+
+.nr-scan-count {
+  font-size: 32px;
+  font-weight: 800;
+  color: @neo_on_surface;
+}
+
+.nr-scan-question {
+  font-size: 18px;
+  font-weight: 700;
+  color: @neo_on_surface;
+}
+
+.nr-answer {
+  min-height: 56px;
+  border-radius: 28px;
+  background-color: @neo_primary_container;
+}
+
+.nr-answer label {
+  font-size: 16px;
+  font-weight: 800;
+  color: @neo_on_primary_container;
+}
+
+.nr-answer.nr-yes {
+  background-color: @neo_primary;
+}
+
+.nr-answer.nr-yes label {
+  color: @neo_on_primary;
+}
+
+.nr-answer:disabled {
+  opacity: 0.38;
+}
+
+.nr-entry {
+  margin: 12px 16px;
+}
+
+.nr-form entry {
+  margin: 4px 0;
+}

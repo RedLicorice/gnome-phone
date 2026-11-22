@@ -463,3 +463,15 @@ Description: NASA solar-system parallax wallpaper for the Neo launcher
  launcher: the Sun, Earth, the Moon, Mars, Saturn and Jupiter from NASA's
  public-domain images over a drawn star field. Installing it makes it the
  default wallpaper; GNOME Settings' Background panel lists it too.
+
+Package: neo-remote
+Architecture: any
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+Recommends: minerva-ir,
+Description: infrared remote app for GNOME Phone
+ Neo Remote turns a phone with an IR LED into a remote for the TV and any
+ other device: remotes found by brand (each Power code of the brand tried in
+ turn until the device reacts) or by model in the code database, a grid of
+ buttons per remote, buttons of your own, and macros recorded by tapping.
+ Everything infrared is Minerva's minerva-ir service (org.minerva.Ir1).

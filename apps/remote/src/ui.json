@@ -1,0 +1,90 @@
+{
+  "_doc": "Neo Remote's words, icons and settings: data, the program holds none. The IR settings (device, timing of the scan) are minerva-ir's ir.conf; the service hands the scan's timing over with each step.",
+  "conf": {
+    "dbus_timeout_ms": 120000,
+    "macro_wait_s": 1.0,
+    "grid_columns": 3
+  },
+  "icons": {
+    "back": "go-previous-symbolic",
+    "add": "list-add-symbolic",
+    "record": "media-record-symbolic",
+    "stop": "media-playback-stop-symbolic",
+    "delete": "user-trash-symbolic",
+    "search": "system-search-symbolic"
+  },
+  "app": { "name": "Telecomando" },
+  "home": {
+    "remotes": "Telecomandi",
+    "macros": "Macro",
+    "no_remotes": "Nessun telecomando. Tocca + e scegli la marca del tuo apparecchio.",
+    "buttons": "%d tasti",
+    "steps": "%d passi",
+    "macro_done": "Macro «%s» eseguita",
+    "macro_deleted": "Macro «%s» eliminata"
+  },
+  "add": {
+    "title": "Nuovo telecomando",
+    "scan": "Cerca per marca",
+    "db": "Cerca il modello",
+    "empty": "Telecomando vuoto",
+    "cancel": "Annulla"
+  },
+  "name": {
+    "title": "Nome",
+    "ok": "Salva",
+    "cancel": "Annulla",
+    "remote_hint": "Es. TV del soggiorno",
+    "macro_hint": "Es. Serata film"
+  },
+  "remote": {
+    "empty": "Nessun tasto. Tocca + per aggiungerne uno.",
+    "edit_title": "Tasto «%s»",
+    "delete_button": "Elimina tasto",
+    "delete_remote": "Eliminare il telecomando «%s»?",
+    "delete": "Elimina",
+    "cancel": "Annulla",
+    "sent": "%s inviato",
+    "record_on": "Registrazione macro: tocca i tasti in ordine",
+    "record_step": "%d passi registrati",
+    "record_wait": "Pausa",
+    "record_empty": "Nessun passo registrato"
+  },
+  "button": {
+    "title": "Nuovo tasto",
+    "name": "Nome",
+    "protocol": "Protocollo (es. NEC, Samsung32; vuoto per codice grezzo)",
+    "address": "Indirizzo (es. 0x07)",
+    "command": "Comando (es. 0x02)",
+    "frequency": "Frequenza portante, Hz (codice grezzo)",
+    "raw": "Impulsi e pause in µs (codice grezzo)",
+    "ok": "Salva",
+    "cancel": "Annulla"
+  },
+  "brands": {
+    "title": "Marca",
+    "filter": "Cerca la marca",
+    "none": "Nessuna marca trovata"
+  },
+  "scan": {
+    "title": "Cerca per marca",
+    "point": "Punta la parte alta del telefono verso l'apparecchio.",
+    "count": "Codice %d di %d",
+    "question": "L'apparecchio si è acceso o spento?",
+    "wait": "Invio…",
+    "yes": "Sì, ha reagito",
+    "next": "No, prossimo",
+    "resend": "Invia di nuovo",
+    "none": "Nessun codice di questa marca ha funzionato. Prova «Cerca il modello».",
+    "saved": "Salvato come «%s»"
+  },
+  "search": {
+    "title": "Cerca il modello",
+    "hint": "Marca e modello, es. samsung bn59",
+    "none": "Nessun risultato",
+    "imported": "Aggiunto «%s»"
+  },
+  "errors": {
+    "service": "Il servizio del telecomando non risponde: %s"
+  }
+}

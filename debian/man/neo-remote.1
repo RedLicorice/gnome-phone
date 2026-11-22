@@ -1,0 +1,17 @@
+.TH NEO-REMOTE 1 "2026-11-22" "gnome-phone" "GNOME Phone"
+.SH NAME
+neo-remote \- infrared remote app for GNOME Phone
+.SH SYNOPSIS
+.B neo-remote
+.SH DESCRIPTION
+Turns the phone's IR LED into a remote. A remote is added by brand (the brand's Power codes are sent one at a time;
+the first one the device reacts to keeps that remote with all its buttons), by model from the code database, or empty.
+A remote's buttons are a grid: a tap sends, a long press deletes; + adds a button by protocol, address and command or
+as raw timings. The record button records a macro from the buttons tapped next (Pause adds a wait); macros run from the
+home page, a long press deletes one.
+.PP
+Everything infrared is the session service org.minerva.Ir1 of Minerva's minerva-ir package (its settings in
+.IR ir.conf ).
+The app's words, icons and settings are its ui.json.
+.SH SEE ALSO
+minerva-ir(1), ir-ctl(1)

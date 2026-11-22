@@ -6,7 +6,7 @@
 
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 
-APPS := calculator calendar clock compass contacts dialer messaging browser settings weather camera files
+APPS := calculator calendar clock compass contacts dialer messaging browser settings weather camera files remote
 # build directory:source directory
 PROJECTS := top:. libneo:libneo extension:extension session:session $(foreach a,$(APPS),$(a):apps/$(a))
 BUILDDIRS := $(foreach p,$(PROJECTS),obj-$(firstword $(subst :, ,$(p))))
