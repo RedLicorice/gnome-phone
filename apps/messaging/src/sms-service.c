@@ -1242,7 +1242,7 @@ on_method_call (GDBusConnection *bus, const char *sender, const char *path, cons
         {
           SmsMessage *m = messages->pdata[i];
 
-          g_variant_builder_add (&out, "(xbsx)", m->id, !MESSAGE_STATUS_IS_INCOMING (m->status) && !m->origin,
+          g_variant_builder_add (&out, "(xbsx)", m->id, sms_message_is_owners (m),
                                  m->text ? m->text : "", m->received);
         }
       g_dbus_method_invocation_return_value (invocation, g_variant_new ("(a(xbsx))", &out));

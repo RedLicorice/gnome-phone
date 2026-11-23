@@ -140,6 +140,12 @@ sms_message_free (SmsMessage *message)
   g_free (message);
 }
 
+gboolean
+sms_message_is_owners (const SmsMessage *message)
+{
+  return !MESSAGE_STATUS_IS_INCOMING (message->status) && (!message->origin || message->live);
+}
+
 void
 sms_part_free (SmsPart *part)
 {

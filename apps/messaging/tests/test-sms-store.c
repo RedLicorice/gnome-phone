@@ -206,6 +206,7 @@ test_origin (void)
   SmsMessage *message = sms_store_get_message (store, id);
 
   g_assert_cmpstr (message->origin, ==, "agent:agent/pc-test");
+  g_assert_false (sms_message_is_owners (message));
   sms_message_free (message);
   sms_store_free (store);
   store = sms_store_open (path, FALSE, &error);  /* opened again: the migration leaves a store that has the column */
@@ -316,7 +317,7 @@ test_live (void)
   g_autofree char *path = NULL;
   SmsStore *store = open_store (&path);
   g_autoptr(SmsMessage) first = NULL, words = NULL, confirming = NULL;
-  gint64 id = sms_store_add_sent (store, "agent:Minerva", "", 1000, "voice-1", NULL, NULL);
+  gint64 id = sms_store_add_sent (store, "agent:Minerva", "", 1000, "voice-1", "voce", NULL);  /* its channel */
 
   sms_store_set_live (store, id, "dictating", "Che", 1000, 0);
   first = sms_store_get_message (store, id);
@@ -334,6 +335,7 @@ test_live (void)
   g_assert_cmpint (confirming->live_until, ==, 5000);
   g_assert_cmpint (sms_store_find_by_uri (store, "voice-1"), ==, id);
   g_assert_cmpuint (count (sms_store_list_messages (store, confirming->conversation_id)), ==, 1);
+  g_assert_true (sms_message_is_owners (confirming));
   sms_store_free (store);
 }
 

@@ -84,7 +84,8 @@ typedef struct
   char *sms_uri;                /* the ModemManager SMS object it was, or NULL */
   int raw_status;               /* ModemManager's error for a failed send, else 0 */
   char *origin;                 /* who wrote an outgoing one: NULL for the owner, else SendAs's origin ("minerva",
-                                 * "agent:<identity>": docs/external-agents-channels.md) */
+                                 * "agent:<identity>": docs/external-agents-channels.md); on a live one (the owner's,
+                                 * see live) the channel it came by ("voce", "Telegram") */
   SmsPart *part;                /* what it carries besides text, or NULL for a text message */
   gboolean edited;              /* its sender changed it after sending */
   char *reactions;              /* the emoji people reacted with, one after the other, or NULL */
@@ -166,6 +167,8 @@ GHashTable     *sms_store_unread_counts (SmsStore *store);
 
 void sms_conversation_free (SmsConversation *conversation);
 void sms_message_free (SmsMessage *message);
+/* whether the owner wrote it: an outgoing one without a writer's origin, or a live one (its origin is the channel) */
+gboolean sms_message_is_owners (const SmsMessage *message);
 /* a part from ReceiveMedia's a{sv} (kind, mime, caption, name, size t, duration u ms, width u, height u, thumbnail ay,
  * animated b, view-once b, latitude d, longitude d, url, waveform ay, quote-ext, quote-text): NULL without a kind */
 SmsPart *sms_part_new_from_dict (GVariant *dict);
