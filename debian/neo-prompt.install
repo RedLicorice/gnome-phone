@@ -1,0 +1,5 @@
+usr/bin/neo-prompt
+usr/share/dbus-1/services/de.yesman.NeoPrompt.service
+usr/share/icons/hicolor/scalable/apps/de.yesman.NeoPrompt.svg
+# a template (@ASSISTANT@: the node's assistant), filled into the user's applications folder by Minerva's user setup
+usr/share/applications/de.yesman.NeoPrompt.desktop usr/share/neo-prompt

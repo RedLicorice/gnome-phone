@@ -1,6 +1,8 @@
 project('neo-calendar', 'c', version: '1.0', meson_version: '>= 1.0',
         default_options: ['warning_level=2', 'c_std=gnu11', 'buildtype=release'])
 add_project_arguments('-Wno-unused-parameter', '-Wno-missing-field-initializers', language: 'c')
+# the Minerva programs' directory (meson.options): where minerva-config and the programs beside it are run from
+add_project_arguments('-DMINERVA_BIN_DIR="@0@"'.format(get_option('minerva-bin-dir')), language: 'c')
 
 gnome = import('gnome')
 i18n = import('i18n')

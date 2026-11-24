@@ -1,0 +1,4 @@
+usr/bin/neo-voice
+usr/share/icons/hicolor/scalable/apps/de.yesman.NeoVoice.svg
+# a template (@ASSISTANT@: the node's assistant), filled into the user's applications folder by Minerva's user setup
+usr/share/applications/de.yesman.NeoVoice.desktop usr/share/neo-voice

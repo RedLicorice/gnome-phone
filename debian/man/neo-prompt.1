@@ -1,0 +1,17 @@
+.TH NEO-PROMPT 1 "2026-11-24" "gnome-phone" "GNOME Phone"
+.SH NAME
+neo-prompt \- prompt editor for GNOME Phone's assistant
+.SH SYNOPSIS
+.B neo-prompt
+.RI [ DOCUMENT ]
+.SH DESCRIPTION
+Edits the long texts of the phone's assistant and shows the context her agent receives: one document per prompt,
+its history and the difference from the shipped text. Neo Settings and Neo Contacts open a document through D-Bus
+activation (de.yesman.NeoPrompt). The documents, labels and settings are the JSON files
+.IR neo-prompt.json ,
+.I neo-prompt-files.json
+and
+.I neo-prompt-ui.json
+of Minerva's configuration layers.
+.SH SEE ALSO
+neo-settings(1), minerva-config(1)

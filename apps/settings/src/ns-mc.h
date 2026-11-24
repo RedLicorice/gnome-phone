@@ -6,7 +6,7 @@
 #include <gio/gio.h>
 #include <json-glib/json-glib.h>
 
-/* whether `minerva-config` is installed (MINERVA_CONFIG_BIN overrides the path) */
+/* whether `minerva-config` is installed (in MINERVA_BIN_DIR; MINERVA_CONFIG_BIN overrides the path) */
 gboolean ns_minerva_available (void);
 
 /* whether another Minerva program (minerva-perm…) is installed: the same directory, an env var of its own name

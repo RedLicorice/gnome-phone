@@ -19,9 +19,7 @@ mc_bin (void)
 {
   const char *env = g_getenv ("MINERVA_CONFIG_BIN");
 
-  return env && *env ? g_strdup (env)
-                     : g_build_filename (g_get_home_dir (), ".local", "share", "minerva", "bin", "minerva-config",
-                                         NULL);
+  return env && *env ? g_strdup (env) : g_build_filename (MINERVA_BIN_DIR, "minerva-config", NULL);
 }
 
 /* a JSON string literal; the output buffer holds secrets, so it is the caller's to wipe */

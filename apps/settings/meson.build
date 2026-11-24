@@ -1,5 +1,7 @@
 project('neo-settings', 'c', version: '0.2', default_options: ['warning_level=2', 'c_std=gnu11'])
 add_project_arguments('-Wno-unused-parameter', '-Wno-missing-field-initializers', language: 'c')
+# the Minerva programs' directory (meson.options): where minerva-config and the programs beside it are run from
+add_project_arguments('-DMINERVA_BIN_DIR="@0@"'.format(get_option('minerva-bin-dir')), language: 'c')
 add_project_arguments('-DNS_VERSION="@0@"'.format(meson.project_version()), language: 'c')
 # the keyring helper the pattern dialog runs, where this project installs it
 add_project_arguments('-DNS_REKEY="@0@"'.format(get_option('prefix') / get_option('libexecdir') / 'neo-keyring-rekey'),

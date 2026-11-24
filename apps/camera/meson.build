@@ -10,6 +10,8 @@ add_project_arguments('-Wno-unused-parameter', '-Wno-missing-field-initializers'
                       '-DGETTEXT_PACKAGE="neo-camera"',
                       '-DLOCALEDIR="@0@"'.format(prefix / get_option('localedir')),
                       '-DDATADIR="@0@"'.format(pkgdatadir), language: 'c')
+# the Minerva programs' directory (meson.options): where minerva-config and the programs beside it are run from
+add_project_arguments('-DMINERVA_BIN_DIR="@0@"'.format(get_option('minerva-bin-dir')), language: 'c')
 
 gnome = import('gnome')
 m = meson.get_compiler('c').find_library('m')

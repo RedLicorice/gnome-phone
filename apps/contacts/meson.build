@@ -4,6 +4,8 @@ add_project_arguments('-Wno-unused-parameter', '-Wno-missing-field-initializers'
                       '-DGETTEXT_PACKAGE="neo-contacts"',
                       '-DLOCALEDIR="@0@"'.format(get_option('prefix') / get_option('localedir')),
                       '-DCT_VERSION="@0@"'.format(meson.project_version()), language: 'c')
+# the Minerva programs' directory (meson.options): where minerva-config and the programs beside it are run from
+add_project_arguments('-DMINERVA_BIN_DIR="@0@"'.format(get_option('minerva-bin-dir')), language: 'c')
 
 gnome = import('gnome')
 gio = dependency('gio-unix-2.0', version: '>= 2.76')

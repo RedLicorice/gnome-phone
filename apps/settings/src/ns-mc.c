@@ -3,7 +3,8 @@
 
 #include <gio/gdesktopappinfo.h>
 
-/* the program's path: `prog`'s own env var ("minerva-perm" -> MINERVA_PERM_BIN) or the Minerva bin directory */
+/* the program's path: `prog`'s own env var ("minerva-perm" -> MINERVA_PERM_BIN), else the directory the Minerva
+ * packages install it in (MINERVA_BIN_DIR, the meson option minerva-bin-dir) */
 static char *
 prog_bin (const char *prog)
 {
@@ -15,7 +16,7 @@ prog_bin (const char *prog)
   const char *env = g_getenv (var);
   if (env && *env)
     return g_strdup (env);
-  return g_build_filename (g_get_home_dir (), ".local", "share", "minerva", "bin", prog, NULL);
+  return g_build_filename (MINERVA_BIN_DIR, prog, NULL);
 }
 
 gboolean
@@ -28,7 +29,11 @@ ns_mc_prog_available (const char *prog)
 gboolean
 ns_minerva_available (void)
 {
-  return ns_mc_prog_available ("minerva-config");
+  g_autofree char *bin = prog_bin ("minerva-config");
+  gboolean there = g_file_test (bin, G_FILE_TEST_IS_EXECUTABLE);
+
+  g_debug ("minerva-config: %s (%s)", bin, there ? "available" : "missing");
+  return there;
 }
 
 typedef struct {

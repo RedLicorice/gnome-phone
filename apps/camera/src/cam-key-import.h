@@ -7,7 +7,7 @@
  * "need_passphrase":true|false}. A pairing code ("minerva-key:v1?p=<provider>&c=<chat>&t=<token>") travels as
  * {"payload":"…"} the same way; the program prints {"ok":true,"provider":"…","message":"…"} or
  * {"ok":false,"error":"…"}. Which program runs is found as Neo Settings does (ns-mc.c): $MINERVA_CONFIG_BIN, else
- * ~/.local/share/minerva/bin/minerva-config. */
+ * minerva-config in MINERVA_BIN_DIR (the meson option minerva-bin-dir). */
 #pragma once
 
 #include <gtk/gtk.h>

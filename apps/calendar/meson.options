@@ -1,0 +1,4 @@
+# where the Minerva packages install their programs (minerva-config, minerva-perm...; Minerva's docs/packaging.md); a
+# program's own env var (minerva-perm -> MINERVA_PERM_BIN) overrides its path
+option('minerva-bin-dir', type: 'string', value: '/usr/lib/minerva/bin',
+       description: 'The directory of the Minerva programs')
