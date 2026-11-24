@@ -234,6 +234,11 @@ typedef struct {
   GStrv              order;       /* the scopes, in the order the pickers show them */
   GStrv              scope_names; /* their labels, in that order */
   GStrv              whitelist;
+  char              *read_scope;  /* the read scope as saved: a chat has a page of its own only under "whitelist" */
+  int                history_days; /* how far back the agents read, in days (0: no limit) */
+  GHashTable        *chat_history; /* chat -> its own depth (GINT_TO_POINTER (days + 1)) */
+  GArray            *history_choices; /* the picker's depths, in days ([history] choices_days) */
+  GtkWidget         *history_row;
   guint              poll_id, poll_s, slow_s;
   char              *kind;        /* the pairing kind of messaging.conf ("" when the provider does not pair) */
   char              *state, *word; /* the last status: its state and the daemon's own label */
@@ -266,6 +271,9 @@ prov_free (Prov *p)
   g_strfreev (p->order);
   g_strfreev (p->scope_names);
   g_strfreev (p->whitelist);
+  g_free (p->read_scope);
+  g_clear_pointer (&p->chat_history, g_hash_table_unref);
+  g_clear_pointer (&p->history_choices, g_array_unref);
   g_free (p);
 }
 
@@ -275,14 +283,79 @@ prov_text (Prov *p, const char *section, const char *key)
   return str_of (obj_of (p->ui, section), key);
 }
 
+/* ---- how far back the agents read (messaging.json history_days, and a chat's own under "whitelist") ---- */
+
+/* what the policy says now: the read scope, the provider's depth and the chats' own */
+static void
+prov_policy (Prov *p, JsonObject *policy)
+{
+  if (!policy)
+    return;
+  if (json_object_has_member (policy, "read_scope")) {
+    g_free (p->read_scope);
+    p->read_scope = g_strdup (str_of (policy, "read_scope"));
+  }
+  if (json_object_has_member (policy, "history_days"))
+    p->history_days = (int) json_object_get_int_member_with_default (policy, "history_days", 0);
+  JsonObject *chats = obj_of (policy, "chats");
+  if (!chats)
+    return;
+  if (!p->chat_history)
+    p->chat_history = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+  g_hash_table_remove_all (p->chat_history);
+  g_autoptr (GList) names = json_object_get_members (chats);
+  for (GList *l = names; l; l = l->next) {
+    JsonObject *own = obj_of (chats, l->data);
+    if (own && json_object_has_member (own, "history_days"))
+      g_hash_table_insert (p->chat_history, g_strdup (l->data),
+                           GINT_TO_POINTER ((int) json_object_get_int_member (own, "history_days") + 1));
+  }
+}
+
+/* "Nessun limite", "Ultimo giorno", "Ultimi 7 giorni" */
+static char *
+history_label (Prov *p, int days)
+{
+  if (days <= 0)
+    return g_strdup (prov_text (p, "labels", "history_none"));
+  if (days == 1)
+    return g_strdup (prov_text (p, "labels", "history_day"));
+  return g_strdup_printf (prov_text (p, "labels", "history_days"), days);
+}
+
+/* the picker's depths, with `current` among them when it was set to one the picker does not offer */
+static GArray *
+history_options (Prov *p, int current)
+{
+  GArray *a = g_array_new (FALSE, FALSE, sizeof (int));
+  gboolean seen = current < 0;
+  for (guint i = 0; p->history_choices && i < p->history_choices->len; i++) {
+    int d = g_array_index (p->history_choices, int, i);
+    g_array_append_val (a, d);
+    seen = seen || d == current;
+  }
+  if (!seen)
+    g_array_append_val (a, current);
+  return a;
+}
+
+static int
+chat_history_of (Prov *p, const char *chat)
+{
+  gpointer v = p->chat_history ? g_hash_table_lookup (p->chat_history, chat) : NULL;
+  return v ? GPOINTER_TO_INT (v) - 1 : -1;
+}
+
 static void
 prov_saved (JsonObject *root, const char *err, gpointer data)
 {
   Prov *p = data;
   const char *bad = bad_of (root, err, p->ui);
   say (p->msg, bad ? bad : prov_text (p, "labels", "saved"), bad != NULL);
-  if (!bad)
+  if (!bad) {
+    prov_policy (p, obj_of (root, "policy"));
     prov_refresh_status (p);
+  }
 }
 
 /* ---- the pairing section ----
@@ -591,12 +664,14 @@ prov_refresh_status (Prov *p)
 typedef struct {
   Prov      *p;
   char      *chat;
+  char      *title;
 } Chat;
 
 static void
 chat_free (Chat *c)
 {
   g_free (c->chat);
+  g_free (c->title);
   g_free (c);
 }
 
@@ -623,6 +698,7 @@ chat_saved (JsonObject *root, const char *err, gpointer data)
     say (c->p->msg, bad, TRUE);
     return;
   }
+  prov_policy (c->p, obj_of (root, "policy"));
   JsonArray *wl = arr_of (obj_of (root, "policy"), "whitelist");
   if (wl) {
     GPtrArray *a = g_ptr_array_new_with_free_func (g_free);
@@ -646,6 +722,87 @@ chat_toggled (GtkWidget *sw, GParamSpec *pspec, gpointer data)
   ns_mc_run (c->p->owner, args, NULL, chat_saved, c);
 }
 
+/* One chat's page: how far back the agents read it, its own depth or the provider's. It has one only under "Solo le
+ * chat scelte"; otherwise a tap on the row turns the chat on or off, as the switch does. */
+
+typedef struct {
+  Prov      *p;
+  GObject   *page;      /* the page, which owns this: held while an answer is coming */
+  char      *chat;
+  GtkWidget *msg;
+  GArray    *options;   /* the depths after the first entry ("as every chat"), in days */
+} ChatPage;
+
+static void
+chat_page_free (ChatPage *cp)
+{
+  g_free (cp->chat);
+  g_array_unref (cp->options);
+  g_free (cp);
+}
+
+static void
+chat_history_saved (JsonObject *root, const char *err, gpointer data)
+{
+  ChatPage *cp = data;
+  GObject *page = cp->page;
+  const char *bad = bad_of (root, err, cp->p->ui);
+  say (cp->msg, bad ? bad : prov_text (cp->p, "labels", "saved"), bad != NULL);
+  if (!bad)
+    prov_policy (cp->p, obj_of (root, "policy"));
+  g_object_unref (page);
+}
+
+static void
+chat_history_picked (GtkWidget *row, guint index, gpointer data)
+{
+  ChatPage *cp = data;
+  g_autofree char *days = index == 0 || index > cp->options->len ? g_strdup ("inherit")
+                                     : g_strdup_printf ("%d", g_array_index (cp->options, int, index - 1));
+  const char *args[] = { "messaging", "history", cp->p->id, days, cp->chat, "--json", NULL };
+  g_object_ref (cp->page);   /* the chat's page and the provider's both stay until the answer is here */
+  ns_mc_run (cp->p->owner, args, NULL, chat_history_saved, cp);
+}
+
+static void
+chat_activate (GtkWidget *row, gpointer data)
+{
+  Chat *c = data;
+  Prov *p = c->p;
+  if (g_strcmp0 (p->read_scope, "whitelist")) {
+    GtkWidget *sw = ns_row_get_switch (row);
+    gtk_switch_set_active (GTK_SWITCH (sw), !gtk_switch_get_active (GTK_SWITCH (sw)));
+    return;
+  }
+  GtkWidget *content;
+  AdwNavigationPage *page = ns_page_new (c->title, &content);
+  ChatPage *cp = g_new0 (ChatPage, 1);
+  cp->p = p;
+  cp->page = G_OBJECT (page);
+  cp->chat = g_strdup (c->chat);
+  int own = chat_history_of (p, c->chat);
+  cp->options = history_options (p, own);
+  g_object_set_data_full (G_OBJECT (page), "mp-chat-page", cp, (GDestroyNotify) chat_page_free);
+  cp->msg = ns_note (content, "");
+  gtk_widget_set_visible (cp->msg, FALSE);
+  GtkWidget *g = ns_group (content, prov_text (p, "sections", "chat_history"));
+  g_autofree char *global = history_label (p, p->history_days);
+  g_autoptr (GPtrArray) labels = g_ptr_array_new_with_free_func (g_free);
+  g_ptr_array_add (labels, g_strdup_printf (prov_text (p, "labels", "history_inherit"), global));
+  guint selected = 0;
+  for (guint i = 0; i < cp->options->len; i++) {
+    int d = g_array_index (cp->options, int, i);
+    g_ptr_array_add (labels, history_label (p, d));
+    if (d == own)
+      selected = i + 1;
+  }
+  g_ptr_array_add (labels, NULL);
+  ns_row_pick (g, prov_text (p, "labels", "history"), (const char *const *) labels->pdata, selected,
+               chat_history_picked, cp);
+  ns_note (content, prov_text (p, "notes", "chat_history"));
+  ns_push (page);
+}
+
 /* The page of the chats the owner may authorize. It opens at once with the card of what is being done: the
  * provider reads the account's contacts and groups (`messaging chats ID --sync`), which may take a while. Cancel shows
  * what the provider already knows. Rows come in batches so a long address book does not freeze the page. */
@@ -657,6 +814,7 @@ typedef struct {
   GtkWidget  *content, *group, *note, *search;
   NsBusy     *busy;
   JsonArray  *chats;      /* the answer being drawn (owned) */
+  GArray     *order;      /* the indexes of chats as drawn: the enabled ones first, each part in the answer's order */
   guint       next, gen, idle_id;
   GStrv       words;      /* what the search field says, one lower case word each */
 } Wl;
@@ -670,6 +828,8 @@ wl_free (Wl *w)
     g_source_remove (w->idle_id);
   if (w->chats)
     json_array_unref (w->chats);
+  if (w->order)
+    g_array_unref (w->order);
   g_strfreev (w->words);
   g_free (w);
 }
@@ -737,9 +897,9 @@ wl_batch (gpointer data)
 {
   Wl *w = data;
   Prov *p = w->p;
-  guint n = w->chats ? json_array_get_length (w->chats) : 0;
+  guint n = w->order ? w->order->len : 0;
   for (guint k = 0; k < CHAT_ROWS_PER_TICK && w->next < n; k++, w->next++) {
-    JsonObject *o = json_array_get_object_element (w->chats, w->next);
+    JsonObject *o = json_array_get_object_element (w->chats, g_array_index (w->order, guint, w->next));
     const char *chat = str_of (o, "chat");
     if (!*chat)
       continue;
@@ -749,7 +909,9 @@ wl_batch (gpointer data)
     Chat *ch = g_new0 (Chat, 1);
     ch->p = p;
     ch->chat = g_strdup (chat);
+    ch->title = g_strdup (title);
     ns_switch_quiet (ns_row_get_switch (row), whitelisted (p, chat));
+    ns_row_on_activate (row, chat_activate, ch);
     g_object_set_data_full (G_OBJECT (row), "mp-chat", ch, (GDestroyNotify) chat_free);
     g_signal_connect (ns_row_get_switch (row), "notify::active", G_CALLBACK (chat_toggled), ch);
   }
@@ -794,6 +956,14 @@ wl_loaded (JsonObject *root, const char *err, gpointer data)
     json_array_unref (w->chats);
   JsonArray *chats = arr_of (root, "chats");
   w->chats = chats ? json_array_ref (chats) : NULL;
+  if (w->order)
+    g_array_unref (w->order);
+  w->order = g_array_new (FALSE, FALSE, sizeof (guint));
+  guint total = w->chats ? json_array_get_length (w->chats) : 0;
+  for (int on = 1; on >= 0; on--)   /* the enabled chats on top, as they are when the page opens */
+    for (guint i = 0; i < total; i++)
+      if (whitelisted (p, str_of (json_array_get_object_element (w->chats, i), "chat")) == on)
+        g_array_append_val (w->order, i);
   w->next = 0;
   gtk_widget_set_visible (w->search, TRUE);
   if (w->idle_id)
@@ -879,6 +1049,35 @@ scope_picked (GtkWidget *row, guint index, gpointer data)
     return;
   const char *args[] = { "messaging", "set", s->p->id, s->kind, s->p->order[index], "--json", NULL };
   ns_mc_run (s->p->owner, args, NULL, prov_saved, s->p);
+}
+
+static void
+history_picked (GtkWidget *row, guint index, gpointer data)
+{
+  Prov *p = data;
+  g_autoptr (GArray) options = history_options (p, p->history_days);
+  if (index >= options->len)
+    return;
+  g_autofree char *days = g_strdup_printf ("%d", g_array_index (options, int, index));
+  const char *args[] = { "messaging", "history", p->id, days, "--json", NULL };
+  ns_mc_run (p->owner, args, NULL, prov_saved, p);
+}
+
+static GtkWidget *
+history_row (Prov *p, GtkWidget *group)
+{
+  g_autoptr (GArray) options = history_options (p, p->history_days);
+  g_autoptr (GPtrArray) labels = g_ptr_array_new_with_free_func (g_free);
+  guint selected = 0;
+  for (guint i = 0; i < options->len; i++) {
+    int d = g_array_index (options, int, i);
+    g_ptr_array_add (labels, history_label (p, d));
+    if (d == p->history_days)
+      selected = i;
+  }
+  g_ptr_array_add (labels, NULL);
+  return ns_row_pick (group, prov_text (p, "labels", "history"), (const char *const *) labels->pdata, selected,
+                      history_picked, p);
 }
 
 typedef struct {
@@ -1016,6 +1215,15 @@ prov_build (Prov *p, JsonObject *root)
   g_strfreev (p->whitelist);
   p->whitelist = (GStrv) g_ptr_array_free (w, FALSE);
 
+  JsonArray *hc = arr_of (obj_of (root, "history"), "choices");
+  g_clear_pointer (&p->history_choices, g_array_unref);
+  p->history_choices = g_array_new (FALSE, FALSE, sizeof (int));
+  for (guint i = 0; hc && i < json_array_get_length (hc); i++) {
+    int d = (int) json_array_get_int_element (hc, i);
+    g_array_append_val (p->history_choices, d);
+  }
+  prov_policy (p, policy);
+
   p->status_g = ns_group (p->content, prov_text (p, "sections", "status"));
   p->status_row = ns_row_info (p->status_g, str_of (obj_of (p->ui, "labels"), "connection"), "");
 
@@ -1035,6 +1243,8 @@ prov_build (Prov *p, JsonObject *root)
                            str_of (policy, "read_scope"));
   p->write_row = scope_row (p, sc, "write_scope", prov_text (p, "labels", "write_scope"),
                             str_of (policy, "write_scope"));
+  p->history_row = history_row (p, sc);
+  ns_note (p->content, prov_text (p, "notes", "history"));
 
   GtkWidget *op = ns_group (p->content, prov_text (p, "sections", "options"));
   p->unread_row = flag_row (p, op, "count_unread",
