@@ -328,7 +328,7 @@ test_dates (void)
 
 /* how the memory service writes and reads a channel id (Minerva's memory [eds] im_write_field, im_read_fields) */
 static const char *const im_reads[] = { "IMPP", "X-", NULL };
-static const CtImForm im_form = { "X-", im_reads };
+static const ImForm im_form = { "X-", im_reads };
 
 /* a telegram id saved from the editor is written as X-TELEGRAM:<id> (EDS 3.62 drops IMPP from vCard 3.0 cards); both
  * forms are read, the old id goes in either form, other channels' rows stay */

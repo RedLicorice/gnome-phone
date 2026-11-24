@@ -20,9 +20,11 @@ layers = static_library('layers', '../../common/minerva-layers.c', dependencies:
                         c_args: ['-DMINERVA_LAYERS_FILE="@0@"'.format(get_option('layers-file'))])
 provider = static_library('provider', 'src/sms-provider.c', link_with: layers,
                           include_directories: include_directories('../../common'), dependencies: [gio])
-phone = static_library('phone', '../dialer/src/phone-number.c', '../dialer/src/contacts.c', '../dialer/src/phone.c',
+json = dependency('json-glib-1.0')
+phone = static_library('phone', '../dialer/src/phone-number.c', '../dialer/src/contacts.c', '../dialer/src/im-form.c',
+                       '../dialer/src/phone.c',
                        '../dialer/src/notifier.c', '../dialer/src/blocked-numbers.c', include_directories: dialer,
-                       dependencies: [gio, ebook, sqlite],
+                       dependencies: [gio, ebook, sqlite, json],
                        c_args: ['-DNOTIFIER_APP_ID="de.yesman.Messaging"', '-DNOTIFIER_APP_NAME="Messaging"'])
 
 # the service: the messages with the app closed, taking them off the modem, sending, the notifications

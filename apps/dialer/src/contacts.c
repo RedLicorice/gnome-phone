@@ -1,8 +1,10 @@
 /* The contacts (contacts.h): an EBookClientView on every enabled address book, its contacts kept in one table. */
 #include "contacts.h"
+#include "im-form.h"
 #include "phone-number.h"
 
 #include <glib/gi18n.h>
+#include <json-glib/json-glib.h>
 #include <libebook/libebook.h>
 #include <string.h>
 
@@ -20,6 +22,9 @@ struct _Contacts {
   GSettings *settings;          /* the Phone's, for Display options; NULL where its schema is not installed */
   gboolean sort_alternative;    /* Sort by: last name */
   gboolean name_alternative;    /* Name format: last name first */
+  GStrv read_fields;            /* where a chat handle is read (im-form.h), from card-form-command; NULL: none */
+  GStrv channels;               /* the channels an X-<CHANNEL> field is read for */
+  GStrv card_form_command;      /* the Phone's card-form-command; NULL where its schema has none */
 };
 
 G_DEFINE_FINAL_TYPE (Contacts, contacts, G_TYPE_OBJECT)
@@ -166,19 +171,9 @@ contact_from_econtact (Contacts *self, EContact *econtact)
       number->label = number_label (l->data);
       g_ptr_array_add (contact->numbers, number);
     }
-  {
-    g_autoptr(GStrvBuilder) handles = g_strv_builder_new ();
-
-    for (GList *l = e_vcard_get_attributes (E_VCARD (econtact)); l; l = l->next)
-      if (!g_ascii_strcasecmp (e_vcard_attribute_get_name (l->data), "IMPP"))
-        {
-          g_autofree char *value = e_vcard_attribute_get_value (l->data);
-
-          if (value && *value)
-            g_strv_builder_add (handles, g_strstrip (value));
-        }
-    contact->handles = g_strv_builder_end (handles);
-  }
+  /* the chat handles, "<channel>:<id>", in every form Minerva's memory service reads them */
+  contact->handles = im_form_handles (E_VCARD (econtact), (const char *const *) self->read_fields,
+                                      (const char *const *) self->channels);
   if (photo && photo->type == E_CONTACT_PHOTO_TYPE_INLINED && photo->data.inlined.length)
     contact->photo = g_bytes_new (photo->data.inlined.data, photo->data.inlined.length);
   e_contact_photo_free (photo);
@@ -297,11 +292,16 @@ on_client (GObject *source, GAsyncResult *result, gpointer data)
       return;
     }
   self = data;
-  /* the contacts with a phone number (HAS_PHONE_NUMBER) or a chat handle (IMPP: Messages' providers) */
+  /* the contacts with a phone number (HAS_PHONE_NUMBER) or a chat handle (Messages' providers, im-form.h) */
   {
-    EBookQuery *either[] = { e_book_query_field_exists (E_CONTACT_TEL), e_book_query_vcard_field_exists ("IMPP") };
-    EBookQuery *q = e_book_query_or (G_N_ELEMENTS (either), either, TRUE);
+    g_auto(GStrv) fields = im_form_fields ((const char *const *) self->read_fields, (const char *const *) self->channels);
+    g_autoptr(GPtrArray) either = g_ptr_array_new ();
+    EBookQuery *q;
 
+    g_ptr_array_add (either, e_book_query_field_exists (E_CONTACT_TEL));
+    for (guint i = 0; fields[i]; i++)
+      g_ptr_array_add (either, e_book_query_vcard_field_exists (fields[i]));
+    q = e_book_query_or ((int) either->len, (EBookQuery **) either->pdata, TRUE);
     query = e_book_query_to_string (q);
     e_book_query_unref (q);
   }
@@ -505,6 +505,9 @@ contacts_finalize (GObject *object)
   g_clear_pointer (&self->sorted, g_ptr_array_unref);
   g_hash_table_unref (self->by_uid);
   g_hash_table_unref (self->matches);
+  g_strfreev (self->read_fields);
+  g_strfreev (self->channels);
+  g_strfreev (self->card_form_command);
   G_OBJECT_CLASS (contacts_parent_class)->finalize (object);
 }
 
@@ -537,14 +540,78 @@ contacts_init (Contacts *self)
       g_signal_connect_swapped (self->settings, "changed::sort-order", G_CALLBACK (on_order_changed), self);
       g_signal_connect_swapped (self->settings, "changed::display-order", G_CALLBACK (on_order_changed), self);
       read_order (self);
+      if (g_settings_schema_has_key (schema, "card-form-command"))
+        self->card_form_command = g_settings_get_strv (self->settings, "card-form-command");
     }
+}
+
+/* --- how a chat handle is written on a card: asked of Minerva's contacts resolver (card-form-command), once */
+
+static GStrv
+strv_member (JsonObject *o, const char *member)
+{
+  JsonArray *list = json_object_has_member (o, member) ? json_object_get_array_member (o, member) : NULL;
+  GStrvBuilder *builder = g_strv_builder_new ();
+  GStrv out;
+
+  for (guint i = 0; list && i < json_array_get_length (list); i++)
+    {
+      const char *text = json_array_get_string_element (list, i);
+
+      if (text && *text)
+        g_strv_builder_add (builder, text);
+    }
+  out = g_strv_builder_end (builder);
+  g_strv_builder_unref (builder);
+  return out;
+}
+
+/* the answer, then the address books; a resolver that cannot answer leaves no chat handle (the numbers still match) */
+static void
+on_card_form (GObject *source, GAsyncResult *result, gpointer data)
+{
+  g_autoptr(GError) error = NULL;
+  g_autofree char *out = NULL;
+  g_autoptr(JsonParser) parser = json_parser_new ();
+  Contacts *self;
+
+  if (!g_subprocess_communicate_utf8_finish (G_SUBPROCESS (source), result, &out, NULL, &error)
+      && g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+    return;
+  self = data;
+  if (!error && g_subprocess_get_successful (G_SUBPROCESS (source)) && out
+      && json_parser_load_from_data (parser, out, -1, &error) && JSON_NODE_HOLDS_OBJECT (json_parser_get_root (parser)))
+    {
+      JsonObject *o = json_node_get_object (json_parser_get_root (parser));
+
+      self->read_fields = strv_member (o, "im_read_fields");
+      self->channels = strv_member (o, "channels");
+    }
+  else
+    g_warning ("contacts: no chat handles, the card form is not known: %s",
+               error ? error->message : "the resolver failed");
+  e_source_registry_new (self->cancellable, on_registry, self);
 }
 
 Contacts *
 contacts_new (void)
 {
   Contacts *self = g_object_new (CONTACTS_TYPE, NULL);
+  GStrv argv = self->card_form_command;
+  g_autoptr(GError) error = NULL;
+  g_autoptr(GSubprocess) resolver = argv && argv[0] && *argv[0]
+                                    ? g_subprocess_newv ((const char *const *) argv,
+                                                         G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_SILENCE,
+                                                         &error)
+                                    : NULL;
 
-  e_source_registry_new (self->cancellable, on_registry, self);
+  if (resolver)
+    g_subprocess_communicate_utf8_async (resolver, NULL, self->cancellable, on_card_form, self);
+  else
+    {
+      if (error)
+        g_warning ("contacts: no chat handles: %s", error->message);
+      e_source_registry_new (self->cancellable, on_registry, self);
+    }
   return self;
 }

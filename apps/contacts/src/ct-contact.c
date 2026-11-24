@@ -1457,62 +1457,20 @@ ct_contact_set_items (EContact *contact, CtKind kind, GPtrArray *items)
 
 /* --- channel identities */
 
-/* the property a channel's id is written to in @field (a CtImForm field): a field ending in '-' is the prefix of
- * X-<CHANNEL>:<id> (X-TELEGRAM), any other holds <scheme>:<id> itself (IMPP), as the memory service's [eds] says */
-static char *
-field_property (const char *field, const char *scheme)
-{
-  g_autofree char *whole = NULL;
-
-  if (!g_str_has_suffix (field, "-"))
-    return g_strdup (field);
-  whole = g_strconcat (field, scheme, NULL);
-  return g_ascii_strup (whole, -1);
-}
-
-/* @attr holds @scheme's id in @field; the id in @id */
-static gboolean
-holds_channel (EVCardAttribute *attr, const char *field, const char *scheme, char **id)
-{
-  g_autofree char *property = field_property (field, scheme);
-  g_autofree char *value = NULL;
-  const char *colon;
-
-  if (g_ascii_strcasecmp (e_vcard_attribute_get_name (attr), property) != 0)
-    return FALSE;
-  value = nth_value (attr, 0);
-  if (g_str_has_suffix (field, "-"))
-    {
-      g_autofree char *text = trimmed (value);
-
-      if (!*text)
-        return FALSE;
-      if (id)
-        *id = g_steal_pointer (&text);
-      return TRUE;
-    }
-  colon = strchr (value, ':');
-  if (!colon || g_ascii_strncasecmp (value, scheme, colon - value) != 0 || scheme[colon - value])
-    return FALSE;
-  if (id)
-    *id = trimmed (colon + 1);
-  return TRUE;
-}
-
 /* the first property of the contact that holds @scheme's id in @field ("IMPP:whatsapp:39333…", with or without an
  * X-SERVICE-TYPE parameter, or "X-WHATSAPP:39333…"); the id in @id */
 static EVCardAttribute *
 find_in_field (EContact *contact, const char *field, const char *scheme, char **id)
 {
   for (GList *l = e_vcard_get_attributes (E_VCARD (contact)); l; l = l->next)
-    if (holds_channel (l->data, field, scheme, id))
+    if (im_form_holds (l->data, field, scheme, id))
       return l->data;
   return NULL;
 }
 
 /* the property that holds @scheme's id: the read fields in their order, then @legacy_property */
 static EVCardAttribute *
-find_channel (EContact *contact, const char *scheme, const char *legacy_property, const CtImForm *form, char **id)
+find_channel (EContact *contact, const char *scheme, const char *legacy_property, const ImForm *form, char **id)
 {
   EVCardAttribute *attr;
 
@@ -1529,14 +1487,8 @@ find_channel (EContact *contact, const char *scheme, const char *legacy_property
   return NULL;
 }
 
-gboolean
-ct_im_form_usable (const CtImForm *form)
-{
-  return form && form->write_field && *form->write_field && form->read_fields && form->read_fields[0];
-}
-
 char *
-ct_contact_get_channel (EContact *contact, const char *scheme, const char *legacy_property, const CtImForm *form)
+ct_contact_get_channel (EContact *contact, const char *scheme, const char *legacy_property, const ImForm *form)
 {
   char *id = NULL;
 
@@ -1547,13 +1499,13 @@ ct_contact_get_channel (EContact *contact, const char *scheme, const char *legac
 }
 
 void
-ct_contact_set_channel (EContact *contact, const char *scheme, const char *legacy_property, const CtImForm *form,
+ct_contact_set_channel (EContact *contact, const char *scheme, const char *legacy_property, const ImForm *form,
                         const char *value)
 {
   EVCard *vcard = E_VCARD (contact);
   g_autofree char *text = trimmed (value);
   g_autofree char *old = NULL;
-  g_autofree char *property = field_property (form->write_field, scheme);
+  g_autofree char *property = im_form_property (form->write_field, scheme);
   g_autofree char *line = g_str_has_suffix (form->write_field, "-") ? g_strdup (text)
                                                                     : g_strconcat (scheme, ":", text, NULL);
   EVCardAttribute *keep = find_channel (contact, scheme, legacy_property, form, &old);
@@ -1575,7 +1527,7 @@ ct_contact_set_channel (EContact *contact, const char *scheme, const char *legac
         {
           g_autofree char *id = NULL;
 
-          same = holds_channel (attr, form->read_fields[i], scheme, &id) && g_strcmp0 (id, old) == 0;
+          same = im_form_holds (attr, form->read_fields[i], scheme, &id) && g_strcmp0 (id, old) == 0;
         }
       if (attr != keep && (legacy || same))
         g_ptr_array_add (drop, attr);

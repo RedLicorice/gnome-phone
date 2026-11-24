@@ -62,10 +62,10 @@ ct_mnv_list (const char *key)
   return ns_json_arr (contacts_part (), key);
 }
 
-const CtImForm *
+const ImForm *
 ct_mnv_im_form (void)
 {
-  static CtImForm form;
+  static ImForm form;
   static GStrv reads;
   JsonArray *list;
   GStrvBuilder *builder;

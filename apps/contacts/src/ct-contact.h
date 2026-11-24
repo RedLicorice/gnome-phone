@@ -13,6 +13,8 @@
 
 #include <libebook-contacts/libebook-contacts.h>
 
+#include "im-form.h"
+
 G_BEGIN_DECLS
 
 /* --- names (§10.5, §10.6) */
@@ -163,20 +165,13 @@ void       ct_contact_set_items (EContact *contact, CtKind kind, GPtrArray *item
  * through minerva-config's people ui): a field ending in '-' is the prefix of X-<CHANNEL>:<id> ("X-WHATSAPP:39333…"),
  * any other holds <scheme>:<id> ("IMPP:whatsapp:39333…"). An id an older Contacts wrote as @legacy_property is read
  * too, and moves to the written form the next time the channel is written. Everything else of the vCard is left as
- * it is. */
-typedef struct {
-  const char *write_field;          /* "X-" or "IMPP" */
-  const char *const *read_fields;   /* NULL-terminated, in the order they are tried */
-} CtImForm;
-
-/* there is a form to write a channel id in and one to read it */
-gboolean ct_im_form_usable (const CtImForm *form);
+ * it is. The form is im-form.h's (shared with Phone and Messages). */
 /* the channel's first id, "" when the contact has none */
-char *ct_contact_get_channel (EContact *contact, const char *scheme, const char *legacy_property, const CtImForm *form);
+char *ct_contact_get_channel (EContact *contact, const char *scheme, const char *legacy_property, const ImForm *form);
 /* sets it in the written form (a property already in that form keeps its parameters), or removes it when @value is
  * empty; the old id goes in every form it is read in, other ids of the same channel stay, and so does every other
  * property */
-void  ct_contact_set_channel (EContact *contact, const char *scheme, const char *legacy_property, const CtImForm *form,
+void  ct_contact_set_channel (EContact *contact, const char *scheme, const char *legacy_property, const ImForm *form,
                               const char *value);
 
 /* What a signature over the card covers, as one comparable text: every property but the @unsigned_fields (a trailing

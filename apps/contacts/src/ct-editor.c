@@ -1440,7 +1440,7 @@ channels_section (Editor *editor)
   GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
   GtkWidget *icon_column = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
   GtkWidget *rows = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-  JsonArray *services = ct_mnv_ui_ready () && ct_im_form_usable (ct_mnv_im_form ()) ? ct_mnv_list ("im_services") : NULL;
+  JsonArray *services = ct_mnv_ui_ready () && im_form_usable (ct_mnv_im_form ()) ? ct_mnv_list ("im_services") : NULL;
   GtkWidget *icon = ct_tinted_icon_new ("ct-message-symbolic", 24, CT_ED_ICON_COLOR);
 
   editor->channel_rows = g_ptr_array_new_with_free_func (channel_row_free);

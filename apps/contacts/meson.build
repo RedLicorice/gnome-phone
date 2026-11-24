@@ -21,7 +21,8 @@ settings = include_directories('../settings/src')
 # the contacts, their vCards and the list's rows: no GTK, so the tests and the seeder link them alone
 json = dependency('json-glib-1.0')
 core = static_library('contacts-core', 'src/ct-contact.c', 'src/ct-vcard.c', 'src/ct-store.c', 'src/ct-rows.c',
-                      'src/ct-mnv-core.c', dependencies: [gio, ebook, m, json])
+                      'src/ct-mnv-core.c', '../dialer/src/im-form.c', include_directories: dialer,
+                      dependencies: [gio, ebook, m, json])
 
 gtk = dependency('gtk4', version: '>= 4.14')
 resources = gnome.compile_resources('contacts-resources', 'src/contacts.gresource.xml', source_dir: ['src', 'data'])
@@ -43,10 +44,10 @@ install_data('data/de.yesman.Contacts.gschema.xml', install_dir: datadir / 'glib
 gnome.post_install(glib_compile_schemas: true, gtk_update_icon_cache: true, update_desktop_database: true)
 
 foreach name : ['ct-contact', 'ct-vcard', 'ct-rows', 'ct-mnv']
-  test(name, executable('test-' + name, 'tests/test-' + name + '.c', include_directories: src, link_with: core,
+  test(name, executable('test-' + name, 'tests/test-' + name + '.c', include_directories: [src, dialer], link_with: core,
                         dependencies: [gio, ebook, m, json]))
 endforeach
 
 # fake contacts for the test rig's private address book (tests/try-contacts.sh); not installed
-executable('ct-seed', 'tests/ct-seed.c', include_directories: src, link_with: core,
+executable('ct-seed', 'tests/ct-seed.c', include_directories: [src, dialer], link_with: core,
            dependencies: [gio, ebook, m, dependency('gdk-pixbuf-2.0')])

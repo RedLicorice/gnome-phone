@@ -23,7 +23,7 @@ typedef struct {
                                  * name the same as the other */
   char *sort_key_primary, *sort_key_alternative;
   GPtrArray *numbers;           /* ContactNumber */
-  GStrv handles;                /* the IMPP values, a chat's address: "whatsapp:+39...", "telegram:8675309" */
+  GStrv handles;                /* the chat handles, a chat's address: "whatsapp:+39...", "telegram:8675309" (im-form.h) */
   GBytes *photo;                /* the contact's picture as image data, or NULL */
 } Contact;
 
@@ -41,8 +41,8 @@ const Contact *contacts_get (Contacts *self, const char *uid);
 /* the contact a number belongs to, or NULL. @country: where the phone is, for numbers stored without a country
  * code */
 const Contact *contacts_lookup (Contacts *self, const char *number, const char *country);
-/* how many contacts a chat is: those whose IMPP is @handle, or that list @number (either may be NULL); @contact, when
- * not NULL, gets the one contact when there is exactly one. Answers are cached until the next "changed" */
+/* how many contacts a chat is: those whose chat handle is @handle, or that list @number (either may be NULL);
+ * @contact, when not NULL, gets the one contact when there is exactly one. Answers are cached until the next "changed" */
 guint          contacts_match (Contacts *self, const char *handle, const char *number, const char *country,
                                const Contact **contact);
 /* the label of the contact's number that matches @number ("Mobile"), or NULL */

@@ -728,7 +728,7 @@ channel_write (M *m, guint index, const char *value, const char *done)
   g_autoptr (GPtrArray) changed = NULL;
   Ask *ask;
 
-  if (!contact || !channel || !ct_im_form_usable (ct_mnv_im_form ()))
+  if (!contact || !channel || !im_form_usable (ct_mnv_im_form ()))
     return;
   copy = e_contact_duplicate (contact);
   ct_contact_set_channel (copy, ns_json_str (channel, "id"), ns_json_str (channel, "legacy_property"), ct_mnv_im_form (),
@@ -808,7 +808,7 @@ channel_rows (M *m)
       g_autofree char *value = contact ? ct_contact_get_channel (contact, ns_json_str (channel, "id"), ns_json_str (channel, "legacy_property"), ct_mnv_im_form ())
                                        : g_strdup ("");
       GtkWidget *row = entry_row (m, ns_json_str (channel, "title"), *value ? value : ct_mnv_text ("channel_none"),
-                                  G_CALLBACK (on_channel), contact != NULL && ct_im_form_usable (ct_mnv_im_form ()));
+                                  G_CALLBACK (on_channel), contact != NULL && im_form_usable (ct_mnv_im_form ()));
 
       g_object_set_data (G_OBJECT (row), "ct-channel", GUINT_TO_POINTER (i));
     }

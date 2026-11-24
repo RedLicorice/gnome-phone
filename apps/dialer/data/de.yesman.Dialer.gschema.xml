@@ -20,6 +20,14 @@
   </enum>
 
   <schema id="de.yesman.Dialer" path="/de/yesman/Dialer/">
+    <key name="card-form-command" type="as">
+      <default>['minerva-contacts', 'signing']</default>
+      <summary>Where a contact's chat handles are read</summary>
+      <description>The program (and its arguments) that answers, as JSON, how Minerva's memory service writes and
+        reads a chat channel id on a vCard (im_read_fields, channels): Phone and Messages read the handles the same
+        way. Empty: no chat handles are read.</description>
+    </key>
+
     <key name="selected-tab" enum="de.yesman.Dialer.Tab">
       <default>'favorites'</default>
       <summary>The tab the app shows</summary>
