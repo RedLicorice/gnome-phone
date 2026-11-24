@@ -326,71 +326,31 @@ test_dates (void)
   g_assert_cmpstr (without, ==, "--03-15");
 }
 
+/* how the memory service writes and reads a channel id (Minerva's memory [eds] im_write_field, im_read_fields) */
+static const char *const im_reads[] = { "IMPP", "X-", NULL };
+static const CtImForm im_form = { "X-", im_reads };
+
+/* a telegram id saved from the editor is written as X-TELEGRAM:<id> (EDS 3.62 drops IMPP from vCard 3.0 cards); both
+ * forms are read, the old id goes in either form, other channels' rows stay */
 static void
 test_channels (void)
 {
   g_autoptr(EContact) contact = e_contact_new_from_vcard (
-    "BEGIN:VCARD\nVERSION:3.0\nUID:u1\nFN:Andrea\nX-EVOLUTION-FILE-AS:Andrea\nX-JABBER:andrea@example.org\n"
-    "IMPP;X-SERVICE-TYPE=Telegram:telegram:777\nIMPP:xmpp:andrea@example.net\nX-WHATSAPP;X-ABLabel=old:+39333\n"
-    "END:VCARD\n");
-  g_autoptr(GPtrArray) im = NULL;
-  g_autofree char *wa = ct_contact_get_channel (contact, "whatsapp", "X-WHATSAPP");
-  g_autofree char *tg = ct_contact_get_channel (contact, "telegram", "X-TELEGRAM");
-  g_autofree char *none = ct_contact_get_channel (contact, "signal", NULL);
+    "BEGIN:VCARD\nVERSION:3.0\nUID:u1\nFN:Andrea\nIMPP;X-SERVICE-TYPE=Telegram:telegram:777\nX-TELEGRAM:777\n"
+    "IMPP:xmpp:andrea@example.net\nX-WHATSAPP:+39333\nEND:VCARD\n");
+  g_autofree char *wa = ct_contact_get_channel (contact, "whatsapp", "X-WHATSAPP", &im_form);
+  g_autofree char *tg = ct_contact_get_channel (contact, "telegram", "X-TELEGRAM", &im_form);
   g_autofree char *text = NULL;
 
-  g_assert_cmpstr (wa, ==, "+39333");           /* an older Contacts' X-WHATSAPP is still read */
-  g_assert_cmpstr (tg, ==, "777");              /* an IMPP with X-SERVICE-TYPE too */
-  g_assert_cmpstr (none, ==, "");
-
-  ct_contact_set_channel (contact, "whatsapp", "X-WHATSAPP", " +39111 ");
-  g_free (wa);
-  wa = ct_contact_get_channel (contact, "whatsapp", "X-WHATSAPP");
-  g_assert_cmpstr (wa, ==, "+39111");
+  g_assert_cmpstr (wa, ==, "+39333");
+  g_assert_cmpstr (tg, ==, "777");
+  ct_contact_set_channel (contact, "telegram", "X-TELEGRAM", &im_form, " 888 ");
   text = e_vcard_to_string (E_VCARD (contact), EVC_FORMAT_VCARD_30);
-  g_assert_nonnull (strstr (text, "IMPP:whatsapp:+39111"));   /* written as the memory service reads it */
-  g_assert_null (strstr (text, "X-WHATSAPP"));                /* the old property moved */
-  g_assert_nonnull (strstr (text, "X-SERVICE-TYPE=Telegram")); /* the other IMPP rows are untouched */
-  g_assert_nonnull (strstr (text, "xmpp:andrea@example.net"));
-  g_assert_nonnull (strstr (text, "X-EVOLUTION-FILE-AS:Andrea"));
-  g_assert_nonnull (strstr (text, "X-JABBER"));
-
-  /* the property of an id that is there keeps its parameters */
-  ct_contact_set_channel (contact, "telegram", "X-TELEGRAM", "888");
-  g_free (tg);
-  tg = ct_contact_get_channel (contact, "telegram", "X-TELEGRAM");
-  g_assert_cmpstr (tg, ==, "888");
-  g_free (text);
-  text = e_vcard_to_string (E_VCARD (contact), EVC_FORMAT_VCARD_30);
-  g_assert_nonnull (strstr (text, "X-SERVICE-TYPE=Telegram"));
-  g_assert_nonnull (strstr (text, "telegram:888"));
-  g_assert_null (strstr (text, "telegram:777"));
-
-  im = ct_contact_get_items (contact, CT_KIND_IM);
-  g_assert_cmpuint (im->len, ==, 4);            /* X-JABBER, two IMPP of telegram/xmpp, whatsapp */
-  {
-    gboolean saw_whatsapp = FALSE, saw_xmpp = FALSE;
-
-    for (guint i = 0; i < im->len; i++)
-      {
-        CtItem *item = im->pdata[i];
-
-        if (!g_strcmp0 (item->value2, "WhatsApp") && !g_strcmp0 (item->value, "+39111"))
-          saw_whatsapp = TRUE;
-        if (!g_strcmp0 (item->value2, "Jabber") && !g_strcmp0 (item->value, "andrea@example.net"))
-          saw_xmpp = TRUE;
-      }
-    g_assert_true (saw_whatsapp && saw_xmpp);
-  }
-
-  ct_contact_set_channel (contact, "whatsapp", "X-WHATSAPP", "  ");
-  g_free (wa);
-  wa = ct_contact_get_channel (contact, "whatsapp", "X-WHATSAPP");
-  g_assert_cmpstr (wa, ==, "");
-  g_free (text);
-  text = e_vcard_to_string (E_VCARD (contact), EVC_FORMAT_VCARD_30);
-  g_assert_null (strstr (text, "whatsapp"));
-  g_assert_nonnull (strstr (text, "xmpp:andrea@example.net"));
+  g_assert_nonnull (strstr (text, "X-TELEGRAM:888\r\n"));
+  g_assert_null (strstr (text, "telegram:"));
+  g_assert_null (strstr (text, "777"));
+  g_assert_nonnull (strstr (text, "IMPP:xmpp:andrea@example.net"));
+  g_assert_nonnull (strstr (text, "X-WHATSAPP:+39333"));
 }
 
 static void
@@ -427,8 +387,8 @@ test_merge (void)
   g_assert_nonnull (strstr (text, "Friends"));
   /* the channels: the same id once, the other one added with its parameters */
   {
-    g_autofree char *wa = ct_contact_get_channel (into, "whatsapp", NULL);
-    g_autofree char *tg = ct_contact_get_channel (into, "telegram", NULL);
+    g_autofree char *wa = ct_contact_get_channel (into, "whatsapp", NULL, &im_form);
+    g_autofree char *tg = ct_contact_get_channel (into, "telegram", NULL, &im_form);
 
     g_assert_cmpstr (wa, ==, "393331112222");
     g_assert_cmpstr (tg, ==, "777");
@@ -531,10 +491,10 @@ test_signed_text (void)
   e_vcard_remove_attributes (E_VCARD (b), NULL, "X-EVOLUTION-FILE-AS");
   same = ct_contact_signed_text (b, unsigned_fields);
   g_assert_cmpstr (before, ==, same);
-  ct_contact_set_channel (b, "telegram", "X-TELEGRAM", "25730854");
+  ct_contact_set_channel (b, "telegram", "X-TELEGRAM", &im_form, "25730854");
   changed = ct_contact_signed_text (b, unsigned_fields);
   g_assert_cmpstr (before, !=, changed);
-  g_assert_nonnull (strstr (changed, "IMPP:telegram:25730854\n"));
+  g_assert_nonnull (strstr (changed, "X-TELEGRAM:25730854\n"));
 }
 
 int

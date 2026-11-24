@@ -62,6 +62,27 @@ ct_mnv_list (const char *key)
   return ns_json_arr (contacts_part (), key);
 }
 
+const CtImForm *
+ct_mnv_im_form (void)
+{
+  static CtImForm form;
+  static GStrv reads;
+  JsonArray *list;
+  GStrvBuilder *builder;
+
+  if (reads || !ui)
+    return &form;
+  builder = g_strv_builder_new ();
+  list = ct_mnv_list ("im_read_fields");
+  for (guint i = 0; list && i < json_array_get_length (list); i++)
+    g_strv_builder_add (builder, json_array_get_string_element (list, i));
+  reads = g_strv_builder_end (builder);
+  g_strv_builder_unref (builder);
+  form.write_field = ct_mnv_text ("im_write_field");
+  form.read_fields = (const char *const *) reads;
+  return &form;
+}
+
 /* ---- the calls ---- */
 
 typedef struct {

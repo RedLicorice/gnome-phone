@@ -1457,75 +1457,140 @@ ct_contact_set_items (EContact *contact, CtKind kind, GPtrArray *items)
 
 /* --- channel identities */
 
+/* the property a channel's id is written to in @field (a CtImForm field): a field ending in '-' is the prefix of
+ * X-<CHANNEL>:<id> (X-TELEGRAM), any other holds <scheme>:<id> itself (IMPP), as the memory service's [eds] says */
 static char *
-ct_contact_get_channel_legacy (EContact *contact, const char *property)
+field_property (const char *field, const char *scheme)
 {
-  EVCardAttribute *attr = e_vcard_get_attribute (E_VCARD (contact), property);
+  g_autofree char *whole = NULL;
 
-  return attr ? nth_value (attr, 0) : g_strdup ("");
+  if (!g_str_has_suffix (field, "-"))
+    return g_strdup (field);
+  whole = g_strconcat (field, scheme, NULL);
+  return g_ascii_strup (whole, -1);
 }
 
-/* the IMPP property of the contact that holds @scheme's id ("IMPP:whatsapp:39333…", with or without an
- * X-SERVICE-TYPE parameter), the first one; the id (after the scheme's colon) in @id */
+/* @attr holds @scheme's id in @field; the id in @id */
+static gboolean
+holds_channel (EVCardAttribute *attr, const char *field, const char *scheme, char **id)
+{
+  g_autofree char *property = field_property (field, scheme);
+  g_autofree char *value = NULL;
+  const char *colon;
+
+  if (g_ascii_strcasecmp (e_vcard_attribute_get_name (attr), property) != 0)
+    return FALSE;
+  value = nth_value (attr, 0);
+  if (g_str_has_suffix (field, "-"))
+    {
+      g_autofree char *text = trimmed (value);
+
+      if (!*text)
+        return FALSE;
+      if (id)
+        *id = g_steal_pointer (&text);
+      return TRUE;
+    }
+  colon = strchr (value, ':');
+  if (!colon || g_ascii_strncasecmp (value, scheme, colon - value) != 0 || scheme[colon - value])
+    return FALSE;
+  if (id)
+    *id = trimmed (colon + 1);
+  return TRUE;
+}
+
+/* the first property of the contact that holds @scheme's id in @field ("IMPP:whatsapp:39333…", with or without an
+ * X-SERVICE-TYPE parameter, or "X-WHATSAPP:39333…"); the id in @id */
 static EVCardAttribute *
-find_impp (EContact *contact, const char *scheme, char **id)
+find_in_field (EContact *contact, const char *field, const char *scheme, char **id)
 {
   for (GList *l = e_vcard_get_attributes (E_VCARD (contact)); l; l = l->next)
-    {
-      EVCardAttribute *attr = l->data;
-      g_autofree char *value = NULL;
-      const char *colon;
+    if (holds_channel (l->data, field, scheme, id))
+      return l->data;
+  return NULL;
+}
 
-      if (g_ascii_strcasecmp (e_vcard_attribute_get_name (attr), "IMPP") != 0)
-        continue;
-      value = nth_value (attr, 0);
-      colon = strchr (value, ':');
-      if (colon && g_ascii_strncasecmp (value, scheme, colon - value) == 0 && !scheme[colon - value])
-        {
-          if (id)
-            *id = trimmed (colon + 1);
-          return attr;
-        }
+/* the property that holds @scheme's id: the read fields in their order, then @legacy_property */
+static EVCardAttribute *
+find_channel (EContact *contact, const char *scheme, const char *legacy_property, const CtImForm *form, char **id)
+{
+  EVCardAttribute *attr;
+
+  for (guint i = 0; form->read_fields && form->read_fields[i]; i++)
+    if ((attr = find_in_field (contact, form->read_fields[i], scheme, id)))
+      return attr;
+  if (legacy_property && *legacy_property)
+    {
+      attr = e_vcard_get_attribute (E_VCARD (contact), legacy_property);
+      if (attr && id)
+        *id = trimmed (nth_value (attr, 0));
+      return attr;
     }
   return NULL;
 }
 
+gboolean
+ct_im_form_usable (const CtImForm *form)
+{
+  return form && form->write_field && *form->write_field && form->read_fields && form->read_fields[0];
+}
+
 char *
-ct_contact_get_channel (EContact *contact, const char *scheme, const char *legacy_property)
+ct_contact_get_channel (EContact *contact, const char *scheme, const char *legacy_property, const CtImForm *form)
 {
   char *id = NULL;
 
-  if (find_impp (contact, scheme, &id))
+  if (find_channel (contact, scheme, legacy_property, form, &id) && id)
     return id;
-  return legacy_property && *legacy_property ? ct_contact_get_channel_legacy (contact, legacy_property)
-                                             : g_strdup ("");
+  g_free (id);
+  return g_strdup ("");
 }
 
 void
-ct_contact_set_channel (EContact *contact, const char *scheme, const char *legacy_property, const char *value)
+ct_contact_set_channel (EContact *contact, const char *scheme, const char *legacy_property, const CtImForm *form,
+                        const char *value)
 {
   EVCard *vcard = E_VCARD (contact);
   g_autofree char *text = trimmed (value);
-  g_autofree char *line = g_strconcat (scheme, ":", text, NULL);
-  EVCardAttribute *impp = find_impp (contact, scheme, NULL);
+  g_autofree char *old = NULL;
+  g_autofree char *property = field_property (form->write_field, scheme);
+  g_autofree char *line = g_str_has_suffix (form->write_field, "-") ? g_strdup (text)
+                                                                    : g_strconcat (scheme, ":", text, NULL);
+  EVCardAttribute *keep = find_channel (contact, scheme, legacy_property, form, &old);
+  g_autoptr(GPtrArray) drop = g_ptr_array_new ();
 
-  /* an id an older Contacts wrote as X-WHATSAPP / X-TELEGRAM moves to IMPP with this write */
-  if (legacy_property && *legacy_property)
-    e_vcard_remove_attributes (vcard, NULL, legacy_property);
+  /* the property that held the id stays, its parameters too, when it is already the written form */
+  if (keep && (!*text || g_ascii_strcasecmp (e_vcard_attribute_get_name (keep), property) != 0))
+    keep = NULL;
+  /* the old id goes in every form it is read in (an address book may hold it twice); another id of the channel
+   * stays. An id an older Contacts wrote as X-WHATSAPP / X-TELEGRAM moves to the written form. */
+  for (GList *l = e_vcard_get_attributes (vcard); l; l = l->next)
+    {
+      EVCardAttribute *attr = l->data;
+      gboolean legacy = legacy_property && *legacy_property && g_ascii_strcasecmp (legacy_property, property) != 0
+                        && g_ascii_strcasecmp (e_vcard_attribute_get_name (attr), legacy_property) == 0;
+      gboolean same = FALSE;
+
+      for (guint i = 0; !same && old && form->read_fields && form->read_fields[i]; i++)
+        {
+          g_autofree char *id = NULL;
+
+          same = holds_channel (attr, form->read_fields[i], scheme, &id) && g_strcmp0 (id, old) == 0;
+        }
+      if (attr != keep && (legacy || same))
+        g_ptr_array_add (drop, attr);
+    }
+  for (guint i = 0; i < drop->len; i++)
+    e_vcard_remove_attribute (vcard, drop->pdata[i]);
   if (!*text)
+    return;
+  if (keep)
     {
-      if (impp)
-        e_vcard_remove_attribute (vcard, impp);
+      e_vcard_attribute_remove_values (keep);
+      e_vcard_attribute_add_value (keep, line);
       return;
     }
-  if (impp)
-    {
-      /* the property stays as it is, its parameters too; another id of the same channel is left alone */
-      e_vcard_attribute_remove_values (impp);
-      e_vcard_attribute_add_value (impp, line);
-      return;
-    }
-  e_vcard_append_attribute_with_value (vcard, e_vcard_attribute_new (NULL, "IMPP"), line);
+  e_vcard_append_attribute_with_value (vcard, e_vcard_attribute_new (NULL, property), line);
 }
 
 /* --- merging two contacts */

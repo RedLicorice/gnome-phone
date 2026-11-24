@@ -159,15 +159,25 @@ void       ct_contact_set_items (EContact *contact, CtKind kind, GPtrArray *item
 
 /* --- channel identities
  * What Minerva's messaging providers know a contact by (a WhatsApp number, a Telegram id) is an IM row of the contact
- * in the address book, written as Minerva's memory service reads it: IMPP:<scheme>:<id> ("IMPP:whatsapp:39333…").
- * An id an older Contacts wrote as @legacy_property (X-WHATSAPP, X-TELEGRAM) is read too, and moves to IMPP the
- * next time the channel is written. Everything else of the vCard is left as it is. */
+ * in the address book, written and read as Minerva's memory service does ([eds] im_write_field, im_read_fields,
+ * through minerva-config's people ui): a field ending in '-' is the prefix of X-<CHANNEL>:<id> ("X-WHATSAPP:39333…"),
+ * any other holds <scheme>:<id> ("IMPP:whatsapp:39333…"). An id an older Contacts wrote as @legacy_property is read
+ * too, and moves to the written form the next time the channel is written. Everything else of the vCard is left as
+ * it is. */
+typedef struct {
+  const char *write_field;          /* "X-" or "IMPP" */
+  const char *const *read_fields;   /* NULL-terminated, in the order they are tried */
+} CtImForm;
 
+/* there is a form to write a channel id in and one to read it */
+gboolean ct_im_form_usable (const CtImForm *form);
 /* the channel's first id, "" when the contact has none */
-char *ct_contact_get_channel (EContact *contact, const char *scheme, const char *legacy_property);
-/* sets it (the IMPP property keeps its parameters), or removes it when @value is empty; other ids of the same
- * channel stay, and so does every other IMPP property */
-void  ct_contact_set_channel (EContact *contact, const char *scheme, const char *legacy_property, const char *value);
+char *ct_contact_get_channel (EContact *contact, const char *scheme, const char *legacy_property, const CtImForm *form);
+/* sets it in the written form (a property already in that form keeps its parameters), or removes it when @value is
+ * empty; the old id goes in every form it is read in, other ids of the same channel stay, and so does every other
+ * property */
+void  ct_contact_set_channel (EContact *contact, const char *scheme, const char *legacy_property, const CtImForm *form,
+                              const char *value);
 
 /* What a signature over the card covers, as one comparable text: every property but the @unsigned_fields (a trailing
  * '*' matches a prefix, as in the token service's [ownercard] unsigned_fields), each "NAME:value" with the value's

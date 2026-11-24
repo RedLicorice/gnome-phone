@@ -152,7 +152,7 @@ struct _Editor {
 
 static void update_section (Section *section);
 
-/* one chat channel's id (an IMPP:<scheme>:<id> row of the card) */
+/* one chat channel's id (an X-<CHANNEL>:<id> or IMPP:<scheme>:<id> row of the card, ct_mnv_im_form) */
 typedef struct {
   char *id;                     /* the scheme: the messaging provider's id */
   char *legacy;                 /* the property an older Contacts wrote it as, "" for none */
@@ -1432,14 +1432,15 @@ channel_legacy (const char *id)
 }
 
 /* Minerva's chat channels (WhatsApp, Telegram: the messaging providers, people ui im_services), one row each, written
- * as IMPP:<scheme>:<id>; only where Minerva's texts are loaded. On a signed card a change is checked at saving. */
+ * as the memory service writes them (ct_mnv_im_form); only where Minerva's texts are loaded and say how. On a signed
+ * card a change is checked at saving. */
 static GtkWidget *
 channels_section (Editor *editor)
 {
   GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
   GtkWidget *icon_column = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
   GtkWidget *rows = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-  JsonArray *services = ct_mnv_ui_ready () ? ct_mnv_list ("im_services") : NULL;
+  JsonArray *services = ct_mnv_ui_ready () && ct_im_form_usable (ct_mnv_im_form ()) ? ct_mnv_list ("im_services") : NULL;
   GtkWidget *icon = ct_tinted_icon_new ("ct-message-symbolic", 24, CT_ED_ICON_COLOR);
 
   editor->channel_rows = g_ptr_array_new_with_free_func (channel_row_free);
@@ -1461,7 +1462,8 @@ channels_section (Editor *editor)
 
       row->id = g_strdup (ns_json_str (service, "id"));
       row->legacy = g_strdup (channel_legacy (row->id));
-      row->original = ct_contact_get_channel (editor->original, row->id, *row->legacy ? row->legacy : NULL);
+      row->original = ct_contact_get_channel (editor->original, row->id, *row->legacy ? row->legacy : NULL,
+                                              ct_mnv_im_form ());
       field = field_new (ns_json_str (service, "title"), row->original, FALSE, GTK_INPUT_PURPOSE_FREE_FORM,
                          GTK_INPUT_HINT_NONE, G_CALLBACK (on_channel_changed), editor, &row->editable);
       gtk_widget_set_hexpand (field, TRUE);
@@ -1671,7 +1673,7 @@ build_contact (Editor *editor)
       g_autofree char *text = g_strstrip (editable_text (row->editable));
 
       if (g_strcmp0 (text, row->original) != 0)   /* an untouched id keeps its property as it was */
-        ct_contact_set_channel (contact, row->id, *row->legacy ? row->legacy : NULL, text);
+        ct_contact_set_channel (contact, row->id, *row->legacy ? row->legacy : NULL, ct_mnv_im_form (), text);
     }
   ct_contact_set_labels (contact, editor->labels);
   if (editor->photo_bytes)

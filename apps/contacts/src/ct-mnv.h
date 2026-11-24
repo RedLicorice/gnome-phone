@@ -16,6 +16,8 @@
 #include <gio/gio.h>
 #include <json-glib/json-glib.h>
 
+#include "ct-contact.h"
+
 G_BEGIN_DECLS
 
 typedef void (*CtMnvDone) (JsonObject *root, const char *error, gpointer data);
@@ -32,6 +34,9 @@ gboolean    ct_mnv_ui_ready (void);
 const char *ct_mnv_text     (const char *key);
 char       *ct_mnv_textf    (const char *key, const char *const *pairs);
 int         ct_mnv_int      (const char *key);
+/* how a chat channel id is written and read on a card, as Minerva's memory service does (the data's
+ * im_write_field, im_read_fields); not usable (ct_im_form_usable) until the data is here or when it has none */
+const CtImForm *ct_mnv_im_form (void);
 double      ct_mnv_double   (const char *key);
 /* a member of one of the data's top-level maps ("kinds", "kind_one"), "" when absent */
 const char *ct_mnv_map      (const char *map, const char *key);

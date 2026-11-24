@@ -728,10 +728,11 @@ channel_write (M *m, guint index, const char *value, const char *done)
   g_autoptr (GPtrArray) changed = NULL;
   Ask *ask;
 
-  if (!contact || !channel)
+  if (!contact || !channel || !ct_im_form_usable (ct_mnv_im_form ()))
     return;
   copy = e_contact_duplicate (contact);
-  ct_contact_set_channel (copy, ns_json_str (channel, "id"), ns_json_str (channel, "legacy_property"), value);
+  ct_contact_set_channel (copy, ns_json_str (channel, "id"), ns_json_str (channel, "legacy_property"), ct_mnv_im_form (),
+                          value);
   changed = g_ptr_array_new_with_free_func (g_object_unref);
   g_ptr_array_add (changed, g_object_ref (copy));
   ask = ask_new (m, NULL, NULL);
@@ -779,7 +780,7 @@ on_channel (GtkWidget *row, gpointer data)
   guint index = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (row), "ct-channel"));
   JsonObject *channel = channel_at (index);
   EContact *contact = contact_of (m);
-  g_autofree char *value = contact && channel ? ct_contact_get_channel (contact, ns_json_str (channel, "id"), ns_json_str (channel, "legacy_property"))
+  g_autofree char *value = contact && channel ? ct_contact_get_channel (contact, ns_json_str (channel, "id"), ns_json_str (channel, "legacy_property"), ct_mnv_im_form ())
                                               : g_strdup ("");
   g_autofree char *at = g_strdup_printf ("%u", index);
 
@@ -804,10 +805,10 @@ channel_rows (M *m)
   for (guint i = 0; channels && i < json_array_get_length (channels); i++)
     {
       JsonObject *channel = json_array_get_object_element (channels, i);
-      g_autofree char *value = contact ? ct_contact_get_channel (contact, ns_json_str (channel, "id"), ns_json_str (channel, "legacy_property"))
+      g_autofree char *value = contact ? ct_contact_get_channel (contact, ns_json_str (channel, "id"), ns_json_str (channel, "legacy_property"), ct_mnv_im_form ())
                                        : g_strdup ("");
       GtkWidget *row = entry_row (m, ns_json_str (channel, "title"), *value ? value : ct_mnv_text ("channel_none"),
-                                  G_CALLBACK (on_channel), contact != NULL);
+                                  G_CALLBACK (on_channel), contact != NULL && ct_im_form_usable (ct_mnv_im_form ()));
 
       g_object_set_data (G_OBJECT (row), "ct-channel", GUINT_TO_POINTER (i));
     }
@@ -995,7 +996,8 @@ render (M *m)
   for (guint i = 0; contact && channels && i < json_array_get_length (channels); i++)
     {
       g_autofree char *value = ct_contact_get_channel (contact, ns_json_str (json_array_get_object_element (channels, i), "id"),
-                                              ns_json_str (json_array_get_object_element (channels, i), "legacy_property"));
+                                              ns_json_str (json_array_get_object_element (channels, i), "legacy_property"),
+                                              ct_mnv_im_form ());
 
       g_string_append_printf (now, "\n%s", value);
     }
