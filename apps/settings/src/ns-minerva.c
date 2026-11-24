@@ -45,6 +45,8 @@ struct Mn {
   GPtrArray *vp_actions;                /* the voiceprint buttons: "mn-when" says in which state each shows */
   GtkWidget *ph_info;                   /* the owner's secret phrase: its row (a group's "phrase" data) */
   char      *ph_help, *ph_remote;       /* its subtitle: the help, or the remote recogniser's warning ({engines}) */
+  GtkWidget *nm_g;                      /* her names: the main one and the nicknames, rebuilt on every refresh */
+  JsonObject *nm;                       /* their texts and the save command (a group's "names" data) */
   guint      poll_id;                   /* refreshes while an enrollment runs */
   guint      poll_s;
   GPtrArray *srows;                     /* their rows: "mn-key", "mn-kind" (and "mn-ids" for a picker) */
@@ -891,6 +893,192 @@ build_app_row (GtkWidget *grp, JsonObject *ap)
   ns_row_on_activate (row, launch_app_row, NULL);
 }
 
+/* ---- her names (Parola di attivazione): the main name, read only (the assistant's identity), and the owner's
+ * nicknames, each with the phrases it lets him say. The list and the phrases come with the status ("names":
+ * `minerva-config names`), the texts and the save command with the group ("names" of settings_ui.json). A change saves
+ * the whole list of nicknames: the data's args, then every nickname in order; minerva-config checks it (empty, twice,
+ * a command word, another assistant's name) and its refusal is shown as it says it. ---- */
+
+typedef struct {
+  Mn    *m;
+  guint  index;    /* the nickname's place in the list; the list's length: a new one */
+  char  *entry;    /* the nickname as it is now ("" for a new one) */
+} NmOp;
+
+static void
+nm_op_free (NmOp *op)
+{
+  g_free (op->entry);
+  g_free (op);
+}
+
+static NmOp *
+nm_op_new (Mn *m, guint index, const char *entry)
+{
+  NmOp *op = g_new0 (NmOp, 1);
+  op->m = m;
+  op->index = index;
+  op->entry = g_strdup (entry);
+  return op;
+}
+
+/* the data's text `key` of `o` with `{what}` replaced by `value` */
+static char *
+nm_text (JsonObject *o, const char *key, const char *what, const char *value)
+{
+  g_autoptr (GString) t = g_string_new (str_of (o, key));
+  g_string_replace (t, what, value, 0);
+  return g_string_free (g_steal_pointer (&t), FALSE);
+}
+
+/* "Sveglia: «ehi mimi» • In conversazione: «mimi»": the phrases of an entry, each list in its own words */
+static void
+nm_forms_append (GString *s, JsonObject *ui, JsonArray *forms, const char *label)
+{
+  if (!forms || !json_array_get_length (forms))
+    return;
+  g_autoptr (GString) list = g_string_new (NULL);
+  for (guint i = 0; i < json_array_get_length (forms); i++) {
+    g_autofree char *f = nm_text (ui, "form", "{form}", json_array_get_string_element (forms, i));
+    g_string_append_printf (list, "%s%s", i ? str_of (ui, "forms_sep") : "", f);
+  }
+  g_autofree char *part = nm_text (ui, label, "{forms}", list->str);
+  g_string_append_printf (s, "%s%s", s->len ? str_of (ui, "parts_sep") : "", part);
+}
+
+static char *
+nm_forms (JsonObject *ui, JsonObject *entry)
+{
+  GString *s = g_string_new (NULL);
+  nm_forms_append (s, ui, arr_of (entry, "wake"), "wake");
+  nm_forms_append (s, ui, arr_of (entry, "attention"), "attention");
+  return g_string_free (s, FALSE);
+}
+
+static void
+nm_done (Mn *m, JsonObject *root, const char *err, gpointer data)
+{
+  m->busy = FALSE;
+  say (m, err ? err : str_of (m->nm, "saved"), err != NULL);
+  mn_refresh (m);
+}
+
+/* save the nicknames of the status with the one at `index` set to `value` (NULL: dropped; index past the end: added) */
+static void
+nm_save (Mn *m, guint index, const char *value)
+{
+  if (m->busy) {
+    say (m, "Still applying the last change…", FALSE);
+    return;
+  }
+  JsonArray *nicks = arr_of (obj_of (m->st, "names"), "nicknames"), *args = arr_of (m->nm, "args");
+  guint n = nicks ? json_array_get_length (nicks) : 0;
+  g_autoptr (GPtrArray) v = g_ptr_array_new ();
+  for (guint k = 0; args && k < json_array_get_length (args); k++)
+    g_ptr_array_add (v, (gpointer) json_array_get_string_element (args, k));
+  for (guint i = 0; i < n; i++) {
+    const char *e = str_of (json_array_get_object_element (nicks, i), "entry");
+    if (i != index)
+      g_ptr_array_add (v, (gpointer) e);
+    else if (value)
+      g_ptr_array_add (v, (gpointer) value);
+  }
+  if (index >= n && value)
+    g_ptr_array_add (v, (gpointer) value);
+  g_ptr_array_add (v, NULL);
+  m->busy = TRUE;
+  say (m, str_of (m->nm, "saving"), FALSE);
+  mn_run (m, (const char *const *) v->pdata, nm_done, NULL);
+}
+
+static void
+nm_entered (const char *text, gpointer data)
+{
+  NmOp *op = data;
+  if (text && g_strcmp0 (text, op->entry))
+    nm_save (op->m, op->index, text);   /* an empty one goes too: minerva-config says why it is refused */
+  nm_op_free (op);
+}
+
+static void
+nm_answered (gboolean yes, gpointer data)
+{
+  NmOp *op = data;
+  if (yes)
+    nm_save (op->m, op->index, NULL);
+  nm_op_free (op);
+}
+
+/* the dialogs get their own copy of the row's op: a refresh may rebuild the rows while one is open */
+static void
+nm_rename (GtkButton *b, gpointer data)
+{
+  NmOp *op = data;
+  JsonObject *t = obj_of (op->m->nm, "rename");
+  ns_ask (GTK_WIDGET (b), str_of (t, "heading"), str_of (t, "body"), op->entry, FALSE, str_of (t, "ok"), nm_entered,
+          nm_op_new (op->m, op->index, op->entry));
+}
+
+static void
+nm_remove (GtkButton *b, gpointer data)
+{
+  NmOp *op = data;
+  JsonObject *t = obj_of (op->m->nm, "remove");
+  g_autofree char *heading = nm_text (t, "heading", "{name}", op->entry);
+  ns_confirm (GTK_WIDGET (b), heading, str_of (t, "body"), str_of (t, "ok"), TRUE, nm_answered,
+              nm_op_new (op->m, op->index, op->entry));
+}
+
+static void
+nm_add (GtkWidget *row, gpointer data)
+{
+  NmOp *op = data;
+  JsonObject *t = obj_of (op->m->nm, "add");
+  ns_ask (row, str_of (t, "heading"), str_of (t, "body"), NULL, FALSE, str_of (t, "ok"), nm_entered,
+          nm_op_new (op->m, op->index, ""));
+}
+
+static void
+fill_names (Mn *m)
+{
+  JsonObject *st = obj_of (m->st, "names");
+  if (!m->nm_g || !st)
+    return;
+  ns_group_clear (m->nm_g);
+  JsonArray *own = arr_of (st, "own"), *nicks = arr_of (st, "nicknames");
+  /* the main name: one row, its own entries' phrases together */
+  g_autoptr (GString) sub = g_string_new (str_of (m->nm, "main"));
+  for (guint i = 0; own && i < json_array_get_length (own); i++) {
+    g_autofree char *f = nm_forms (m->nm, json_array_get_object_element (own, i));
+    g_string_append_printf (sub, "%s%s", str_of (m->nm, "parts_sep"), f);
+  }
+  ns_row (m->nm_g, NULL, NULL, str_of (st, "name"), sub->str);
+  guint n = nicks ? json_array_get_length (nicks) : 0;
+  for (guint i = 0; i < n; i++) {
+    JsonObject *e = json_array_get_object_element (nicks, i);
+    g_autofree char *f = nm_forms (m->nm, e);
+    GtkWidget *row = ns_row (m->nm_g, NULL, NULL, str_of (e, "entry"), f);
+    NmOp *op = nm_op_new (m, i, str_of (e, "entry"));
+    g_object_set_data_full (G_OBJECT (row), "mn-nm-op", op, (GDestroyNotify) nm_op_free);
+    GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_box_append (GTK_BOX (box), icon_button ("document-edit-symbolic", str_of (obj_of (m->nm, "rename"), "tip"),
+                                                G_CALLBACK (nm_rename), op, 0, TRUE));
+    gtk_box_append (GTK_BOX (box), icon_button ("list-remove-symbolic", str_of (obj_of (m->nm, "remove"), "tip"),
+                                                G_CALLBACK (nm_remove), op, 0, TRUE));
+    ns_row_suffix (row, box);
+  }
+  gint64 max = json_object_get_int_member_with_default (st, "max_nicknames", 0);
+  if ((gint64) n < max) {
+    NmOp *op = nm_op_new (m, n, "");
+    GtkWidget *add = ns_row_button (m->nm_g, str_of (obj_of (m->nm, "add"), "label"), FALSE, nm_add, op);
+    g_object_set_data_full (G_OBJECT (add), "mn-nm-op", op, (GDestroyNotify) nm_op_free);
+  } else {
+    g_autofree char *count = g_strdup_printf ("%" G_GINT64_FORMAT, max);
+    g_autofree char *full = nm_text (m->nm, "full", "{count}", count);
+    ns_row (m->nm_g, NULL, NULL, full, NULL);
+  }
+}
+
 /* the groups of one page: a group of settings_ui.json names its page, the Voice page when it names none; `after`
  * takes the ones placed after the page's own cards ("place": "after_engines": the Voice page's Comandi, Avanzate) */
 static void
@@ -902,7 +1090,12 @@ build_groups (Mn *m, const char *page, gboolean after)
     const char *gp = str_of (g, "page");
     if (g_strcmp0 (*gp ? gp : "voice", page) || (*str_of (g, "place") != '\0') != after)
       continue;
-    GtkWidget *grp = ns_group (m->sg_box, str_of (g, "title"));
+    JsonObject *nm = obj_of (g, "names");   /* her names: a card of their own, first under the group's title */
+    if (nm && !m->nm) {
+      m->nm = json_object_ref (nm);
+      m->nm_g = ns_group (m->sg_box, str_of (g, "title"));
+    }
+    GtkWidget *grp = ns_group (m->sg_box, nm ? NULL : str_of (g, "title"));
     JsonArray *rows = arr_of (g, "rows");
     for (guint j = 0; rows && j < json_array_get_length (rows); j++) {
       JsonObject *r = json_array_get_object_element (rows, j);
@@ -1078,6 +1271,7 @@ status_done (Mn *m, JsonObject *root, const char *err, gpointer data)
   fill_groups (m);
   fill_voiceprint (m);
   fill_phrase (m);
+  fill_names (m);
 }
 
 static void
@@ -1111,6 +1305,8 @@ mn_free (Mn *m)
   g_free (m->ph_help);
   g_free (m->ph_remote);
   g_free (m->gpage);
+  if (m->nm)
+    json_object_unref (m->nm);
   g_free (m);
 }
 
