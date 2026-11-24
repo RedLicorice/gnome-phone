@@ -497,6 +497,35 @@ test_signed_text (void)
   g_assert_nonnull (strstr (changed, "X-TELEGRAM:25730854\n"));
 }
 
+/* "Collega WhatsApp": a chat picked for an existing contact goes through the editor's channel write. It adds the id
+ * in the written form and leaves every other line as it was, the signed ones (X-MINERVA-OWNER-SIG, X-MINERVA-ROLE-*)
+ * included; the same id once more writes nothing. */
+static void
+test_link_channel (void)
+{
+  g_autoptr(EContact) contact = e_contact_new_from_vcard (
+    "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:pas-7\r\nFN:Maria Rossi\r\nN:Rossi;Maria;;;\r\nTEL;TYPE=CELL:+39 333 1234567\r\n"
+    "X-TELEGRAM:25730854\r\nX-MINERVA-ROLE-FAMILY:2026-11-01\r\nX-MINERVA-OWNER-SIG:MEUCIQDx7Yz\r\n"
+    "NOTE:una nota\r\nEND:VCARD\r\n");
+  g_autofree char *original = ct_contact_get_channel (contact, "whatsapp", "X-WHATSAPP", &im_form);
+  g_autofree char *before = e_vcard_to_string (E_VCARD (contact), EVC_FORMAT_VCARD_30);
+  g_autofree char *after = NULL, *linked = NULL, *again = NULL;
+  g_autoptr(GString) without = NULL;
+
+  g_assert_cmpstr (original, ==, "");
+  g_assert_true (ct_contact_apply_channel (contact, "whatsapp", "X-WHATSAPP", &im_form, original, " +393331234567 "));
+  linked = ct_contact_get_channel (contact, "whatsapp", "X-WHATSAPP", &im_form);
+  g_assert_cmpstr (linked, ==, "+393331234567");
+  after = e_vcard_to_string (E_VCARD (contact), EVC_FORMAT_VCARD_30);
+  /* the card is the one it was, with the id's line and nothing else */
+  without = g_string_new (after);
+  g_assert_cmpuint (g_string_replace (without, "X-WHATSAPP:+393331234567\r\n", "", 0), ==, 1);
+  g_assert_cmpstr (without->str, ==, before);
+  g_assert_false (ct_contact_apply_channel (contact, "whatsapp", "X-WHATSAPP", &im_form, linked, "+393331234567"));
+  again = e_vcard_to_string (E_VCARD (contact), EVC_FORMAT_VCARD_30);
+  g_assert_cmpstr (again, ==, after);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -514,6 +543,7 @@ main (int argc, char **argv)
   g_test_add_func ("/contact/dates", test_dates);
   g_test_add_func ("/contact/channels", test_channels);
   g_test_add_func ("/contact/signed-text", test_signed_text);
+  g_test_add_func ("/contact/link-channel", test_link_channel);
   g_test_add_func ("/contact/merge", test_merge);
   g_test_add_func ("/contact/merge-fills", test_merge_fills_what_is_missing);
   g_test_add_func ("/contact/word-prefix", test_word_prefix);

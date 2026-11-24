@@ -21,6 +21,7 @@
 #include "ct-editor.h"
 #include "ct-avatar.h"
 #include "ct-dialogs.h"
+#include "ct-minerva-pages.h"
 #include "ct-mnv.h"
 #include "ct-page.h"
 #include "ct-popup.h"
@@ -142,8 +143,9 @@ struct _Editor {
   GdkTexture *photo_texture;
   guint32 photo_tint;
 
-  GtkWidget *more_fields, *legacy, *channels;
+  GtkWidget *more_fields, *legacy, *channels, *channel_list;
   GPtrArray *channel_rows;      /* ChannelRow: Minerva's chat channels (people ui im_services), one row each */
+  GFile *prefill_photo;         /* a new contact's picture from a prefill, read once the page is on screen */
   gboolean expanded;            /* "More fields" was tapped */
   char *initial_state;
   char *saved_name;
@@ -157,7 +159,7 @@ typedef struct {
   char *id;                     /* the scheme: the messaging provider's id */
   char *legacy;                 /* the property an older Contacts wrote it as, "" for none */
   char *original;               /* the id the card had when the editor opened */
-  GtkWidget *editable;
+  GtkWidget *editable, *line;
 } ChannelRow;
 
 static void
@@ -1157,29 +1159,39 @@ set_photo (Editor *editor, GBytes *bytes)
   gtk_widget_queue_draw (editor->photo);
 }
 
-/* the chosen picture, cut to its centre square and made at most 720 px (the crop step is left out) */
-static void
-on_photo_file (GObject *source, GAsyncResult *result, gpointer data)
+/* a picture file as the contact's photo, cut to its centre square and made at most 720 px (the crop step is left
+ * out); FALSE when it cannot be read, or is larger than Minerva's data allows (people ui photo_max_bytes: a file is
+ * not decoded whole into memory for a 720 px square). The page must be on screen (its renderer draws the square). */
+static gboolean
+photo_from_file (Editor *editor, GFile *file)
 {
-  Editor *editor = data;
-  g_autoptr(GFile) file = gtk_file_dialog_open_finish (GTK_FILE_DIALOG (source), result, NULL);
   g_autoptr(GdkTexture) texture = NULL;
   g_autoptr(GError) error = NULL;
   g_autoptr(GskRenderNode) node = NULL;
   g_autoptr(GdkTexture) square = NULL;
   g_autoptr(GBytes) bytes = NULL;
+  g_autoptr(GFileInfo) info = NULL;
   GtkSnapshot *snapshot;
   GskRenderer *renderer;
   int w, h, side, size;
+  double max_bytes = ct_mnv_double ("photo_max_bytes");
 
-  if (!file)
-    return;
+  info = g_file_query_info (file, G_FILE_ATTRIBUTE_STANDARD_SIZE, G_FILE_QUERY_INFO_NONE, NULL, &error);
+  if (!info)
+    {
+      g_warning ("photo: %s", error->message);
+      return FALSE;
+    }
+  if (max_bytes > 0 && (double) g_file_info_get_size (info) > max_bytes)
+    {
+      g_warning ("photo: %" G_GOFFSET_FORMAT " bytes, more than photo_max_bytes", g_file_info_get_size (info));
+      return FALSE;
+    }
   texture = gdk_texture_new_from_file (file, &error);
   if (!texture)
     {
       g_warning ("photo: %s", error->message);
-      ct_window_toast (editor->window, _("Couldn't save contact photo changes"));
-      return;
+      return FALSE;
     }
   w = gdk_texture_get_width (texture);
   h = gdk_texture_get_height (texture);
@@ -1197,6 +1209,18 @@ on_photo_file (GObject *source, GAsyncResult *result, gpointer data)
   square = gsk_renderer_render_texture (renderer, node, &GRAPHENE_RECT_INIT (0, 0, size, size));
   bytes = gdk_texture_save_to_png_bytes (square);
   set_photo (editor, bytes);
+  return TRUE;
+}
+
+/* the chosen picture */
+static void
+on_photo_file (GObject *source, GAsyncResult *result, gpointer data)
+{
+  Editor *editor = data;
+  g_autoptr(GFile) file = gtk_file_dialog_open_finish (GTK_FILE_DIALOG (source), result, NULL);
+
+  if (file && !photo_from_file (editor, file))
+    ct_window_toast (editor->window, _("Couldn't save contact photo changes"));
 }
 
 static void
@@ -1435,7 +1459,7 @@ channel_legacy (const char *id)
  * as the memory service writes them (ct_mnv_im_form); only where Minerva's texts are loaded and say how. On a signed
  * card a change is checked at saving. */
 static GtkWidget *
-channels_section (Editor *editor)
+channels_section (Editor *editor, EContact *prefill)
 {
   GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
   GtkWidget *icon_column = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
@@ -1459,12 +1483,16 @@ channels_section (Editor *editor)
       ChannelRow *row = g_new0 (ChannelRow, 1);
       GtkWidget *line = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
       GtkWidget *field, *title;
+      g_autofree char *initial = NULL;
 
       row->id = g_strdup (ns_json_str (service, "id"));
       row->legacy = g_strdup (channel_legacy (row->id));
       row->original = ct_contact_get_channel (editor->original, row->id, *row->legacy ? row->legacy : NULL,
                                               ct_mnv_im_form ());
-      field = field_new (ns_json_str (service, "title"), row->original, FALSE, GTK_INPUT_PURPOSE_FREE_FORM,
+      /* a new contact's id from its prefill (an imported chat's), saved as a typed one would be */
+      initial = editor->is_new && prefill ? ct_contact_get_channel (prefill, row->id, NULL, ct_mnv_im_form ())
+                                          : g_strdup (row->original);
+      field = field_new (ns_json_str (service, "title"), initial, FALSE, GTK_INPUT_PURPOSE_FREE_FORM,
                          GTK_INPUT_HINT_NONE, G_CALLBACK (on_channel_changed), editor, &row->editable);
       gtk_widget_set_hexpand (field, TRUE);
       gtk_widget_add_css_class (line, "ct-ed-row");
@@ -1476,10 +1504,64 @@ channels_section (Editor *editor)
       gtk_widget_set_valign (title, GTK_ALIGN_CENTER);
       gtk_box_append (GTK_BOX (line), title);
       gtk_box_append (GTK_BOX (rows), line);
+      row->line = line;
       g_ptr_array_add (editor->channel_rows, row);
     }
+  editor->channel_list = rows;
   gtk_widget_set_visible (box, editor->channel_rows->len > 0);
   return box;
+}
+
+/* "Collega WhatsApp": the chat picked from the provider's is the channel row's id. Nothing is written before Save,
+ * whose signed-card check covers it as it covers a typed id. */
+typedef struct {
+  Editor *editor;
+  ChannelRow *row;
+} Link;
+
+static void
+on_link_picked (const char *provider, const char *chat, gpointer data)
+{
+  Link *link = data;
+
+  gtk_editable_set_text (GTK_EDITABLE (link->row->editable), chat);
+}
+
+static void
+on_link (NeoPressable *button, Link *link)
+{
+  ct_window_push (link->editor->window,
+                  ct_mnv_chats_new (link->editor->window, link->row->id, TRUE, on_link_picked, link, NULL));
+}
+
+/* under each channel whose provider imports chats, its "Collega <provider>" (an existing contact's editor) */
+static void
+on_imports (JsonObject *root, const char *err, gpointer data)
+{
+  Editor *editor = data;
+
+  if (err)
+    return;
+  for (guint i = 0; i < editor->channel_rows->len; i++)
+    {
+      ChannelRow *row = editor->channel_rows->pdata[i];
+      JsonObject *provider = ct_mnv_import_provider (row->id);
+      g_autofree char *text = NULL;
+      GtkWidget *button;
+      Link *link;
+
+      if (!provider)
+        continue;
+      text = ct_mnv_textf ("import_link", (const char *const[]) { "provider", ns_json_str (provider, "label"), NULL });
+      button = ct_text_button (text, "ct-ed-link");
+      gtk_widget_set_halign (button, GTK_ALIGN_START);
+      link = g_new0 (Link, 1);
+      link->editor = editor;
+      link->row = row;
+      g_object_set_data_full (G_OBJECT (button), "ct-link", link, g_free);
+      g_signal_connect (button, "clicked", G_CALLBACK (on_link), link);
+      gtk_box_insert_child_after (GTK_BOX (editor->channel_list), button, row->line);
+    }
 }
 
 /* "Can't update this info": the IM and SIP rows, which the editor shows but cannot change (§4.18) */
@@ -1670,10 +1752,10 @@ build_contact (Editor *editor)
   for (guint i = 0; editor->channel_rows && i < editor->channel_rows->len; i++)
     {
       ChannelRow *row = editor->channel_rows->pdata[i];
-      g_autofree char *text = g_strstrip (editable_text (row->editable));
+      g_autofree char *text = editable_text (row->editable);
 
-      if (g_strcmp0 (text, row->original) != 0)   /* an untouched id keeps its property as it was */
-        ct_contact_set_channel (contact, row->id, *row->legacy ? row->legacy : NULL, ct_mnv_im_form (), text);
+      ct_contact_apply_channel (contact, row->id, *row->legacy ? row->legacy : NULL, ct_mnv_im_form (), row->original,
+                                text);
     }
   ct_contact_set_labels (contact, editor->labels);
   if (editor->photo_bytes)
@@ -1954,6 +2036,13 @@ on_back (CtPage *page, gpointer data)
 static void
 on_map (GtkWidget *widget, Editor *editor)
 {
+  /* a prefill's picture (an imported chat's); one that cannot be read leaves the photo empty, as it was */
+  if (editor->prefill_photo)
+    {
+      g_autoptr(GFile) file = g_steal_pointer (&editor->prefill_photo);
+
+      photo_from_file (editor, file);
+    }
   if (editor->is_new && editor->name_fields[1])
     gtk_widget_grab_focus (editor->name_fields[1]);
 }
@@ -1970,6 +2059,7 @@ editor_free (gpointer data)
   g_clear_pointer (&editor->channel_rows, g_ptr_array_unref);
   g_clear_pointer (&editor->photo_bytes, g_bytes_unref);
   g_clear_object (&editor->photo_texture);
+  g_clear_object (&editor->prefill_photo);
   g_clear_object (&editor->original);
   g_free (editor->uid);
   g_free (editor->book_uid);
@@ -2067,6 +2157,18 @@ ct_editor_new (GtkWidget *window, const char *uid, EContact *prefill)
       if (picture)
         e_contact_photo_free (picture);
     }
+  /* a new contact's picture from its prefill: inlined, or a file (an imported chat's) read once on screen */
+  if (editor->is_new && prefill)
+    {
+      EContactPhoto *picture = e_contact_get (prefill, E_CONTACT_PHOTO);
+
+      if (picture && picture->type == E_CONTACT_PHOTO_TYPE_INLINED && picture->data.inlined.length)
+        photo = g_bytes_new (picture->data.inlined.data, picture->data.inlined.length);
+      else if (picture && picture->type == E_CONTACT_PHOTO_TYPE_URI && picture->data.uri && *picture->data.uri)
+        editor->prefill_photo = g_file_new_for_uri (picture->data.uri);
+      if (picture)
+        e_contact_photo_free (picture);
+    }
   /* the photo's background: the card's own colour (it was opened from QuickContact) or #607d8b */
   editor->photo_tint = !editor->is_new ? ct_avatar_header_color (editor->profile ? CT_PROFILE_UID : uid)
                                        : CT_C_QC_DEFAULT_TINT;
@@ -2093,7 +2195,7 @@ ct_editor_new (GtkWidget *window, const char *uid, EContact *prefill)
   gtk_widget_add_css_class (editor->content, "ct-ed-content");
   gtk_box_append (GTK_BOX (editor->content), photo_area (editor));
   set_photo (editor, photo);
-  if (photo && editor->profile)
+  if (photo && (editor->profile || (editor->is_new && prefill)))
     g_bytes_unref (photo);
   gtk_box_append (GTK_BOX (editor->content), account_header (editor));
 
@@ -2101,8 +2203,10 @@ ct_editor_new (GtkWidget *window, const char *uid, EContact *prefill)
   for (int s = S_NICKNAME; s < S_LABELS; s++)
     gtk_box_append (GTK_BOX (editor->content), section_new (editor, s));
   gtk_box_append (GTK_BOX (editor->content), labels_section (editor));
-  editor->channels = channels_section (editor);
+  editor->channels = channels_section (editor, prefill);
   gtk_box_append (GTK_BOX (editor->content), editor->channels);
+  if (!editor->is_new && !editor->profile && editor->channel_rows->len)
+    ct_mnv_imports_load (G_OBJECT (page), on_imports, editor);
   load_rows (editor, editor->is_new && prefill ? prefill : editor->original,
              !editor->is_new ? prefill : NULL);
 

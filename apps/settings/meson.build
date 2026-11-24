@@ -32,11 +32,13 @@ executable('neo-settings',
   'src/ns-minerva.c', 'src/ns-avatar.c', 'src/ns-avatar-preview.c', 'src/ns-prompt.c', 'src/ns-events.c', 'src/ns-federation.c', 'src/ns-provider.c', 'src/ns-mc.c', 'src/ns-charge.c', 'src/ns-apikeys.c', 'src/ns-account.c', 'src/ns-ssh.c', 'src/ns-perm.c', 'src/ns-agents.c',
   # the node's assistant ({assistant} in a text), read the way Messaging reads it: its sources, not a copy
   '../messaging/src/msg-assistant.c', '../messaging/src/sms-provider.c', '../../common/minerva-layers.c',
+  # a chat's contact opens in the Contacts app through its actions, with the Dialer's helpers (libneo: their snackbar)
+  '../dialer/src/contacts-app.c', '../dialer/src/app-action.c',
   resources,
-  include_directories: include_directories('../messaging/src', '../../common'),
+  include_directories: include_directories('../messaging/src', '../../common', '../dialer/src'),
   c_args: ['-DASSISTANT_FILE="@0@"'.format(get_option('assistant-file')),
            '-DMINERVA_LAYERS_FILE="@0@"'.format(get_option('layers-file'))],
-  dependencies: deps,
+  dependencies: deps + [dependency('neo-1')],
   install: true)
 install_data('data/de.yesman.NeoSettings.desktop', install_dir: get_option('datadir') / 'applications')
 install_data('data/de.yesman.NeoSettings.svg', install_dir: get_option('datadir') / 'icons' / 'hicolor' / 'scalable' / 'apps')

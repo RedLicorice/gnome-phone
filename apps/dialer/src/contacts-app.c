@@ -89,3 +89,9 @@ contacts_app_insert_or_edit (GtkWidget *from, const char *destination)
 {
   activate (from, "insert-or-edit", fields (destination));
 }
+
+void
+contacts_app_import_chat (GtkWidget *from, const char *provider, const char *chat)
+{
+  activate (from, "import-chat", g_variant_new ("(ss)", provider, chat));
+}

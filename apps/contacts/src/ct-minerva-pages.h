@@ -14,4 +14,17 @@ G_BEGIN_DECLS
 GtkWidget *ct_mnv_list_new          (GtkWidget *window, const char *id);
 GtkWidget *ct_minerva_settings_new  (GtkWidget *window);
 
+/* A messaging provider's chats with one person (`messaging chats ID --kind user`), searchable: the one tapped goes to
+ * @picked (the list closes first). A chat that already has a contact (the listing's "contact") is left out for a
+ * new contact; with @linking (an existing contact's "Collega") it shows with that contact's name, and picking it
+ * asks first, since the chat would then belong to two contacts. @destroy (or NULL) frees @data with the page. */
+typedef void (*CtChatPicked) (const char *provider, const char *chat, gpointer data);
+GtkWidget *ct_mnv_chats_new         (GtkWidget *window, const char *provider, gboolean linking, CtChatPicked picked,
+                                     gpointer data, GDestroyNotify destroy);
+/* "Importa da <provider>": that list, then the chat picked as a new contact (ct_mnv_import_chat) */
+void       ct_mnv_import_pick       (GtkWidget *window, const char *provider);
+/* the new-contact editor filled in with what the provider knows of @chat (`messaging contact`): its name, number,
+ * id there and picture; the refusal's text as a toast when it cannot be (a group, an unknown chat) */
+void       ct_mnv_import_chat       (GtkWidget *window, const char *provider, const char *chat);
+
 G_END_DECLS

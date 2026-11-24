@@ -17,6 +17,9 @@
  *                             ("" anything, "phone" or "email"). The answer is that action, activated on the
  *                             caller the same way, with (ss): the contact's UID and its vCard, or ("", "") when
  *                             the picker was left without a pick.
+ *   import-chat     (ss)      the editor for a new contact filled in from a messaging provider's chat with one
+ *                             person (provider id, chat id): its name, number, id there and picture, as
+ *                             `minerva-config messaging contact` gives them (Settings' "Aggiungi contatto")
  *   minerva-settings          the people's Minerva settings: trust, when strangers are forgotten (Settings opens
  *                             it from Minerva › Memoria › Fiducia; the desktop file's action of the same name)
  *
@@ -194,38 +197,12 @@ on_minerva_settings (GSimpleAction *action, GVariant *parameter, gpointer app)
 static EContact *
 prefill_from (GVariant *fields)
 {
-  EContact *contact = e_contact_new ();
   const char *name = NULL, *phone = NULL, *email = NULL;
 
   g_variant_lookup (fields, "name", "&s", &name);
   g_variant_lookup (fields, "phone", "&s", &phone);
   g_variant_lookup (fields, "email", "&s", &email);
-  if (name && *name)
-    {
-      /* one string: given and family as e_contact_name_from_string splits it */
-      EContactName *parsed = e_contact_name_from_string (name);
-      g_autoptr(CtName) split = ct_name_new ();
-
-      g_free (split->given);
-      g_free (split->family);
-      split->given = g_strdup (parsed->given ? parsed->given : "");
-      split->family = g_strdup (parsed->family ? parsed->family : "");
-      ct_contact_set_name (contact, split);
-      e_contact_name_free (parsed);
-    }
-  for (int k = 0; k < 2; k++)
-    {
-      const char *value = k == 0 ? phone : email;
-      CtKind kind = k == 0 ? CT_KIND_PHONE : CT_KIND_EMAIL;
-      g_autoptr(GPtrArray) items = NULL;
-
-      if (!value || !*value)
-        continue;
-      items = g_ptr_array_new_with_free_func ((GDestroyNotify) ct_item_free);
-      g_ptr_array_add (items, ct_item_new (kind, ct_kind_default_type (kind), value));
-      ct_contact_set_items (contact, kind, items);
-    }
-  return contact;
+  return ct_contact_prefill (name, phone, email);
 }
 
 static void
@@ -236,6 +213,18 @@ on_insert (GSimpleAction *action, GVariant *parameter, gpointer app)
 
   gtk_window_present (GTK_WINDOW (window));
   ct_window_new_contact (window, prefill);
+}
+
+/* a chat of a messaging provider as a new contact (Settings › Messaggi › a chat › Aggiungi contatto) */
+static void
+on_import_chat (GSimpleAction *action, GVariant *parameter, gpointer app)
+{
+  GtkWidget *window = contacts_window (app);
+  const char *provider, *chat;
+
+  g_variant_get (parameter, "(&s&s)", &provider, &chat);
+  gtk_window_present (GTK_WINDOW (window));
+  ct_mnv_import_chat (window, provider, chat);
 }
 
 static void
@@ -355,6 +344,7 @@ main (int argc, char **argv)
     { .name = "insert", .activate = on_insert, .parameter_type = "a{sv}" },
     { .name = "insert-or-edit", .activate = on_insert_or_edit, .parameter_type = "a{sv}" },
     { .name = "pick-contact", .activate = on_pick_contact, .parameter_type = "(sss)" },
+    { .name = "import-chat", .activate = on_import_chat, .parameter_type = "(ss)" },
     { .name = "minerva-settings", .activate = on_minerva_settings },
   };
 

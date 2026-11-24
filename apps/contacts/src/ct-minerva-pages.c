@@ -15,6 +15,7 @@
 #include <glib/gi18n.h>
 #include <neo.h>
 #include <spongy-gtk.h>
+#include <string.h>
 
 /* ===== a page: the toolbar, the busy line and a scrolling column =============================================== */
 
@@ -23,6 +24,12 @@ typedef struct {
   JsonObject *known;            /* the last `people known` (a ref) */
   int ops;
   char *list_id;                /* an entries list: its id in the data's "lists" */
+  char *provider;               /* a provider's chats: its id, */
+  gboolean linking;             /* for an existing contact: the chats other contacts have show too */
+  CtChatPicked picked;          /* who gets the chat picked, */
+  gpointer picked_data;
+  GDestroyNotify picked_destroy;
+  GtkWidget *search;            /* and the field that narrows them */
 } P;
 
 static void
@@ -31,7 +38,10 @@ p_free (gpointer data)
   P *p = data;
 
   g_clear_pointer (&p->known, json_object_unref);
+  if (p->picked_destroy)
+    p->picked_destroy (p->picked_data);
   g_free (p->list_id);
+  g_free (p->provider);
   g_free (p);
 }
 
@@ -637,4 +647,238 @@ ct_minerva_settings_new (GtkWidget *window)
 
   rules_load (p);
   return p->page;
+}
+
+/* ===== a provider's chats with one person: the one tapped is picked ============================================ */
+
+/* what the search matches a row by: its title and its chat id, case-folded */
+static void
+chats_filter (GtkEditable *search, P *p)
+{
+  g_autofree char *fold = g_utf8_casefold (gtk_editable_get_text (search), -1);
+  g_auto(GStrv) words = g_strsplit (fold, " ", -1);
+
+  for (GtkWidget *row = gtk_widget_get_first_child (p->rows); row; row = gtk_widget_get_next_sibling (row))
+    {
+      const char *text = g_object_get_data (G_OBJECT (row), "ct-text");
+      gboolean shown = TRUE;
+
+      if (!text)
+        continue;               /* a note */
+      for (guint i = 0; shown && words[i]; i++)
+        shown = !*words[i] || strstr (text, words[i]);
+      gtk_widget_set_visible (row, shown);
+    }
+}
+
+/* the list goes first: what the pick opens comes over the screen the list was opened from */
+static void
+chat_picked (P *p, const char *chat)
+{
+  GtkWidget *page = g_object_ref (p->page);
+  g_autofree char *picked = g_strdup (chat);
+
+  ct_window_pop (p->window, page);
+  if (p->picked)
+    p->picked (p->provider, picked, p->picked_data);
+  g_object_unref (page);
+}
+
+static void
+on_taken_confirmed (int response, gpointer data)
+{
+  Op *op = data;
+
+  if (response == CT_DIALOG_OK)
+    chat_picked (op->p, op->a);
+  op_free (op);
+}
+
+static void
+on_chat (NeoPressable *row, gpointer data)
+{
+  P *p = data;
+  const char *chat = g_object_get_data (G_OBJECT (row), "ct-chat");
+  const char *owner = g_object_get_data (G_OBJECT (row), "ct-contact-name");
+
+  /* a chat another contact has: linking it here makes it two contacts' */
+  if (owner)
+    {
+      Op *op = op_new (p, chat, owner);
+      g_autofree char *body = ct_mnv_textf ("link_taken_body", (const char *const[]) { "name", owner, NULL });
+
+      ct_confirm_dialog (p->window, ct_mnv_text ("link_taken_heading"), body, ct_mnv_text ("link_taken_ok"),
+                         on_taken_confirmed, op);
+      return;
+    }
+  chat_picked (p, chat);
+}
+
+static void
+chats_loaded (JsonObject *root, const char *err, gpointer data)
+{
+  P *p = data;
+  JsonArray *chats = err ? NULL : ns_json_arr (root, "chats");
+  guint shown = 0;
+
+  ct_busy_stop (p->busy);
+  clear_rows (p);
+  if (err)
+    {
+      note (p, err);
+      return;
+    }
+  for (guint i = 0; chats && i < json_array_get_length (chats); i++)
+    {
+      JsonObject *o = json_array_get_object_element (chats, i);
+      const char *chat = ns_json_str (o, "chat"), *label = ns_json_str (o, "label");
+      gboolean taken = *ns_json_str (o, "contact") != '\0';
+      GtkWidget *row;
+      g_autofree char *text = NULL, *sub = NULL;
+
+      /* a chat that is a contact already is not one to make a contact of */
+      if (!*chat || (taken && !p->linking))
+        continue;
+      if (!*label)
+        label = chat;
+      /* the id under a name, which of two with one name it is; and whose it is when a contact has it (the listing
+       * names such a chat after its contact) */
+      sub = taken ? ct_mnv_textf ("link_taken_row", (const char *const[]) { "name", label, NULL })
+                  : g_strcmp0 (label, chat) ? g_strdup (chat) : NULL;
+      row = ct_pref_row (taken ? chat : label, sub, NULL, G_CALLBACK (on_chat), p);
+      text = g_utf8_casefold (label, -1);
+      g_object_set_data_full (G_OBJECT (row), "ct-chat", g_strdup (chat), g_free);
+      if (taken)
+        g_object_set_data_full (G_OBJECT (row), "ct-contact-name", g_strdup (label), g_free);
+      g_object_set_data_full (G_OBJECT (row), "ct-text", g_strconcat (text, " ", chat, NULL), g_free);
+      gtk_box_append (GTK_BOX (p->rows), row);
+      shown++;
+    }
+  if (!shown)
+    note (p, ct_mnv_text ("import_empty"));
+  chats_filter (GTK_EDITABLE (p->search), p);
+}
+
+GtkWidget *
+ct_mnv_chats_new (GtkWidget *window, const char *provider, gboolean linking, CtChatPicked picked, gpointer data,
+                  GDestroyNotify destroy)
+{
+  JsonObject *def = ct_mnv_import_provider (provider);
+  const char *label = *ns_json_str (def, "label") ? ns_json_str (def, "label") : provider;
+  g_autofree char *title = ct_mnv_textf ("import_pick_title", (const char *const[]) { "provider", label, NULL });
+  P *p = page_new (window, title, "ct-mnv-chats");
+  GtkWidget *field = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+  GtkWidget *input = gtk_overlay_new ();
+
+  p->provider = g_strdup (provider);
+  p->linking = linking;
+  p->picked = picked;
+  p->picked_data = data;
+  p->picked_destroy = destroy;
+  /* the search field, in the editor's look (an EditText) */
+  p->search = gtk_text_new ();
+  gtk_text_set_placeholder_text (GTK_TEXT (p->search), ct_mnv_text ("import_search"));
+  gtk_widget_add_css_class (p->search, "ct-ed-text");
+  gtk_widget_set_valign (p->search, GTK_ALIGN_CENTER);
+  gtk_accessible_update_property (GTK_ACCESSIBLE (p->search), GTK_ACCESSIBLE_PROPERTY_LABEL,
+                                  ct_mnv_text ("import_search"), -1);
+  gtk_widget_add_css_class (field, "ct-ed-field");
+  gtk_widget_add_css_class (input, "ct-ed-input");
+  gtk_overlay_set_child (GTK_OVERLAY (input), p->search);
+  gtk_widget_set_vexpand (input, TRUE);
+  gtk_box_append (GTK_BOX (field), input);
+  gtk_box_insert_child_after (GTK_BOX (gtk_widget_get_parent (p->rows)), field, p->busy);
+  g_signal_connect (p->search, "changed", G_CALLBACK (chats_filter), p);
+  ct_busy_start (p->busy, ct_mnv_text ("import_loading"), ct_mnv_text ("busy_slow"), (guint) ct_mnv_int ("busy_slow_s"));
+  ct_mnv_user_chats (G_OBJECT (p->page), provider, chats_loaded, p);
+  return p->page;
+}
+
+/* ===== a chat becomes a new contact ============================================================================= */
+
+typedef struct {
+  GtkWidget *window;
+  char *provider, *chat;
+} Import;
+
+static void
+import_free (Import *import)
+{
+  g_object_unref (import->window);
+  g_free (import->provider);
+  g_free (import->chat);
+  g_free (import);
+}
+
+/* the new-contact editor with what the provider knows of the chat: its name, its number, its id there (written as
+ * the memory service writes it) and its picture (a local file, read by the editor) */
+static void
+import_answered (JsonObject *root, const char *err, gpointer data)
+{
+  Import *import = data;
+  g_autoptr(EContact) prefill = NULL;
+  const char *channel, *id, *photo;
+
+  if (err)
+    {
+      ct_window_toast (import->window, err);
+      import_free (import);
+      return;
+    }
+  ct_window_toast_hide (import->window);
+  prefill = ct_contact_prefill (ns_json_str (root, "name"), ns_json_str (root, "phone"), NULL);
+  channel = ns_json_str (root, "channel");
+  id = ns_json_str (root, "channel_id");
+  photo = ns_json_str (root, "photo");
+  if (*channel && *id && im_form_usable (ct_mnv_im_form ()))
+    ct_contact_set_channel (prefill, channel, NULL, ct_mnv_im_form (), id);
+  if (*photo)
+    {
+      g_autofree char *uri = g_filename_to_uri (photo, NULL, NULL);
+      EContactPhoto picture = { .type = E_CONTACT_PHOTO_TYPE_URI };
+
+      picture.data.uri = uri;
+      if (uri)
+        e_contact_set (prefill, E_CONTACT_PHOTO, &picture);
+    }
+  ct_window_new_contact (import->window, prefill);
+  import_free (import);
+}
+
+/* Minerva's texts first: they say how a channel id is written on the card */
+static void
+import_ui_ready (JsonObject *root, const char *err, gpointer data)
+{
+  Import *import = data;
+
+  if (err)
+    {
+      import_answered (NULL, err, import);
+      return;
+    }
+  ct_window_toast_hold (import->window, ct_mnv_text ("import_busy"));
+  ct_mnv_chat_contact (G_OBJECT (import->window), import->provider, import->chat, import_answered, import);
+}
+
+void
+ct_mnv_import_chat (GtkWidget *window, const char *provider, const char *chat)
+{
+  Import *import = g_new0 (Import, 1);
+
+  import->window = g_object_ref (window);
+  import->provider = g_strdup (provider);
+  import->chat = g_strdup (chat);
+  ct_mnv_ui_load (G_OBJECT (window), import_ui_ready, import);
+}
+
+static void
+on_import_picked (const char *provider, const char *chat, gpointer data)
+{
+  ct_mnv_import_chat (data, provider, chat);
+}
+
+void
+ct_mnv_import_pick (GtkWidget *window, const char *provider)
+{
+  ct_window_push (window, ct_mnv_chats_new (window, provider, FALSE, on_import_picked, window, NULL));
 }

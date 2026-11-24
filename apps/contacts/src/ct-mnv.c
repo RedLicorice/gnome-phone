@@ -7,6 +7,11 @@
 #include <string.h>
 
 static JsonObject *ui;          /* `people ui` once per process: the texts do not change under a running app */
+static JsonArray *imports;      /* the providers whose chats import (`messaging list` "import"), read again with every
+                                 * ct_mnv_ui_load */
+static gboolean imports_loading;
+
+static void imports_fetch (GObject *owner, CtMnvDone done, gpointer data);
 
 gboolean
 ct_mnv_available (void)
@@ -115,24 +120,63 @@ answered (JsonObject *root, const char *err, gpointer data)
   g_free (call);
 }
 
-/* `minerva-config people ARGS… --json`, @args ending at NULL */
+/* `minerva-config GROUP ACTION [OPTIONS…] --json -- [ARGS…]`: the arguments come after "--", so an id that starts
+ * with '-' (a chat's, a contact's) is never read as an option; @options (NULL-terminated, or NULL) and @args are
+ * borrowed */
 static void
-people (GObject *owner, const char *stdin_text, CtMnvDone done, gpointer data, const char *first, ...)
+run (GObject *owner, const char *stdin_text, CtMnvDone done, gpointer data, const char *group, const char *action,
+     const char *const *options, const char *const *args)
 {
   g_autoptr(GPtrArray) argv = g_ptr_array_new ();
   Call *call = g_new0 (Call, 1);
-  va_list ap;
 
   call->done = done;
   call->data = data;
-  g_ptr_array_add (argv, (gpointer) "people");
-  va_start (ap, first);
-  for (const char *arg = first; arg; arg = va_arg (ap, const char *))
-    g_ptr_array_add (argv, (gpointer) arg);
-  va_end (ap);
+  g_ptr_array_add (argv, (gpointer) group);
+  g_ptr_array_add (argv, (gpointer) action);
+  for (guint i = 0; options && options[i]; i++)
+    g_ptr_array_add (argv, (gpointer) options[i]);
   g_ptr_array_add (argv, (gpointer) "--json");
+  g_ptr_array_add (argv, (gpointer) "--");
+  for (guint i = 0; args && args[i]; i++)
+    g_ptr_array_add (argv, (gpointer) args[i]);
   g_ptr_array_add (argv, NULL);
   ns_mc_run (owner, (const char *const *) argv->pdata, stdin_text, answered, call);
+}
+
+/* run() with the positional arguments as a NULL-terminated variadic list */
+static void
+run_v (GObject *owner, CtMnvDone done, gpointer data, const char *group, const char *action,
+       const char *const *options, va_list ap)
+{
+  g_autoptr(GPtrArray) args = g_ptr_array_new ();
+
+  for (const char *arg = va_arg (ap, const char *); arg; arg = va_arg (ap, const char *))
+    g_ptr_array_add (args, (gpointer) arg);
+  g_ptr_array_add (args, NULL);
+  run (owner, NULL, done, data, group, action, options, (const char *const *) args->pdata);
+}
+
+/* `minerva-config people ACTION [OPTIONS…] --json -- ARGS…`, the ARGS ending at NULL */
+static void
+people (GObject *owner, const char *const *options, CtMnvDone done, gpointer data, const char *action, ...)
+{
+  va_list ap;
+
+  va_start (ap, action);
+  run_v (owner, done, data, "people", action, options, ap);
+  va_end (ap);
+}
+
+/* `minerva-config messaging ACTION [OPTIONS…] --json -- ARGS…`, the ARGS ending at NULL */
+static void
+messaging (GObject *owner, const char *const *options, CtMnvDone done, gpointer data, const char *action, ...)
+{
+  va_list ap;
+
+  va_start (ap, action);
+  run_v (owner, done, data, "messaging", action, options, ap);
+  va_end (ap);
 }
 
 typedef struct {
@@ -157,6 +201,9 @@ ct_mnv_ui_load (GObject *owner, CtMnvDone done, gpointer data)
 {
   UiWait *wait;
 
+  /* the providers that import may change under a running app (messaging.conf, a provider turned off): read again */
+  if (!imports_loading)
+    imports_fetch (owner, NULL, NULL);
   if (ui)
     {
       if (done)
@@ -202,7 +249,7 @@ ct_mnv_voice_status (GObject *owner, CtMnvDone done, gpointer data)
 void
 ct_mnv_voice_enroll (GObject *owner, const char *pid, const char *consent, CtMnvDone done, gpointer data)
 {
-  people (owner, NULL, done, data, "voice-enroll", pid, "--consent", consent, NULL);
+  people (owner, (const char *const[]) { "--consent", consent, NULL }, done, data, "voice-enroll", pid, NULL);
 }
 
 void
@@ -215,7 +262,7 @@ void
 ct_mnv_voice_learn (GObject *owner, const char *pid, gboolean on, const char *consent, CtMnvDone done, gpointer data)
 {
   if (on)
-    people (owner, NULL, done, data, "voice-learn", pid, "on", "--consent", consent, NULL);
+    people (owner, (const char *const[]) { "--consent", consent, NULL }, done, data, "voice-learn", pid, "on", NULL);
   else
     people (owner, NULL, done, data, "voice-learn", pid, "off", NULL);
 }
@@ -381,20 +428,9 @@ cascade_run (Cascade *cascade)
       cascade_free (cascade);
       return;
     }
+  /* each command: its action, then its arguments */
   argv = cascade->commands->pdata[cascade->next++];
-  {
-    g_autoptr (GPtrArray) full = g_ptr_array_new ();
-    Call *call = g_new0 (Call, 1);
-
-    call->done = cascade_stepped;
-    call->data = cascade;
-    g_ptr_array_add (full, (gpointer) "people");
-    for (guint i = 0; argv[i]; i++)
-      g_ptr_array_add (full, argv[i]);
-    g_ptr_array_add (full, (gpointer) "--json");
-    g_ptr_array_add (full, NULL);
-    ns_mc_run (cascade->owner, (const char *const *) full->pdata, NULL, answered, call);
-  }
+  run (cascade->owner, NULL, cascade_stepped, cascade, "people", argv[0], NULL, (const char *const *) argv + 1);
 }
 
 static void
@@ -490,4 +526,92 @@ ct_mnv_archive_contact_merged (GObject *owner, const char *from, const char *to,
   else if (gone)
     add_command (cascade, "link", ns_json_str (gone, "id"), to, NULL);
   cascade_run (cascade);
+}
+
+/* ---- the messaging providers: chats that become contacts ---- */
+
+typedef struct {
+  CtMnvDone done;
+  gpointer data;
+} ImportsWait;
+
+static void
+imports_answered (JsonObject *root, const char *err, gpointer data)
+{
+  ImportsWait *wait = data;
+  JsonArray *providers = err ? NULL : ns_json_arr (root, "providers");
+
+  imports_loading = FALSE;
+  /* a list that could not be read leaves the one there was */
+  if (providers)
+    {
+      g_clear_pointer (&imports, json_array_unref);
+      imports = json_array_new ();
+      for (guint i = 0; i < json_array_get_length (providers); i++)
+        {
+          JsonObject *p = json_array_get_object_element (providers, i);
+
+          /* a provider that is off has no daemon to list its chats */
+          if (p && *ns_json_str (p, "id") && json_object_get_boolean_member_with_default (p, "import", FALSE)
+              && json_object_get_boolean_member_with_default (p, "enabled", TRUE))
+            json_array_add_object_element (imports, json_object_ref (p));
+        }
+    }
+  if (wait->done)
+    wait->done (NULL, imports ? NULL : (err ? err : ct_mnv_text ("error")), wait->data);
+  g_free (wait);
+}
+
+static void
+imports_fetch (GObject *owner, CtMnvDone done, gpointer data)
+{
+  ImportsWait *wait = g_new0 (ImportsWait, 1);
+
+  wait->done = done;
+  wait->data = data;
+  imports_loading = TRUE;
+  messaging (owner, NULL, imports_answered, wait, "list", NULL);
+}
+
+void
+ct_mnv_imports_load (GObject *owner, CtMnvDone done, gpointer data)
+{
+  if (imports)
+    {
+      if (done)
+        done (NULL, NULL, data);
+      return;
+    }
+  imports_fetch (owner, done, data);
+}
+
+JsonArray *
+ct_mnv_imports (void)
+{
+  return imports;
+}
+
+JsonObject *
+ct_mnv_import_provider (const char *id)
+{
+  for (guint i = 0; imports && id && i < json_array_get_length (imports); i++)
+    {
+      JsonObject *p = json_array_get_object_element (imports, i);
+
+      if (!g_strcmp0 (ns_json_str (p, "id"), id))
+        return p;
+    }
+  return NULL;
+}
+
+void
+ct_mnv_user_chats (GObject *owner, const char *provider, CtMnvDone done, gpointer data)
+{
+  messaging (owner, (const char *const[]) { "--kind", "user", NULL }, done, data, "chats", provider, NULL);
+}
+
+void
+ct_mnv_chat_contact (GObject *owner, const char *provider, const char *chat, CtMnvDone done, gpointer data)
+{
+  messaging (owner, NULL, done, data, "contact", provider, chat, NULL);
 }

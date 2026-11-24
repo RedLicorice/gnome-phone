@@ -1,6 +1,7 @@
 /* Contacts' one door to Minerva's people archive. Every call the Contacts app makes about a person's notebook, voice,
  * face samples, kind, channel links, strangers or rules goes through this file and nothing else: today they run
- * `minerva-config people … --json` (people library, eyes' people_link), through Neo Settings' ns-mc.c; when the
+ * `minerva-config people … --json` (people library, eyes' people_link), and `minerva-config messaging … --json` for
+ * the chats that become contacts, through Neo Settings' ns-mc.c; when the
  * archive moves to Minerva's memory service, only this file changes.
  *
  * The key of a person is the contact's UID in the address book: ct_mnv_by_contact finds the person linked to a
@@ -96,5 +97,18 @@ void ct_mnv_archive_contact_merged  (GObject *owner, const char *from, const cha
 /* an animal's or object's owner: a contact's UID, "" for nobody */
 void ct_mnv_set_owner   (GObject *owner, const char *pid, const char *contact_uid, CtMnvDone done, gpointer data);
 void ct_mnv_rename      (GObject *owner, const char *pid, const char *name, CtMnvDone done, gpointer data);
+
+/* The messaging providers' chats that become contacts (`minerva-config messaging … --json`): a provider imports when
+ * messaging.conf says so (`messaging list` "import"; WhatsApp does, Telegram's bot does not). Every ct_mnv_ui_load
+ * reads the list again in the background; ct_mnv_imports_load answers with no root once there is one (at once when
+ * it is here). ct_mnv_imports is then those providers ({id, label, …}, borrowed), NULL before. */
+void        ct_mnv_imports_load    (GObject *owner, CtMnvDone done, gpointer data);
+JsonArray  *ct_mnv_imports         (void);
+/* one provider of that list by its id, NULL when it does not import */
+JsonObject *ct_mnv_import_provider (const char *id);
+/* a provider's chats with one person, never a group: {chats: [{chat, label, name, contact, …}]} */
+void ct_mnv_user_chats   (GObject *owner, const char *provider, CtMnvDone done, gpointer data);
+/* what one of them gives a new contact: {name, phone, channel, channel_id, photo} (photo: a local file, or "") */
+void ct_mnv_chat_contact (GObject *owner, const char *provider, const char *chat, CtMnvDone done, gpointer data);
 
 G_END_DECLS

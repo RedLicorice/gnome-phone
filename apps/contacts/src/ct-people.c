@@ -1497,9 +1497,38 @@ ct_people_reset (GtkWidget *page)
 }
 
 static void
+on_fab_chosen (int index, gpointer data)
+{
+  People *people = data;
+  JsonArray *imports = ct_mnv_imports ();
+
+  if (index == 0)
+    ct_window_new_contact (people->window, NULL);
+  else if (index > 0 && imports && (guint) index <= json_array_get_length (imports))
+    ct_mnv_import_pick (people->window, ns_json_str (json_array_get_object_element (imports, index - 1), "id"));
+}
+
+/* the new contact at once; where a messaging provider's chats become contacts, a menu first: "Nuovo contatto",
+ * then "Importa da <provider>" for each */
+static void
 on_fab (NeoPressable *fab, People *people)
 {
-  ct_window_new_contact (people->window, NULL);
+  JsonArray *imports = ct_mnv_imports ();
+  guint n = imports ? json_array_get_length (imports) : 0;
+  g_autoptr(GPtrArray) texts = g_ptr_array_new_with_free_func (g_free);
+
+  if (!n)
+    {
+      ct_window_new_contact (people->window, NULL);
+      return;
+    }
+  g_ptr_array_add (texts, g_strdup (*ct_mnv_text ("import_new") ? ct_mnv_text ("import_new") : _("Create new contact")));
+  for (guint i = 0; i < n; i++)
+    g_ptr_array_add (texts, ct_mnv_textf ("import_from", (const char *const[]) {
+                                            "provider", ns_json_str (json_array_get_object_element (imports, i), "label"),
+                                            NULL }));
+  ct_popup_show (GTK_WIDGET (fab), (const char *const *) texts->pdata, (int) texts->len, CT_POPUP_OVER_END, 0, 0, 0,
+                 on_fab_chosen, people);
 }
 
 static void

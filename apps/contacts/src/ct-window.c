@@ -390,6 +390,15 @@ ct_window_toast_hold (GtkWidget *window, const char *text)
 }
 
 void
+ct_window_toast_hide (GtkWidget *window)
+{
+  Shell *shell = shell_of (window);
+
+  g_clear_handle_id (&shell->toast_timeout, g_source_remove);
+  on_toast_timeout (shell);
+}
+
+void
 ct_window_toast (GtkWidget *window, const char *text)
 {
   Shell *shell = shell_of (window);

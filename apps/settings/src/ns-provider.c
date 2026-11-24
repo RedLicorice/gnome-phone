@@ -6,6 +6,7 @@
 #include "ns-provider.h"
 #include "ns-mc.h"
 #include "ns-ui.h"
+#include "contacts-app.h"
 
 #include <string.h>
 
@@ -244,6 +245,7 @@ typedef struct {
   JsonObject        *group_choices;  /* the group settings that are one of a set: key -> [value, ...] */
   int                forget_idle_days; /* a temporary group card is erased after this long idle ... */
   gboolean           forget_disabled;  /* ... and when the group is no longer allowed */
+  gboolean           import;      /* a chat with one person can become a contact (messaging.conf contact-import) */
   guint              poll_id, poll_s, slow_s;
   char              *kind;        /* the pairing kind of messaging.conf ("" when the provider does not pair) */
   char              *state, *word; /* the last status: its state and the daemon's own label */
@@ -680,6 +682,7 @@ typedef struct {
   Prov      *p;
   char      *chat;
   char      *title;
+  char      *contact; /* the uid of the chat's contact in the address book ("" for none), as the listing matched it */
   gboolean   group;   /* a group chat: its page has its own settings, under any read scope */
 } Chat;
 
@@ -688,6 +691,7 @@ chat_free (Chat *c)
 {
   g_free (c->chat);
   g_free (c->title);
+  g_free (c->contact);
   g_free (c);
 }
 
@@ -738,15 +742,18 @@ chat_toggled (GtkWidget *sw, GParamSpec *pspec, gpointer data)
   ns_mc_run (c->p->owner, args, NULL, chat_saved, c);
 }
 
-/* One chat's page: how far back the agents read it, its own depth or the provider's. A person's chat has one only
- * under "Solo le chat scelte"; otherwise a tap on the row turns the chat on or off, as the switch does. A group's page
- * opens under any read scope: what wakes her there, how she signs, Ricorda gruppo (`messaging group`), and the depth
- * under "Solo le chat scelte". */
+/* One chat's page. A person's chat: its contact (a tap opens it in Contacts) or "Aggiungi contatto" (Contacts makes one
+ * of the chat, where the provider imports), under any read scope; under "Solo le chat scelte" also how far back the
+ * agents read it, its own depth or the provider's. A chat whose page would be empty (no contact to show or make, not
+ * under "Solo le chat scelte") has none: a tap on the row turns it on or off, as the switch does. A group's page opens
+ * under any read scope: what wakes her there, how she signs, Ricorda gruppo (`messaging group`), and the depth under
+ * "Solo le chat scelte". */
 
 typedef struct {
   Prov      *p;
   GObject   *page;      /* the page, which owns this: held while an answer is coming */
   char      *chat;
+  char      *contact;   /* its contact's uid, "" for none */
   GtkWidget *msg;
   GArray    *options;   /* the depths after the first entry ("as every chat"), in days */
 } ChatPage;
@@ -755,8 +762,41 @@ static void
 chat_page_free (ChatPage *cp)
 {
   g_free (cp->chat);
+  g_free (cp->contact);
   g_array_unref (cp->options);
   g_free (cp);
+}
+
+/* ---- a person's chat and the address book: through the Contacts app's actions ---- */
+
+static void
+contact_open (GtkWidget *row, gpointer data)
+{
+  ChatPage *cp = data;
+  contacts_app_view (row, cp->contact, NULL);
+}
+
+static void
+contact_add (GtkWidget *row, gpointer data)
+{
+  ChatPage *cp = data;
+  contacts_app_import_chat (row, cp->p->id, cp->chat);
+}
+
+/* what the chat's page shows of its contact: the contact, or the row that makes one; FALSE when neither can be */
+static gboolean
+contact_shown (Chat *c)
+{
+  return !c->group && contacts_app_installed () && (*c->contact || c->p->import);
+}
+
+static void
+contact_settings (ChatPage *cp, GtkWidget *content, const char *name)
+{
+  GtkWidget *g = ns_group (content, prov_text (cp->p, "sections", "contact"));
+  GtkWidget *row = *cp->contact ? ns_row (g, NULL, NULL, name, NULL)
+                                : ns_row (g, NULL, NULL, prov_text (cp->p, "labels", "contact_add"), NULL);
+  ns_row_on_activate (row, *cp->contact ? contact_open : contact_add, cp);
 }
 
 static void
@@ -929,7 +969,7 @@ chat_activate (GtkWidget *row, gpointer data)
 {
   Chat *c = data;
   Prov *p = c->p;
-  if (!c->group && g_strcmp0 (p->read_scope, "whitelist")) {
+  if (!c->group && !contact_shown (c) && g_strcmp0 (p->read_scope, "whitelist")) {
     GtkWidget *sw = ns_row_get_switch (row);
     gtk_switch_set_active (GTK_SWITCH (sw), !gtk_switch_get_active (GTK_SWITCH (sw)));
     return;
@@ -940,6 +980,7 @@ chat_activate (GtkWidget *row, gpointer data)
   cp->p = p;
   cp->page = G_OBJECT (page);
   cp->chat = g_strdup (c->chat);
+  cp->contact = g_strdup (c->contact);
   int own = chat_history_of (p, c->chat);
   cp->options = history_options (p, own);
   g_object_set_data_full (G_OBJECT (page), "mp-chat-page", cp, (GDestroyNotify) chat_page_free);
@@ -947,7 +988,9 @@ chat_activate (GtkWidget *row, gpointer data)
   gtk_widget_set_visible (cp->msg, FALSE);
   if (c->group)
     group_settings (cp, content);
-  if (g_strcmp0 (p->read_scope, "whitelist")) {   /* a group's own depth counts only there */
+  if (contact_shown (c))
+    contact_settings (cp, content, c->title);
+  if (g_strcmp0 (p->read_scope, "whitelist")) {   /* a chat's own depth counts only there */
     ns_push (page);
     return;
   }
@@ -1076,6 +1119,7 @@ wl_batch (gpointer data)
     ch->p = p;
     ch->chat = g_strdup (chat);
     ch->title = g_strdup (title);
+    ch->contact = g_strdup (str_of (o, "contact"));
     ch->group = !g_strcmp0 (str_of (o, "kind"), "group");
     ns_switch_quiet (ns_row_get_switch (row), whitelisted (p, chat));
     ns_row_on_activate (row, chat_activate, ch);
@@ -1394,6 +1438,7 @@ prov_build (Prov *p, JsonObject *root)
     p->group_choices = json_object_ref (obj_of (root, "group_choices"));
   p->forget_idle_days = self ? (int) json_object_get_int_member_with_default (self, "group_forget_idle_days", 0) : 0;
   p->forget_disabled = self && json_object_get_boolean_member_with_default (self, "group_forget_disabled", FALSE);
+  p->import = self && json_object_get_boolean_member_with_default (self, "import", FALSE);
   prov_policy (p, policy);
 
   p->status_g = ns_group (p->content, prov_text (p, "sections", "status"));

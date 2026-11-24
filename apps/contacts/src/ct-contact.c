@@ -1545,6 +1545,50 @@ ct_contact_set_channel (EContact *contact, const char *scheme, const char *legac
   e_vcard_append_attribute_with_value (vcard, e_vcard_attribute_new (NULL, property), line);
 }
 
+gboolean
+ct_contact_apply_channel (EContact *contact, const char *scheme, const char *legacy_property, const ImForm *form,
+                          const char *original, const char *value)
+{
+  g_autofree char *text = trimmed (value);
+
+  if (g_strcmp0 (text, original ? original : "") == 0)
+    return FALSE;
+  ct_contact_set_channel (contact, scheme, legacy_property, form, text);
+  return TRUE;
+}
+
+EContact *
+ct_contact_prefill (const char *name, const char *phone, const char *email)
+{
+  EContact *contact = e_contact_new ();
+
+  if (name && *name)
+    {
+      EContactName *parsed = e_contact_name_from_string (name);
+      g_autoptr(CtName) split = ct_name_new ();
+
+      g_free (split->given);
+      g_free (split->family);
+      split->given = g_strdup (parsed->given ? parsed->given : "");
+      split->family = g_strdup (parsed->family ? parsed->family : "");
+      ct_contact_set_name (contact, split);
+      e_contact_name_free (parsed);
+    }
+  for (int k = 0; k < 2; k++)
+    {
+      const char *value = k == 0 ? phone : email;
+      CtKind kind = k == 0 ? CT_KIND_PHONE : CT_KIND_EMAIL;
+      g_autoptr(GPtrArray) items = NULL;
+
+      if (!value || !*value)
+        continue;
+      items = g_ptr_array_new_with_free_func ((GDestroyNotify) ct_item_free);
+      g_ptr_array_add (items, ct_item_new (kind, ct_kind_default_type (kind), value));
+      ct_contact_set_items (contact, kind, items);
+    }
+  return contact;
+}
+
 /* --- merging two contacts */
 
 /* two rows say the same: the same text without case or spaces, the same digits for a number */

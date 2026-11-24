@@ -173,6 +173,16 @@ char *ct_contact_get_channel (EContact *contact, const char *scheme, const char 
  * property */
 void  ct_contact_set_channel (EContact *contact, const char *scheme, const char *legacy_property, const ImForm *form,
                               const char *value);
+/* the editor's channel row at saving: @value (trimmed) is written with ct_contact_set_channel when it differs from
+ * @original, the id the card had when the editor opened ("" for none); an untouched id keeps its property as it was.
+ * TRUE when the card was written. A chat picked to link the contact ("Collega WhatsApp") goes through here too. */
+gboolean ct_contact_apply_channel (EContact *contact, const char *scheme, const char *legacy_property,
+                                   const ImForm *form, const char *original, const char *value);
+
+/* A new contact's fields as another app (or a chat import) gives them: @name in one string, split into given and
+ * family as e_contact_name_from_string does, a phone number and an email address in their default types; NULL or
+ * empty ones are left out. */
+EContact *ct_contact_prefill (const char *name, const char *phone, const char *email);
 
 /* What a signature over the card covers, as one comparable text: every property but the @unsigned_fields (a trailing
  * '*' matches a prefix, as in the token service's [ownercard] unsigned_fields), each "NAME:value" with the value's

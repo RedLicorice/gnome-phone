@@ -29,6 +29,8 @@ void       ct_window_toast         (GtkWidget *window, const char *text);
 /* the same toast, kept on screen until the next ct_window_toast: what a slow action is doing, where the busy line of
  * a long page is out of sight (ct-minerva.c) */
 void       ct_window_toast_hold    (GtkWidget *window, const char *text);
+/* a held toast fades now: the slow action is done and its result shows otherwise (the screen it opened) */
+void       ct_window_toast_hide    (GtkWidget *window);
 /* the full-width snackbar ("Label deleted" UNDO), Snackbar.LENGTH_LONG */
 void       ct_window_snackbar      (GtkWidget *window, const char *text, const char *action,
                                     NeoSnackbarAction callback, gpointer data);
