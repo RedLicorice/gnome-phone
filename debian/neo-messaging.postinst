@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+#DEBHELPER#
+# the channel registry changed (neo-messaging.triggers): every logged-in user's Messaging service reads it again
+if [ "$1" = triggered ] && [ -d /run/systemd/system ]; then
+    for user in $(loginctl list-users --no-legend 2>/dev/null | awk '{ print $2 }'); do
+        systemctl --user -M "$user@" try-restart neo-messaging-sms.service 2>/dev/null || true
+    done
+fi
+exit 0

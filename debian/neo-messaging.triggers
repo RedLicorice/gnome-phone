@@ -1,0 +1,3 @@
+# a Minerva messaging channel plugin was installed, upgraded or removed (Minerva docs/channels.md): the Messaging
+# service reads the channel registry once at start, so it is restarted to take the new channel's address
+interest-noawait /usr/share/minerva/channels.d
