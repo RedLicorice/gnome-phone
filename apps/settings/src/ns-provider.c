@@ -239,6 +239,11 @@ typedef struct {
   GHashTable        *chat_history; /* chat -> its own depth (GINT_TO_POINTER (days + 1)) */
   GArray            *history_choices; /* the picker's depths, in days ([history] choices_days) */
   GtkWidget         *history_row;
+  JsonObject        *chats;       /* the chats' own settings (policy "chats"): a group's resolved under "group" */
+  JsonObject        *group_defaults; /* a group's settings with none of its own (policy "group") */
+  JsonObject        *group_choices;  /* the group settings that are one of a set: key -> [value, ...] */
+  int                forget_idle_days; /* a temporary group card is erased after this long idle ... */
+  gboolean           forget_disabled;  /* ... and when the group is no longer allowed */
   guint              poll_id, poll_s, slow_s;
   char              *kind;        /* the pairing kind of messaging.conf ("" when the provider does not pair) */
   char              *state, *word; /* the last status: its state and the daemon's own label */
@@ -274,6 +279,9 @@ prov_free (Prov *p)
   g_free (p->read_scope);
   g_clear_pointer (&p->chat_history, g_hash_table_unref);
   g_clear_pointer (&p->history_choices, g_array_unref);
+  g_clear_pointer (&p->chats, json_object_unref);
+  g_clear_pointer (&p->group_defaults, json_object_unref);
+  g_clear_pointer (&p->group_choices, json_object_unref);
   g_free (p);
 }
 
@@ -297,9 +305,16 @@ prov_policy (Prov *p, JsonObject *policy)
   }
   if (json_object_has_member (policy, "history_days"))
     p->history_days = (int) json_object_get_int_member_with_default (policy, "history_days", 0);
+  JsonObject *group = obj_of (policy, "group");
+  if (group) {
+    g_clear_pointer (&p->group_defaults, json_object_unref);
+    p->group_defaults = json_object_ref (group);
+  }
   JsonObject *chats = obj_of (policy, "chats");
   if (!chats)
     return;
+  g_clear_pointer (&p->chats, json_object_unref);
+  p->chats = json_object_ref (chats);
   if (!p->chat_history)
     p->chat_history = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   g_hash_table_remove_all (p->chat_history);
@@ -665,6 +680,7 @@ typedef struct {
   Prov      *p;
   char      *chat;
   char      *title;
+  gboolean   group;   /* a group chat: its page has its own settings, under any read scope */
 } Chat;
 
 static void
@@ -722,8 +738,10 @@ chat_toggled (GtkWidget *sw, GParamSpec *pspec, gpointer data)
   ns_mc_run (c->p->owner, args, NULL, chat_saved, c);
 }
 
-/* One chat's page: how far back the agents read it, its own depth or the provider's. It has one only under "Solo le
- * chat scelte"; otherwise a tap on the row turns the chat on or off, as the switch does. */
+/* One chat's page: how far back the agents read it, its own depth or the provider's. A person's chat has one only
+ * under "Solo le chat scelte"; otherwise a tap on the row turns the chat on or off, as the switch does. A group's page
+ * opens under any read scope: what wakes her there, how she signs, Ricorda gruppo (`messaging group`), and the depth
+ * under "Solo le chat scelte". */
 
 typedef struct {
   Prov      *p;
@@ -764,12 +782,154 @@ chat_history_picked (GtkWidget *row, guint index, gpointer data)
   ns_mc_run (cp->p->owner, args, NULL, chat_history_saved, cp);
 }
 
+/* ---- a group's own settings (messaging.json chats.<chat>.group) ---- */
+
+typedef struct {
+  ChatPage  *cp;
+  char      *key;    /* wake_mention, tag, replies_to, ... */
+  GtkWidget *row;
+} GroupKey;
+
+static void
+group_key_free (GroupKey *gk)
+{
+  g_free (gk->key);
+  g_free (gk);
+}
+
+/* the group's settings in effect: its own over the provider's */
+static JsonObject *
+group_of (Prov *p, const char *chat)
+{
+  JsonObject *own = obj_of (obj_of (p->chats, chat), "group");
+  return own ? own : p->group_defaults;
+}
+
+static void
+group_run (GroupKey *gk, const char *value)
+{
+  ChatPage *cp = gk->cp;
+  const char *args[] = { "messaging", "group", cp->p->id, cp->chat, gk->key, value, "--json", NULL };
+  g_object_ref (cp->page);   /* as the depth: the page stays until the answer is here */
+  ns_mc_run (cp->p->owner, args, NULL, chat_history_saved, cp);
+}
+
+static GroupKey *
+group_key_new (ChatPage *cp, const char *key)
+{
+  GroupKey *gk = g_new0 (GroupKey, 1);
+  gk->cp = cp;
+  gk->key = g_strdup (key);
+  return gk;
+}
+
+/* the row owns its key's data */
+static void
+group_key_attach (GroupKey *gk, GtkWidget *row)
+{
+  gk->row = row;
+  g_object_set_data_full (G_OBJECT (row), "mp-group-key", gk, (GDestroyNotify) group_key_free);
+}
+
+static void
+group_toggled (GtkWidget *sw, GParamSpec *pspec, gpointer data)
+{
+  if (ns_switch_syncing (sw))
+    return;
+  group_run (data, gtk_switch_get_active (GTK_SWITCH (sw)) ? "true" : "false");
+}
+
+static void
+group_switch (ChatPage *cp, GtkWidget *g, const char *key)
+{
+  g_autofree char *label = g_strdup_printf ("group_%s", key);
+  GtkWidget *row = ns_row_toggle (g, NULL, NULL, prov_text (cp->p, "labels", label), NULL);
+  GroupKey *gk = group_key_new (cp, key);
+  group_key_attach (gk, row);
+  JsonObject *now = group_of (cp->p, cp->chat);
+  ns_switch_quiet (ns_row_get_switch (row), now && json_object_get_boolean_member_with_default (now, key, FALSE));
+  g_signal_connect (ns_row_get_switch (row), "notify::active", G_CALLBACK (group_toggled), gk);
+}
+
+static void
+group_entered (const char *text, gpointer data)
+{
+  GroupKey *gk = data;
+  if (!text || !*text) {   /* an empty tag is no tag: the one in effect stays */
+    ns_row_value_set (gk->row, str_of (group_of (gk->cp->p, gk->cp->chat), gk->key) ?: "");
+    return;
+  }
+  group_run (gk, text);
+}
+
+static void
+group_picked (GtkWidget *row, guint index, gpointer data)
+{
+  GroupKey *gk = data;
+  JsonArray *values = arr_of (gk->cp->p->group_choices, gk->key);
+  if (values && index < json_array_get_length (values))
+    group_run (gk, json_array_get_string_element (values, index));
+}
+
+/* one of a set: "Solo ai suoi messaggi" / "Anche ai miei", each label group_<key>_<value> */
+static void
+group_pick (ChatPage *cp, GtkWidget *g, const char *key)
+{
+  JsonArray *values = arr_of (cp->p->group_choices, key);
+  const char *current = str_of (group_of (cp->p, cp->chat), key);
+  g_autoptr (GPtrArray) labels = g_ptr_array_new_with_free_func (g_free);
+  guint selected = 0;
+  for (guint i = 0; values && i < json_array_get_length (values); i++) {
+    const char *value = json_array_get_string_element (values, i);
+    g_autofree char *label = g_strdup_printf ("group_%s_%s", key, value);
+    g_ptr_array_add (labels, g_strdup (prov_text (cp->p, "labels", label)));
+    if (!g_strcmp0 (value, current))
+      selected = i;
+  }
+  g_ptr_array_add (labels, NULL);
+  g_autofree char *title = g_strdup_printf ("group_%s", key);
+  GroupKey *gk = group_key_new (cp, key);
+  group_key_attach (gk, ns_row_pick (g, prov_text (cp->p, "labels", title), (const char *const *) labels->pdata,
+                                     selected, group_picked, gk));
+}
+
+static void
+group_settings (ChatPage *cp, GtkWidget *content)
+{
+  Prov *p = cp->p;
+  GtkWidget *g = ns_group (content, prov_text (p, "sections", "group_wake"));
+  group_switch (cp, g, "wake_mention");
+  group_switch (cp, g, "wake_all");
+  group_switch (cp, g, "wake_tag");
+  GroupKey *gk = group_key_new (cp, "tag");
+  group_key_attach (gk, ns_row_value (g, prov_text (p, "labels", "group_tag"), str_of (group_of (p, cp->chat), "tag"),
+                                      FALSE, group_entered, gk));
+  group_switch (cp, g, "wake_replies");
+  group_pick (cp, g, "replies_to");
+  ns_note (content, prov_text (p, "notes", "group_wake"));
+
+  g = ns_group (content, prov_text (p, "sections", "group_response"));
+  group_pick (cp, g, "response");
+  ns_note (content, prov_text (p, "notes", "group_response"));
+
+  g = ns_group (content, prov_text (p, "sections", "group_memory"));
+  group_switch (cp, g, "remember");
+  g_autofree char *days = g_strdup_printf ("%d", p->forget_idle_days);
+  g_autoptr (GString) idle_text = g_string_new (prov_text (p, "notes", "group_remember"));
+  g_string_replace (idle_text, "{days}", days, 0);
+  const char *idle = idle_text->str;
+  g_autofree char *rule = p->forget_disabled ? g_strjoin (" ", idle, prov_text (p, "notes", "group_remember_disabled"),
+                                                          NULL)
+                                             : g_strdup (idle);
+  ns_note (content, rule);
+}
+
 static void
 chat_activate (GtkWidget *row, gpointer data)
 {
   Chat *c = data;
   Prov *p = c->p;
-  if (g_strcmp0 (p->read_scope, "whitelist")) {
+  if (!c->group && g_strcmp0 (p->read_scope, "whitelist")) {
     GtkWidget *sw = ns_row_get_switch (row);
     gtk_switch_set_active (GTK_SWITCH (sw), !gtk_switch_get_active (GTK_SWITCH (sw)));
     return;
@@ -785,6 +945,12 @@ chat_activate (GtkWidget *row, gpointer data)
   g_object_set_data_full (G_OBJECT (page), "mp-chat-page", cp, (GDestroyNotify) chat_page_free);
   cp->msg = ns_note (content, "");
   gtk_widget_set_visible (cp->msg, FALSE);
+  if (c->group)
+    group_settings (cp, content);
+  if (g_strcmp0 (p->read_scope, "whitelist")) {   /* a group's own depth counts only there */
+    ns_push (page);
+    return;
+  }
   GtkWidget *g = ns_group (content, prov_text (p, "sections", "chat_history"));
   g_autofree char *global = history_label (p, p->history_days);
   g_autoptr (GPtrArray) labels = g_ptr_array_new_with_free_func (g_free);
@@ -910,6 +1076,7 @@ wl_batch (gpointer data)
     ch->p = p;
     ch->chat = g_strdup (chat);
     ch->title = g_strdup (title);
+    ch->group = !g_strcmp0 (str_of (o, "kind"), "group");
     ns_switch_quiet (ns_row_get_switch (row), whitelisted (p, chat));
     ns_row_on_activate (row, chat_activate, ch);
     g_object_set_data_full (G_OBJECT (row), "mp-chat", ch, (GDestroyNotify) chat_free);
@@ -1222,6 +1389,11 @@ prov_build (Prov *p, JsonObject *root)
     int d = (int) json_array_get_int_element (hc, i);
     g_array_append_val (p->history_choices, d);
   }
+  g_clear_pointer (&p->group_choices, json_object_unref);
+  if (obj_of (root, "group_choices"))
+    p->group_choices = json_object_ref (obj_of (root, "group_choices"));
+  p->forget_idle_days = self ? (int) json_object_get_int_member_with_default (self, "group_forget_idle_days", 0) : 0;
+  p->forget_disabled = self && json_object_get_boolean_member_with_default (self, "group_forget_disabled", FALSE);
   prov_policy (p, policy);
 
   p->status_g = ns_group (p->content, prov_text (p, "sections", "status"));
