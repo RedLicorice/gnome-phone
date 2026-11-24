@@ -156,7 +156,8 @@ static void update_section (Section *section);
 
 /* one chat channel's id (an X-<CHANNEL>:<id> or IMPP:<scheme>:<id> row of the card, ct_mnv_im_form) */
 typedef struct {
-  char *id;                     /* the scheme: the messaging provider's id */
+  char *id;                     /* the messaging provider's id (the channel's name) */
+  char *scheme;                 /* the IMPP scheme its ids are written with (people ui channel_list impp) */
   char *legacy;                 /* the property an older Contacts wrote it as, "" for none */
   char *original;               /* the id the card had when the editor opened */
   GtkWidget *editable, *line;
@@ -168,6 +169,7 @@ channel_row_free (gpointer data)
   ChannelRow *row = data;
 
   g_free (row->id);
+  g_free (row->scheme);
   g_free (row->legacy);
   g_free (row->original);
   g_free (row);
@@ -1439,22 +1441,6 @@ on_channel_changed (Editor *editor)
 {
 }
 
-/* the legacy property of a channel, from the Minerva section's list (people ui channel_list), "" for none */
-static const char *
-channel_legacy (const char *id)
-{
-  JsonArray *list = ct_mnv_list ("channel_list");
-
-  for (guint i = 0; list && i < json_array_get_length (list); i++)
-    {
-      JsonObject *c = json_array_get_object_element (list, i);
-
-      if (g_strcmp0 (ns_json_str (c, "id"), id) == 0)
-        return ns_json_str (c, "legacy_property");
-    }
-  return "";
-}
-
 /* Minerva's chat channels (the messaging providers that are enabled, people ui im_services), one row each, written
  * as the memory service writes them (ct_mnv_im_form); only where Minerva's texts are loaded and say how. On a signed
  * card a change is checked at saving. */
@@ -1479,18 +1465,21 @@ channels_section (Editor *editor, EContact *prefill)
   gtk_box_append (GTK_BOX (box), rows);
   for (guint i = 0; services && i < json_array_get_length (services); i++)
     {
-      JsonObject *service = json_array_get_object_element (services, i);
+      JsonObject *service = json_array_get_object_element (services, i), *channel;
       ChannelRow *row = g_new0 (ChannelRow, 1);
       GtkWidget *line = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
       GtkWidget *field, *title;
       g_autofree char *initial = NULL;
 
       row->id = g_strdup (ns_json_str (service, "id"));
-      row->legacy = g_strdup (channel_legacy (row->id));
-      row->original = ct_contact_get_channel (editor->original, row->id, *row->legacy ? row->legacy : NULL,
+      channel = ct_mnv_channel (row->id);
+      row->scheme = g_strdup (channel ? ct_mnv_channel_scheme (channel) : row->id);
+      /* the property an older Contacts wrote it as (people ui channel_list legacy_property), "" for none */
+      row->legacy = g_strdup (ns_json_str (channel, "legacy_property"));
+      row->original = ct_contact_get_channel (editor->original, row->scheme, *row->legacy ? row->legacy : NULL,
                                               ct_mnv_im_form ());
       /* a new contact's id from its prefill (an imported chat's), saved as a typed one would be */
-      initial = editor->is_new && prefill ? ct_contact_get_channel (prefill, row->id, NULL, ct_mnv_im_form ())
+      initial = editor->is_new && prefill ? ct_contact_get_channel (prefill, row->scheme, NULL, ct_mnv_im_form ())
                                           : g_strdup (row->original);
       field = field_new (ns_json_str (service, "title"), initial, FALSE, GTK_INPUT_PURPOSE_FREE_FORM,
                          GTK_INPUT_HINT_NONE, G_CALLBACK (on_channel_changed), editor, &row->editable);
@@ -1754,7 +1743,7 @@ build_contact (Editor *editor)
       ChannelRow *row = editor->channel_rows->pdata[i];
       g_autofree char *text = editable_text (row->editable);
 
-      ct_contact_apply_channel (contact, row->id, *row->legacy ? row->legacy : NULL, ct_mnv_im_form (), row->original,
+      ct_contact_apply_channel (contact, row->scheme, *row->legacy ? row->legacy : NULL, ct_mnv_im_form (), row->original,
                                 text);
     }
   ct_contact_set_labels (contact, editor->labels);

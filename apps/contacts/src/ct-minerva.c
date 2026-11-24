@@ -731,7 +731,7 @@ channel_write (M *m, guint index, const char *value, const char *done)
   if (!contact || !channel || !im_form_usable (ct_mnv_im_form ()))
     return;
   copy = e_contact_duplicate (contact);
-  ct_contact_set_channel (copy, ns_json_str (channel, "id"), ns_json_str (channel, "legacy_property"), ct_mnv_im_form (),
+  ct_contact_set_channel (copy, ct_mnv_channel_scheme (channel), ns_json_str (channel, "legacy_property"), ct_mnv_im_form (),
                           value);
   changed = g_ptr_array_new_with_free_func (g_object_unref);
   g_ptr_array_add (changed, g_object_ref (copy));
@@ -780,7 +780,7 @@ on_channel (GtkWidget *row, gpointer data)
   guint index = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (row), "ct-channel"));
   JsonObject *channel = channel_at (index);
   EContact *contact = contact_of (m);
-  g_autofree char *value = contact && channel ? ct_contact_get_channel (contact, ns_json_str (channel, "id"), ns_json_str (channel, "legacy_property"), ct_mnv_im_form ())
+  g_autofree char *value = contact && channel ? ct_contact_get_channel (contact, ct_mnv_channel_scheme (channel), ns_json_str (channel, "legacy_property"), ct_mnv_im_form ())
                                               : g_strdup ("");
   g_autofree char *at = g_strdup_printf ("%u", index);
 
@@ -799,27 +799,28 @@ static void
 channel_rows (M *m)
 {
   JsonArray *channels = ct_mnv_list ("channel_list");
+  JsonArray *invites = ct_mnv_list ("invites");
   EContact *contact = contact_of (m);
 
   heading (m, ct_mnv_text ("channels"));
   for (guint i = 0; channels && i < json_array_get_length (channels); i++)
     {
       JsonObject *channel = json_array_get_object_element (channels, i);
-      g_autofree char *value = contact ? ct_contact_get_channel (contact, ns_json_str (channel, "id"), ns_json_str (channel, "legacy_property"), ct_mnv_im_form ())
+      g_autofree char *value = contact ? ct_contact_get_channel (contact, ct_mnv_channel_scheme (channel), ns_json_str (channel, "legacy_property"), ct_mnv_im_form ())
                                        : g_strdup ("");
       GtkWidget *row = entry_row (m, ns_json_str (channel, "title"), *value ? value : ct_mnv_text ("channel_none"),
                                   G_CALLBACK (on_channel), contact != NULL && im_form_usable (ct_mnv_im_form ()));
 
       g_object_set_data (G_OBJECT (row), "ct-channel", GUINT_TO_POINTER (i));
     }
-  /* a channel whose manifest describes an invitation (ui.contacts.invite: the person writes to the channel's bot,
-   * which links her id to this contact) shows its row; the invitation itself is a task of its own */
-  for (guint i = 0; channels && i < json_array_get_length (channels); i++)
+  /* the invitations (people ui contacts.invites: a channel whose manifest says contact.invite, where the person
+   * writes to the channel's bot, which links her id to this contact), one row each; the invitation itself is a task
+   * of its own */
+  for (guint i = 0; invites && i < json_array_get_length (invites); i++)
     {
-      JsonObject *invite = ns_json_obj (json_array_get_object_element (channels, i), "invite");
+      JsonObject *invite = json_array_get_object_element (invites, i);
 
-      if (invite)
-        entry_row (m, ns_json_str (invite, "title"), ns_json_str (invite, "note"), NULL, FALSE);
+      entry_row (m, ns_json_str (invite, "title"), ns_json_str (invite, "note"), NULL, FALSE);
     }
 }
 
@@ -1002,9 +1003,9 @@ render (M *m)
                           m->name ? m->name : "", m->max_samples, contact != NULL, role);
   for (guint i = 0; contact && channels && i < json_array_get_length (channels); i++)
     {
-      g_autofree char *value = ct_contact_get_channel (contact, ns_json_str (json_array_get_object_element (channels, i), "id"),
-                                              ns_json_str (json_array_get_object_element (channels, i), "legacy_property"),
-                                              ct_mnv_im_form ());
+      JsonObject *channel = json_array_get_object_element (channels, i);
+      g_autofree char *value = ct_contact_get_channel (contact, ct_mnv_channel_scheme (channel),
+                                                       ns_json_str (channel, "legacy_property"), ct_mnv_im_form ());
 
       g_string_append_printf (now, "\n%s", value);
     }

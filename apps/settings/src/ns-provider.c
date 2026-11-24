@@ -49,15 +49,15 @@ bad_of (JsonObject *root, const char *err, JsonObject *ui)
   return NULL;
 }
 
-/* the data's words for a provider of that pairing kind in that state: messaging_ui.json "pairing_kinds" > kind >
- * "state:label" (the daemon's own label, "offline:token mancante"), else "state"; for an account that is already
+/* the data's words for a channel in that state: `messaging ui` "channels" > the channel's id > "pairing" (its
+ * manifest's per-state texts) > "state:label" (the daemon's own label, "offline:token mancante"), else "state"; for an account that is already
  * linked the same keys with "paired:" in front come first. Members: status (the state's name), hint (what the owner
  * does now), action (start | qr | busy | scan | token), button (the action's row), wait (what is being done while the
  * answer is awaited), cancel and retry (the labels of the rows offered when it takes long) */
 static JsonObject *
-entry_of (JsonObject *ui, const char *kind, const char *state, const char *label, gboolean paired)
+entry_of (JsonObject *ui, const char *id, const char *state, const char *label, gboolean paired)
 {
-  JsonObject *k = obj_of (obj_of (ui, "pairing_kinds"), kind ? kind : "");
+  JsonObject *k = obj_of (obj_of (obj_of (ui, "channels"), id ? id : ""), "pairing");
   state = state ? state : "";
   label = label ? label : "";
   JsonObject *e;
@@ -75,9 +75,10 @@ entry_of (JsonObject *ui, const char *kind, const char *state, const char *label
 }
 
 /* what a status answer says, in the data's words: the state ("Collegato"), and the daemon's own label after it
- * ("token mancante"). A service that does not answer is "not running", whatever the program said */
+ * ("token mancante"; the channel's words, which hold the generic ones with its own over them, else the generic).
+ * A service that does not answer is "not running", whatever the program said */
 static char *
-status_text (JsonObject *root, const char *err, JsonObject *ui, const char *kind)
+status_text (JsonObject *root, const char *err, JsonObject *ui, const char *id)
 {
   JsonObject *labels = obj_of (ui, "labels");
   if (err || !root || !ok_of (root))
@@ -87,12 +88,13 @@ status_text (JsonObject *root, const char *err, JsonObject *ui, const char *kind
     state = str_of (root, "status");
   const char *label = str_of (root, "label");
   gboolean paired = json_object_get_boolean_member_with_default (root, "paired", FALSE);
-  const char *word = str_of (entry_of (ui, kind, state, label, paired), "status");
+  const char *word = str_of (entry_of (ui, id, state, label, paired), "status");
   if (!*word)
     word = *state ? str_of (obj_of (ui, "states"), state) : "";
   if (!*word)
     word = *state ? state : str_of (labels, "status_unknown");
-  const char *said = str_of (obj_of (ui, "words"), label);
+  JsonObject *channel = obj_of (obj_of (ui, "channels"), id ? id : "");
+  const char *said = str_of (obj_of (channel ? channel : ui, "words"), label);
   if (*said)
     label = said;
   return *label ? g_strdup_printf ("%s \xc2\xb7 %s", word, label) : g_strdup (word);
@@ -101,7 +103,7 @@ status_text (JsonObject *root, const char *err, JsonObject *ui, const char *kind
 /* ---- the index: one row per provider ---- */
 
 typedef struct {
-  char      *id, *kind;
+  char      *id;
   GtkWidget *row;
 } ProviderRow;
 
@@ -118,7 +120,6 @@ static void
 provider_row_free (ProviderRow *r)
 {
   g_free (r->id);
-  g_free (r->kind);
   g_free (r);
 }
 
@@ -143,7 +144,7 @@ index_status_done (JsonObject *root, const char *err, gpointer data)
 {
   ProviderRow *r = data;
   Index *ix = g_object_get_data (G_OBJECT (r->row), "mp-index");
-  g_autofree char *text = status_text (root, err, ix->ui, r->kind);
+  g_autofree char *text = status_text (root, err, ix->ui, r->id);
   ns_row_set_subtitle (r->row, text);
 }
 
@@ -165,7 +166,6 @@ index_loaded (JsonObject *root, const char *err, gpointer data)
       continue;
     ProviderRow *r = g_new0 (ProviderRow, 1);
     r->id = g_strdup (id);
-    r->kind = g_strdup (str_of (o, "pairing"));
     r->row = ns_row (ix->group, "chat-message-new-symbolic", "green", str_of (o, "label"), "");
     g_object_set_data (G_OBJECT (r->row), "mp-index", ix);
     g_object_set_data_full (G_OBJECT (r->row), "mp-id", g_strdup (id), g_free);
@@ -383,7 +383,7 @@ prov_saved (JsonObject *root, const char *err, gpointer data)
 static JsonObject *
 prov_entry (Prov *p)
 {
-  return entry_of (p->ui, p->kind, p->state, p->word, p->paired);
+  return entry_of (p->ui, p->id, p->state, p->word, p->paired);
 }
 
 static gboolean
@@ -662,7 +662,7 @@ status_loaded (JsonObject *root, const char *err, gpointer data)
     p->asked = FALSE;
   if (g_strcmp0 (state, "pairing"))
     qr_forget (p);   /* no pairing, no code: a picture left from before would also hide the card */
-  g_autofree char *text = status_text (root, err, p->ui, p->kind);
+  g_autofree char *text = status_text (root, err, p->ui, p->id);
   ns_row_set_subtitle (p->status_row, text);
   if (!g_strcmp0 (state, "pairing") && !g_strcmp0 (action, "qr"))
     qr_run (p);   /* a code is shown the moment it exists, and asked for again while it is */
@@ -1452,7 +1452,7 @@ prov_build (Prov *p, JsonObject *root)
   p->pair_g = ns_group (p->content, prov_text (p, "sections", "pairing"));
   ns_group_set_visible (p->pair_g, FALSE);
 
-  const char *note = str_of (obj_of (p->ui, "provider_notes"), p->id);
+  const char *note = str_of (obj_of (obj_of (p->ui, "channels"), p->id), "note");
   if (*note)
     ns_note (p->content, note);
 
@@ -1545,15 +1545,14 @@ ns_page_provider (GtkWidget *row, gpointer data)
 
 /* ---- Accounts: the channels' tokens ----
  * One row per channel of the registry (`minerva-config channels --json`) whose pairing has a secret the owner enters
- * (a bot's token): its title and hint are the texts' token_title and token_hint with {name} (the secret's name),
- * {label} (the channel's) and {docs_url} (where the token comes from) filled in; it is stored through
- * `minerva-config key set <secret.key>`, on stdin. */
+ * (a bot's token), stored through `minerva-config key set <secret.key>`, on stdin; its title and hint are the
+ * channel's token_title and token_hint (`messaging ui` "channels"). */
 
 typedef struct {
   GObject           *owner;
   GtkWidget         *content;
   char              *only;      /* one channel's row (its provider page), NULL for every channel's */
-  JsonObject        *labels;    /* `messaging ui` labels, until the channels come */
+  JsonObject        *ui;        /* `messaging ui`, until the channels come */
 } Token;
 
 typedef struct {
@@ -1566,8 +1565,8 @@ static void
 token_free (Token *t)
 {
   g_free (t->only);
-  if (t->labels)
-    json_object_unref (t->labels);
+  if (t->ui)
+    json_object_unref (t->ui);
   g_free (t);
 }
 
@@ -1576,17 +1575,6 @@ token_row_free (TokenRow *r)
 {
   g_free (r->key);
   g_free (r);
-}
-
-/* @template with the secret's {name}, the channel's {label} and the secret's {docs_url} */
-static char *
-token_text (const char *template, JsonObject *channel, JsonObject *secret)
-{
-  GString *s = g_string_new (template);
-  g_string_replace (s, "{name}", ns_json_str (secret, "name"), 0);
-  g_string_replace (s, "{label}", ns_json_str (channel, "label"), 0);
-  g_string_replace (s, "{docs_url}", ns_json_str (secret, "docs_url"), 0);
-  return g_string_free (s, FALSE);
 }
 
 static void
@@ -1598,7 +1586,7 @@ token_saved (JsonObject *root, const char *err, gpointer data)
     return;
   }
   ns_row_value_set (r->row, "");
-  say (r->msg, str_of (r->t->labels, "token_saved"), FALSE);
+  say (r->msg, str_of (obj_of (r->t->ui, "labels"), "token_saved"), FALSE);
 }
 
 static void
@@ -1620,19 +1608,17 @@ token_channels_done (JsonObject *root, const char *err, gpointer data)
   g_autoptr (GList) names = json_object_get_members (root);
   names = g_list_sort (names, (GCompareFunc) g_strcmp0);
   for (GList *l = names; l; l = l->next) {
-    JsonObject *channel = ns_json_obj (root, l->data);
-    JsonObject *secret = ns_json_obj (ns_json_obj (channel, "pairing"), "secret");
-    if (!secret || !*ns_json_str (secret, "key") || (t->only && g_strcmp0 (t->only, l->data) != 0))
+    JsonObject *secret = obj_of (obj_of (obj_of (root, l->data), "pairing"), "secret");
+    JsonObject *texts = obj_of (obj_of (t->ui, "channels"), l->data);
+    if (!secret || !*str_of (secret, "key") || (t->only && g_strcmp0 (t->only, l->data) != 0))
       continue;
     TokenRow *r = g_new0 (TokenRow, 1);
     r->t = t;
-    r->key = g_strdup (ns_json_str (secret, "key"));
-    g_autofree char *title = token_text (str_of (t->labels, "token_title"), channel, secret);
-    g_autofree char *hint = token_text (str_of (t->labels, "token_hint"), channel, secret);
+    r->key = g_strdup (str_of (secret, "key"));
     GtkWidget *g = ns_group (t->content, NULL);
-    r->row = ns_row_value (g, title, "", TRUE, token_entered, r);
+    r->row = ns_row_value (g, str_of (texts, "token_title"), "", TRUE, token_entered, r);
     g_object_set_data_full (G_OBJECT (r->row), "mp-token-row", r, (GDestroyNotify) token_row_free);
-    ns_note (t->content, hint);
+    ns_note (t->content, str_of (texts, "token_hint"));
     r->msg = ns_note (t->content, "");
     gtk_widget_set_visible (r->msg, FALSE);
   }
@@ -1644,10 +1630,7 @@ token_ui_done (JsonObject *root, const char *err, gpointer data)
   Token *t = data;
   if (err || !ok_of (root))
     return;
-  JsonObject *labels = obj_of (root, "labels");
-  if (!labels)
-    return;
-  t->labels = json_object_ref (labels);
+  t->ui = json_object_ref (root);
   const char *args[] = { "channels", "--json", NULL };
   ns_mc_run (t->owner, args, NULL, token_channels_done, t);
 }

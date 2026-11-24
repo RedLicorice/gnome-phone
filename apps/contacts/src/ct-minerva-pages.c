@@ -830,8 +830,10 @@ import_answered (JsonObject *root, const char *err, gpointer data)
   channel = ns_json_str (root, "channel");
   id = ns_json_str (root, "channel_id");
   photo = ns_json_str (root, "photo");
+  /* the channel's name; its id goes on the card with the channel's IMPP scheme */
   if (*channel && *id && im_form_usable (ct_mnv_im_form ()))
-    ct_contact_set_channel (prefill, channel, NULL, ct_mnv_im_form (), id);
+    ct_contact_set_channel (prefill, ct_mnv_channel (channel) ? ct_mnv_channel_scheme (ct_mnv_channel (channel)) : channel,
+                            NULL, ct_mnv_im_form (), id);
   if (*photo)
     {
       g_autofree char *uri = g_filename_to_uri (photo, NULL, NULL);

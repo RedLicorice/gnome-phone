@@ -67,6 +67,29 @@ ct_mnv_list (const char *key)
   return ns_json_arr (contacts_part (), key);
 }
 
+JsonObject *
+ct_mnv_channel (const char *id)
+{
+  JsonArray *list = ct_mnv_list ("channel_list");
+
+  for (guint i = 0; id && list && i < json_array_get_length (list); i++)
+    {
+      JsonObject *channel = json_array_get_object_element (list, i);
+
+      if (g_strcmp0 (ns_json_str (channel, "id"), id) == 0)
+        return channel;
+    }
+  return NULL;
+}
+
+const char *
+ct_mnv_channel_scheme (JsonObject *channel)
+{
+  const char *impp = ns_json_str (channel, "impp");
+
+  return *impp ? impp : ns_json_str (channel, "id");
+}
+
 const ImForm *
 ct_mnv_im_form (void)
 {
@@ -200,7 +223,7 @@ ui_answered (JsonObject *root, const char *err, gpointer data)
         {
           JsonObject *channel = json_array_get_object_element (channels, i);
 
-          ct_contact_register_channel (ns_json_str (channel, "id"), ns_json_str (channel, "legacy_property"),
+          ct_contact_register_channel (ct_mnv_channel_scheme (channel), ns_json_str (channel, "legacy_property"),
                                        ns_json_str (channel, "title"));
         }
     }

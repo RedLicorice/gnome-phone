@@ -43,6 +43,11 @@ double      ct_mnv_double   (const char *key);
 const char *ct_mnv_map      (const char *map, const char *key);
 /* the data's list under "contacts" (the channels, the rules), borrowed, NULL when absent */
 JsonArray  *ct_mnv_list     (const char *key);
+/* a messaging channel of the data's channel_list ({id, legacy_property, impp, title, hint, number_based}) by its
+ * id, borrowed, NULL when it has none; and the IMPP scheme its ids are written with on a card (its "impp", else its
+ * id) */
+JsonObject *ct_mnv_channel        (const char *id);
+const char *ct_mnv_channel_scheme (JsonObject *channel);
 
 /* the person linked to the contact @uid: {"person": {…} or null} */
 void ct_mnv_by_contact  (GObject *owner, const char *uid, CtMnvDone done, gpointer data);
