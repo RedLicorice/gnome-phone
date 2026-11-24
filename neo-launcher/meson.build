@@ -75,7 +75,7 @@ meson.add_install_script(find_program('python3'), files('../tools/icon-theme/mak
 # the NASA solar-system parallax set (tools/parallax-solar-system makes it), packaged apart as neo-parallax-solar-system
 install_subdir('parallax/solar-system', install_dir: get_option('datadir') / 'neo-launcher' / 'parallax')
 # the theme-v4 wallpapers (tools/parallax-renaissance/build_chisel.py makes them); the theme picks one by its look
-foreach look : ['marble', 'sea', 'forest', 'plum']
+foreach look : ['marble', 'sea', 'forest', 'plum', 'cyber']
   install_subdir('parallax/renaissance-' + look, install_dir: get_option('datadir') / 'neo-launcher' / 'parallax')
 endforeach
 install_data('parallax/95_neo-parallax-solar-system.gschema.override',
