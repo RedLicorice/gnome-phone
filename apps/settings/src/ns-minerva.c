@@ -501,11 +501,25 @@ stt_engine (Mn *m, const char *id)
   return NULL;
 }
 
+/* an engine or a choice the status says can be chosen today (an older minerva-config says nothing: it can) */
+static gboolean
+selectable (JsonObject *o)
+{
+  return json_object_get_boolean_member_with_default (o, "selectable", TRUE);
+}
+
+/* the recognizers the chain could still take: selectable and not in it yet */
 static guint
-stt_engine_count (Mn *m)
+stt_addable_count (Mn *m)
 {
   JsonArray *a = arr_of (m->st, "stt_engines");
-  return a ? json_array_get_length (a) : 0;
+  guint n = 0;
+  for (guint i = 0; a && i < json_array_get_length (a); i++) {
+    JsonObject *o = json_array_get_object_element (a, i);
+    if (selectable (o) && !g_strv_contains ((const char *const *) m->stt_ids, str_of (o, "id")))
+      n++;
+  }
+  return n;
 }
 
 static const char *
@@ -549,13 +563,19 @@ stt_add (GtkWidget *row, gpointer data)
   JsonArray *a = arr_of (m->st, "stt_engines");
   guint shown = 0;
   for (guint i = 0; a && i < json_array_get_length (a); i++) {
-    const char *id = str_of (json_array_get_object_element (a, i), "id");
+    JsonObject *o = json_array_get_object_element (a, i);
+    const char *id = str_of (o, "id");
     if (g_strv_contains ((const char *const *) m->stt_ids, id))
       continue;
+    shown++;
+    if (!selectable (o)) {   /* listed with why it cannot be added today */
+      GtkWidget *r = ns_row (g, NULL, NULL, stt_label (m, id), str_of (o, "reason"));
+      gtk_widget_set_sensitive (r, FALSE);
+      continue;
+    }
     GtkWidget *r = ns_row (g, NULL, NULL, stt_label (m, id), stt_hint (m, id));
     g_object_set_data_full (G_OBJECT (r), "mn-id", g_strdup (id), g_free);
     ns_row_on_activate (r, stt_add_picked, m);
-    shown++;
   }
   if (!shown)
     ns_note (c, "Every recognizer is already in the list.");
@@ -586,7 +606,7 @@ stt_fill (Mn *m)
   }
   g_autofree char *last = g_strdup_printf ("%s • always the last one", str_of (fixed, "hint"));
   ns_row (m->stt, NULL, NULL, str_of (fixed, "name"), last);
-  if (n < stt_engine_count (m))
+  if (stt_addable_count (m))
     ns_row_button (m->stt, "Add a recognizer…", FALSE, stt_add, m);
 }
 
@@ -1111,18 +1131,22 @@ build_groups (Mn *m, const char *page, gboolean after)
         JsonArray *ch = arr_of (r, "choices");
         g_autoptr (GPtrArray) ids = g_ptr_array_new_with_free_func (g_free);
         g_autoptr (GPtrArray) labels = g_ptr_array_new_with_free_func (g_free);
+        g_autoptr (GPtrArray) reasons = g_ptr_array_new ();   /* "" = can be chosen; else why not, greyed out */
         for (guint k = 0; ch && k < json_array_get_length (ch); k++) {
           JsonObject *o = json_array_get_object_element (ch, k);
           g_ptr_array_add (ids, g_strdup (str_of (o, "id")));
           g_ptr_array_add (labels, g_strdup (str_of (o, "label")));
+          g_ptr_array_add (reasons, (char *) (selectable (o) ? "" : str_of (o, "reason")));
         }
         g_ptr_array_add (ids, NULL);
         g_ptr_array_add (labels, NULL);
+        g_ptr_array_add (reasons, NULL);
         Choice *c = g_new0 (Choice, 1);
         c->m = m;
         c->key = g_strdup (key);
         c->ids = g_strdupv ((char **) ids->pdata);
         row = ns_row_pick (grp, label, (const char *const *) labels->pdata, 0, choice_picked, c);
+        ns_row_pick_set_reasons (row, (const char *const *) reasons->pdata);
         g_object_set_data_full (G_OBJECT (row), "mn-choice", c, (GDestroyNotify) choice_free);
         if (*help)
           ns_row_set_subtitle (row, help);
@@ -1676,13 +1700,19 @@ build_rows (Mn *m)
     choice_row (m, m->roles_g, "Mailbox (other agents)", "roles.mailbox", "Same as main", FALSE);
   }
   if (m->voice_g) {
-    JsonArray *ve = arr_of (m->st, "voice_engines");   /* the phone's own, then every provider with a voice */
+    /* the phone's own (id ""), then every cloud voice; the stored value may be the id or one of its aliases */
+    JsonArray *ve = arr_of (m->st, "voice_engines");
+    const char *engine = setting (m, "voice.engine");
     g_autoptr (GPtrArray) labels = g_ptr_array_new ();
     guint sel = 0;
     for (guint i = 0; ve && i < json_array_get_length (ve); i++) {
       JsonObject *o = json_array_get_object_element (ve, i);
       g_ptr_array_add (labels, (char *) str_of (o, "label"));
-      if (!g_strcmp0 (str_of (o, "id"), setting (m, "voice.engine")))
+      gboolean match = !g_strcmp0 (str_of (o, "id"), engine);
+      JsonArray *al = arr_of (o, "aliases");
+      for (guint k = 0; !match && *engine && al && k < json_array_get_length (al); k++)
+        match = !g_strcmp0 (json_array_get_string_element (al, k), engine);
+      if (match)
         sel = i;
     }
     g_ptr_array_add (labels, NULL);

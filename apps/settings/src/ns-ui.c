@@ -817,6 +817,7 @@ ns_row_flag (GtkWidget *group, const char *title, const char *subtitle, GSetting
 
 typedef struct {
   char     **labels;
+  char     **reasons;   /* NULL, or one per label: non-empty = not pickable, said under it */
   guint      selected;
   NsPicked   picked;
   gpointer   data;
@@ -865,6 +866,12 @@ pick_open (GtkWidget *row, gpointer data)
   GtkWidget *g = ns_group (content, NULL);
   for (guint i = 0; p->labels[i]; i++) {
     GtkWidget *r = mark_row (g, p->labels[i], i == p->selected);
+    const char *reason = p->reasons && i < g_strv_length (p->reasons) ? p->reasons[i] : NULL;
+    if (reason && *reason) {
+      ns_row_set_subtitle (r, reason);
+      gtk_widget_set_sensitive (r, FALSE);
+      continue;
+    }
     g_object_set_data (G_OBJECT (r), "ns-pick", p);
     ns_row_on_activate (r, pick_picked, GUINT_TO_POINTER (i));
   }
@@ -875,6 +882,7 @@ static void
 pick_free (Pick *p)
 {
   g_strfreev (p->labels);
+  g_strfreev (p->reasons);
   g_free (p);
 }
 
@@ -901,6 +909,14 @@ ns_row_pick_select (GtkWidget *row, guint selected)
   Pick *p = g_object_get_data (G_OBJECT (row), "ns-pick");
   p->selected = selected;
   ns_row_set_subtitle (row, selected < g_strv_length (p->labels) ? p->labels[selected] : NULL);
+}
+
+void
+ns_row_pick_set_reasons (GtkWidget *row, const char *const *reasons)
+{
+  Pick *p = g_object_get_data (G_OBJECT (row), "ns-pick");
+  g_strfreev (p->reasons);
+  p->reasons = g_strdupv ((char **) reasons);
 }
 
 /* ---- a typed value ---- */

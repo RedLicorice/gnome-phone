@@ -71,6 +71,9 @@ typedef void (*NsPicked) (GtkWidget *row, guint index, gpointer data);
 GtkWidget *ns_row_pick (GtkWidget *group, const char *title, const char *const *labels, guint selected,
                         NsPicked picked, gpointer data);
 void       ns_row_pick_select (GtkWidget *row, guint selected);
+/* the choices that cannot be picked: reasons[i] (one per label) non-empty greys choice i out with the reason under
+ * it; NULL or "" leaves it pickable (the reasons are copied) */
+void       ns_row_pick_set_reasons (GtkWidget *row, const char *const *reasons);
 /* a string or integer key, typed in a dialog */
 GtkWidget *ns_row_entry (GtkWidget *group, const char *title, GSettings *s, const char *key);
 
