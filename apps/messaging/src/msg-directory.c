@@ -5,8 +5,6 @@
 
 #include "sms-provider.h"
 
-#define PROVIDER_NAME_PREFIX MSG_PROVIDER_NAME_PREFIX
-#define PROVIDER_PATH_PREFIX MSG_PROVIDER_PATH_PREFIX
 #define CHATS_CHANGED "ChatsChanged"
 
 typedef struct {
@@ -39,6 +37,16 @@ typedef struct {
   MsgDirectory *self;
   char         *id;
 } Read;
+
+void
+msg_provider_bus (const char *id, char **name, char **path, char **iface)
+{
+  g_autofree char *element = g_dbus_escape_object_path (id);
+
+  *name = g_strconcat (MSG_PROVIDER_NAME_PREFIX, id, NULL);
+  *path = g_strconcat (MSG_PROVIDER_PATH_PREFIX, element, NULL);
+  *iface = g_strconcat (MSG_PROVIDER_NAME_PREFIX, element, NULL);
+}
 
 static void
 read_free (Read *r)
@@ -105,27 +113,39 @@ on_chats (GObject *source, GAsyncResult *res, gpointer data)
 static void
 read_provider (MsgDirectory *self, const char *id)
 {
-  g_autofree char *name = g_strconcat (PROVIDER_NAME_PREFIX, id, NULL);
-  g_autofree char *path = g_strconcat (PROVIDER_PATH_PREFIX, id, NULL);
+  g_autofree char *name = NULL, *path = NULL, *iface = NULL;
   Read *r = g_new0 (Read, 1);
 
+  msg_provider_bus (id, &name, &path, &iface);
   r->self = g_object_ref (self);
   r->id = g_strdup (id);
-  g_dbus_connection_call (self->bus, name, path, name, "Chats", NULL, G_VARIANT_TYPE ("(s)"),
+  g_dbus_connection_call (self->bus, name, path, iface, "Chats", NULL, G_VARIANT_TYPE ("(s)"),
                           G_DBUS_CALL_FLAGS_NO_AUTO_START, -1, self->cancel, on_chats, r);
 }
 
 static void
 on_appeared (GDBusConnection *bus, const char *name, const char *owner, gpointer data)
 {
-  read_provider (MSG_DIRECTORY (data), name + strlen (PROVIDER_NAME_PREFIX));
+  read_provider (MSG_DIRECTORY (data), name + strlen (MSG_PROVIDER_NAME_PREFIX));
 }
 
+/* a subscription's provider: its interface carries the escaped id, so the id travels with the subscription */
 static void
 on_chats_changed (GDBusConnection *bus, const char *sender, const char *path, const char *iface,
                   const char *member, GVariant *params, gpointer data)
 {
-  read_provider (MSG_DIRECTORY (data), iface + strlen (PROVIDER_NAME_PREFIX));
+  Read *sub = data;
+
+  read_provider (sub->self, sub->id);
+}
+
+static void
+sub_free (gpointer data)
+{
+  Read *sub = data;
+
+  g_free (sub->id);
+  g_free (sub);
 }
 
 static void
@@ -144,15 +164,19 @@ on_bus (GObject *source, GAsyncResult *res, gpointer data)
   ids = sms_provider_ids ();
   for (guint i = 0; ids && ids[i]; i++)
     {
-      g_autofree char *name = NULL, *path = NULL;
+      g_autofree char *name = NULL, *path = NULL, *iface = NULL;
+      Read *r;
       guint watch, sub;
 
       if (!sms_provider_flag (ids[i], "directory-names"))
         continue;
-      name = g_strconcat (PROVIDER_NAME_PREFIX, ids[i], NULL);
-      path = g_strconcat (PROVIDER_PATH_PREFIX, ids[i], NULL);
-      sub = g_dbus_connection_signal_subscribe (self->bus, NULL, name, CHATS_CHANGED, path, NULL,
-                                                G_DBUS_SIGNAL_FLAGS_NONE, on_chats_changed, self, NULL);
+      msg_provider_bus (ids[i], &name, &path, &iface);
+      /* self outlives the subscription: dispose unsubscribes; the struct only carries the id */
+      r = g_new0 (Read, 1);
+      r->self = self;
+      r->id = g_strdup (ids[i]);
+      sub = g_dbus_connection_signal_subscribe (self->bus, NULL, iface, CHATS_CHANGED, path, NULL,
+                                                G_DBUS_SIGNAL_FLAGS_NONE, on_chats_changed, r, sub_free);
       watch = g_bus_watch_name_on_connection (self->bus, name, G_BUS_NAME_WATCHER_FLAGS_NONE, on_appeared, NULL,
                                               self, NULL);
       g_array_append_val (self->signals, sub);

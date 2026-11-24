@@ -339,6 +339,39 @@ test_live (void)
   sms_store_free (store);
 }
 
+/* a renamed channel: its conversations take the new address, once; a chat the new address already holds keeps its
+ * own conversation, and the old rows of it stay */
+static void
+test_rename_address (void)
+{
+  g_autofree char *path = NULL;
+  SmsStore *store = open_store (&path);
+  g_autoptr(GError) error = NULL;
+  g_autoptr(GPtrArray) conversations = NULL;
+  gboolean renamed = FALSE, kept = FALSE, other = FALSE;
+
+  sms_store_add_incoming (store, "chan:5", "hi", 900, 1000, NULL, NULL);
+  sms_store_add_incoming (store, "chan:6", "old", 900, 1100, NULL, NULL);
+  sms_store_add_incoming (store, "chan-bot:6", "new", 900, 1200, NULL, NULL);
+  sms_store_add_incoming (store, "chanx:7", "another channel", 900, 1300, NULL, NULL);
+  g_assert_cmpuint (sms_store_rename_address (store, "chan:", "chan-bot:", &error), ==, 1);
+  g_assert_no_error (error);
+  g_assert_cmpuint (sms_store_rename_address (store, "chan:", "chan-bot:", &error), ==, 0);
+  g_assert_no_error (error);
+  conversations = sms_store_list_conversations (store, FALSE);
+  g_assert_cmpuint (conversations->len, ==, 4);
+  for (guint i = 0; i < conversations->len; i++)
+    {
+      SmsConversation *c = conversations->pdata[i];
+
+      renamed |= g_strcmp0 (c->destinations[0], "chan-bot:5") == 0 && g_strcmp0 (c->name, "chan-bot:5") == 0;
+      kept |= g_strcmp0 (c->destinations[0], "chan:6") == 0;
+      other |= g_strcmp0 (c->destinations[0], "chanx:7") == 0;
+    }
+  g_assert_true (renamed && kept && other);
+  sms_store_free (store);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -352,5 +385,6 @@ main (int argc, char **argv)
   g_test_add_func ("/sms-store/typed-part", test_typed_part);
   g_test_add_func ("/sms-store/changes", test_changes);
   g_test_add_func ("/sms-store/live", test_live);
+  g_test_add_func ("/sms-store/rename-address", test_rename_address);
   return g_test_run ();
 }

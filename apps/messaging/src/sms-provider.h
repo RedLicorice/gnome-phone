@@ -35,6 +35,15 @@ char *sms_provider_address (const char *provider_id);
 /* a key of any section without the quotes that keep its spaces ([agents] bubble_label, say), or NULL */
 char *sms_provider_text (const char *section, const char *key);
 
+/* a scalar of provider @provider_id's manifest at the dotted @path ("contact.impp"), or NULL: the registry's other
+ * parts, beyond its "messaging" section */
+char *sms_provider_manifest_text (const char *provider_id, const char *path);
+
+/* @destination as a person's card holds it: "<impp>:<chat>", the impp the channel's manifest names (contact.impp,
+ * the network's, shared by every channel of that network: a bot and an account), else the provider's id; NULL for a
+ * destination of no provider */
+char *sms_provider_handle (const char *destination);
+
 /* every section that declares an address, as provider ids (the caller frees) */
 GStrv sms_provider_ids (void);
 

@@ -84,6 +84,8 @@ conf_stamp (void)
 /* the channels' sections: each channel's "messaging" object of `minerva-config channels --json`, asked once per process
  * (a reload asks again); empty when minerva-config is not installed or fails */
 static GKeyFile *channels = NULL;
+/* the same answer whole, for the manifests' other parts (sms_provider_manifest_text) */
+static JsonNode *manifests = NULL;
 
 /* a scalar member as the INI would hold it; NULL for an object, an array or null, which a section cannot hold */
 static char *
@@ -128,6 +130,7 @@ channels_conf (void)
       return channels;
     }
   all = json_node_get_object (root);
+  manifests = json_node_ref (root);
   names = json_object_get_members (all);
   for (GList *l = names; l; l = l->next)
     {
@@ -159,6 +162,7 @@ void
 sms_provider_reload (void)
 {
   g_clear_pointer (&channels, g_key_file_free);
+  g_clear_pointer (&manifests, json_node_unref);
   registry_forget ();
 }
 
@@ -343,6 +347,34 @@ char *
 sms_provider_group (const char * const *destinations)
 {
   return destinations && destinations[0] && !destinations[1] ? owner_or_null (destinations[0]) : NULL;
+}
+
+char *
+sms_provider_manifest_text (const char *provider_id, const char *path)
+{
+  g_auto(GStrv) keys = g_strsplit (path, ".", -1);
+  JsonNode *node;
+
+  channels_conf ();
+  if (!manifests || !provider_id)
+    return NULL;
+  node = manifests;
+  node = JSON_NODE_HOLDS_OBJECT (node) ? json_object_get_member (json_node_get_object (node), provider_id) : NULL;
+  for (guint i = 0; node && keys[i]; i++)
+    node = JSON_NODE_HOLDS_OBJECT (node) ? json_object_get_member (json_node_get_object (node), keys[i]) : NULL;
+  return node ? scalar_text (node) : NULL;
+}
+
+char *
+sms_provider_handle (const char *destination)
+{
+  g_autofree char *id = owner_or_null (destination);
+  g_autofree char *chat = id ? sms_provider_chat (destination) : NULL;
+  g_autofree char *network = id ? sms_provider_manifest_text (id, "contact.impp") : NULL;
+
+  if (!chat)
+    return NULL;
+  return g_strconcat (network && *network ? network : id, ":", chat, NULL);
 }
 
 char *

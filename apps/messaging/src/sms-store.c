@@ -333,6 +333,69 @@ sms_store_open (const char *path, gboolean read_only, GError **error)
   return self;
 }
 
+/* A destination of the old address' rows that the new address does not hold yet (a provider that already wrote a
+ * conversation under its new address keeps that one; the old rows of the same chat stay as they were). */
+#define RENAMED(col) "?2 || substr(" col ", length(?1) + 1)"
+#define OLD(col) "substr(" col ", 1, length(?1)) = ?1"
+
+guint
+sms_store_rename_address (SmsStore *self, const char *old_address, const char *new_address, GError **error)
+{
+  static const char *const statements[] = {
+    "UPDATE participants SET normalized_destination = " RENAMED ("normalized_destination") ","
+    " send_destination = CASE WHEN " OLD ("send_destination") " THEN " RENAMED ("send_destination")
+    " ELSE send_destination END,"
+    " display_destination = CASE WHEN " OLD ("display_destination") " THEN " RENAMED ("display_destination")
+    " ELSE display_destination END"
+    " WHERE " OLD ("normalized_destination") " AND NOT EXISTS (SELECT 1 FROM participants AS n"
+    " WHERE n.sub_id = participants.sub_id AND n.normalized_destination = " RENAMED ("participants.normalized_destination") ")",
+    "UPDATE conversations SET participant_normalized_destination = " RENAMED ("participant_normalized_destination")
+    " WHERE " OLD ("participant_normalized_destination") " AND NOT EXISTS (SELECT 1 FROM participants AS p"
+    " WHERE p.normalized_destination = conversations.participant_normalized_destination)",
+    "UPDATE conversations SET name = substr(replace(', ' || name, ', ' || ?1, ', ' || ?2), 3)"
+    " WHERE instr(', ' || name, ', ' || ?1) > 0 AND NOT EXISTS (SELECT 1 FROM conversation_participants AS cp"
+    " JOIN participants AS p ON p._id = cp.participant_id"
+    " WHERE cp.conversation_id = conversations._id AND " OLD ("p.normalized_destination") ")",
+    "UPDATE reactions SET sender = " RENAMED ("sender") " WHERE " OLD ("sender")
+    " AND NOT EXISTS (SELECT 1 FROM reactions AS r WHERE r.message_id = reactions.message_id"
+    " AND r.sender = " RENAMED ("reactions.sender") ")",
+  };
+  guint changed = 0;
+
+  if (!old_address || !*old_address || !new_address || !*new_address || g_strcmp0 (old_address, new_address) == 0)
+    return 0;
+  if (!exec (self, "BEGIN IMMEDIATE", error))
+    return 0;
+  for (guint i = 0; i < G_N_ELEMENTS (statements); i++)
+    {
+      sqlite3_stmt *update = prepare (self, statements[i]);
+
+      if (update)
+        {
+          sqlite3_bind_text (update, 1, old_address, -1, SQLITE_TRANSIENT);
+          sqlite3_bind_text (update, 2, new_address, -1, SQLITE_TRANSIENT);
+        }
+      if (!run (self, update))
+        {
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "messages: renaming %s: %s", old_address,
+                       sqlite3_errmsg (self->db));
+          exec (self, "ROLLBACK", NULL);
+          return 0;
+        }
+      if (i == 0)
+        changed = (guint) sqlite3_changes (self->db);
+    }
+  if (!exec (self, "COMMIT", error))
+    {
+      exec (self, "ROLLBACK", NULL);
+      return 0;
+    }
+  return changed;
+}
+
+#undef RENAMED
+#undef OLD
+
 void
 sms_store_free (SmsStore *self)
 {

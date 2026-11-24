@@ -100,6 +100,10 @@ typedef struct _SmsStore SmsStore;
 /* opens (or makes) the store at @path; read-only for the app */
 SmsStore *sms_store_open (const char *path, gboolean read_only, GError **error);
 void      sms_store_free (SmsStore *store);
+/* a channel renamed (its manifest's renamed_from): every participant, conversation and reaction whose destination
+ * starts with @old_address takes @new_address in its place, in one transaction; a destination the new address
+ * already holds is left as it is. Running it again changes nothing. The participants renamed, 0 on an error */
+guint     sms_store_rename_address (SmsStore *store, const char *old_address, const char *new_address, GError **error);
 
 /* --- writing (the service) */
 

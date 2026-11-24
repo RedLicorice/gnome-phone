@@ -117,17 +117,19 @@ msg_person_new (Contacts *contacts, const char *destination, const char *country
 {
   MsgPerson *person = g_new0 (MsgPerson, 1);
   /* an agent is named by its name, and is no contact */
-  /* a provider's chat is the contact whose IMPP is its address, or that lists the number after the address
+  /* a provider's chat is the contact whose IMPP is its address as a card holds it (sms_provider_handle: the network's
+   * scheme, then the chat), or that lists the number after the address
    * (echo:+39...); an id with the channel's lid-prefix or a group has no number. Two contacts are not guessed between: the number shows.
    * TODO(X-MINERVA-CHAT-<provider>): the owner's choice on an ambiguous chat, read from the chosen contact's vCard */
   g_autofree char *owner = sms_provider_owner (destination);
   g_autofree char *chat = owner ? sms_provider_chat (destination) : NULL;
   g_autofree char *label = owner ? sms_provider_label (owner) : NULL;
+  g_autofree char *handle = owner ? sms_provider_handle (destination) : NULL;
   const char *number = chat && !has_prefix_of (owner, chat, "lid-prefix") && !has_prefix_of (owner, chat, "group-prefix")
                        ? chat : (chat ? NULL : destination);
   const Contact *contact = NULL;
   guint matches = contacts && !sms_agent_name (destination)
-                  ? contacts_match (contacts, owner ? destination : NULL, number, country, &contact) : 0;
+                  ? contacts_match (contacts, handle, number, country, &contact) : 0;
 
   person->destination = g_strdup (destination);
   if (is_self_agent (destination) && self_card ())

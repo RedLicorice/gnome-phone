@@ -12,10 +12,14 @@
 
 G_BEGIN_DECLS
 
-/* the provider daemons' bus protocol (messaging/internal/dbus/names.go): org.minerva.Provider.<id> at
- * /org/minerva/Provider/<id>, every method answering one JSON string */
+/* the provider daemons' bus protocol (messaging/internal/dbus/names.go): bus name org.minerva.Provider.<id>, object
+ * /org/minerva/Provider/<e> and interface org.minerva.Provider.<e>, <e> the id escaped as an object path element
+ * (g_dbus_escape_object_path: a "-" is not allowed there); every method answers one JSON string */
 #define MSG_PROVIDER_NAME_PREFIX "org.minerva.Provider."
 #define MSG_PROVIDER_PATH_PREFIX "/org/minerva/Provider/"
+
+/* the bus name, object path and interface of provider @id (each newly allocated) */
+void msg_provider_bus (const char *id, char **name, char **path, char **iface);
 
 #define MSG_TYPE_DIRECTORY (msg_directory_get_type ())
 G_DECLARE_FINAL_TYPE (MsgDirectory, msg_directory, MSG, DIRECTORY, GObject)

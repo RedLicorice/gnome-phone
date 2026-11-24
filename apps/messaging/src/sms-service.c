@@ -1694,6 +1694,30 @@ system_bus (GError **error)
   return g_bus_get_sync (G_BUS_TYPE_SYSTEM, NULL, error);
 }
 
+/* A channel the registry says was renamed (its manifest's renamed_from.address): its conversations take its address
+ * now, before any of them is read (Minerva's docs/channels.md, "Renaming a channel"). Idempotent. */
+static void
+rename_channels (SmsStore *store)
+{
+  g_auto(GStrv) ids = sms_provider_ids ();
+
+  for (guint i = 0; ids && ids[i]; i++)
+    {
+      g_autofree char *old_address = sms_provider_manifest_text (ids[i], "renamed_from.address");
+      g_autofree char *new_address = sms_provider_address (ids[i]);
+      g_autoptr(GError) error = NULL;
+      guint renamed;
+
+      if (!old_address || !new_address)
+        continue;
+      renamed = sms_store_rename_address (store, old_address, new_address, &error);
+      if (error)
+        g_warning ("%s: conversations of %s not renamed: %s", ids[i], old_address, error->message);
+      else if (renamed)
+        g_message ("%s: %u conversations' participants renamed from %s to %s", ids[i], renamed, old_address, new_address);
+    }
+}
+
 int
 main (int argc, char **argv)
 {
@@ -1721,6 +1745,7 @@ main (int argc, char **argv)
   service.store = sms_store_open (store_path, FALSE, &error);
   if (!service.store)
     g_error ("%s", error->message);
+  rename_channels (service.store);
   service.contacts = contacts_new ();
   service.blocked = blocked_numbers_new (NULL);
   g_signal_connect (service.contacts, "changed", G_CALLBACK (on_contacts_changed), &service);

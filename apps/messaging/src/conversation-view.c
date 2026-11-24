@@ -736,16 +736,15 @@ static void
 on_withdraw (ConversationView *self)
 {
   g_autoptr(SmsMessage) message = selected_message (self);
-  g_autofree char *provider = NULL, *name = NULL, *path = NULL;
+  g_autofree char *provider = NULL, *name = NULL, *path = NULL, *iface = NULL;
   g_autoptr(GDBusConnection) bus = g_bus_get_sync (G_BUS_TYPE_SESSION, NULL, NULL);
 
   select_message (self, 0);
   if (!message || !bus || !self->conversation || !(provider = sms_provider_owner (self->conversation->destinations[0])))
     return;
-  name = g_strconcat (MSG_PROVIDER_NAME_PREFIX, provider, NULL);
-  path = g_strconcat (MSG_PROVIDER_PATH_PREFIX, provider, NULL);
+  msg_provider_bus (provider, &name, &path, &iface);
   g_object_set_data (G_OBJECT (self), "withdrawing", GSIZE_TO_POINTER (message->id));
-  g_dbus_connection_call (bus, name, path, name, "Revoke", g_variant_new ("(x)", message->id), G_VARIANT_TYPE ("(s)"),
+  g_dbus_connection_call (bus, name, path, iface, "Revoke", g_variant_new ("(x)", message->id), G_VARIANT_TYPE ("(s)"),
                           G_DBUS_CALL_FLAGS_NONE, -1, NULL, on_withdrawn, g_object_ref (self));
 }
 
