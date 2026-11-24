@@ -38,7 +38,7 @@
       <summary>Display font chain</summary>
       <description>Families (comma separated, first one installed wins) for clocks, titles and dialog titles while the
       Renaissance look is on. The stock face is always appended, so a missing font never blanks text. Fonts are
-      installed on the phone with tools/phone/install-fonts.sh and are never part of the repository.</description>
+      the owner's own, in ~/.local/share/fonts on the phone, and are never part of the repository.</description>
     </key>
     <key name="font-body" type="s">
       <default>''</default>

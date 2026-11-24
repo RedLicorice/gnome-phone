@@ -113,7 +113,7 @@ home_layout (void)
   H.scroll = H.page * H.pitch;
   if (!H.time_font) {
     /* the optional Renaissance look (setting de.yesman.GnomePhone.Theme name) sets the clock in the first installed
-     * family of the font-display chain (any font installed with tools/phone/install-fonts.sh); read when the launcher
+     * family of the font-display chain (any font fontconfig finds, e.g. the owner's in ~/.local/share/fonts); read when the launcher
      * starts. Without the look, or with none of the chain installed, the stock face. */
     g_autofree char *family = NULL;
     g_autoptr (GSettingsSchema) schema = g_settings_schema_source_lookup (g_settings_schema_source_get_default (),

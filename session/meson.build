@@ -1,9 +1,9 @@
 # The session's system files, installed by a package (debian/: gnome-phone-session, gnome-phone-daemons, sim-apn)
-# instead of install.sh. Its own project, like libneo and the apps; the programs the units start come from the
+# Its own project, like libneo and the apps; the programs the units start come from the
 # top-level project (input-boost, neo-wakeup, gp-auth) or from here (neo-dock, sim-apn).
 #
 # Left out on purpose: environment.d/60-spongy.conf (one phone's density) and org.gnome.Shell@.service.d/50-mobile.conf
-# (a shell built into /opt by hand); install.sh, which enables the phone session, stays the hand-install path.
+# (a shell built into /opt by hand).
 project('gnome-phone-session', version: '0.1.0', meson_version: '>= 1.0')
 
 prefix = get_option('prefix')

@@ -432,6 +432,15 @@ Description: file manager for GNOME Phone
  storage, removable media, the recycle bin, recent files, the local network
  and saved remotes over SMB, SFTP, FTP/FTPS and WebDAV.
 
+Package: neo-iconpack-renaissance
+Architecture: all
+Depends: ${misc:Depends},
+Recommends: neo-launcher,
+Description: Renaissance icon packs for the Neo launcher
+ The four packs of the optional Renaissance theme: day and night, each as
+ full icons and as glyphs. Neo Settings' Home screen switches packs; the
+ default pack stays Round's.
+
 Package: neo-iconpack-round
 Architecture: all
 Depends: ${misc:Depends},

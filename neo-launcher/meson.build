@@ -60,6 +60,11 @@ install_data('data/layout.json', install_dir: get_option('datadir') / 'neo-launc
 install_subdir('iconpacks/round', install_dir: get_option('datadir') / 'neo-launcher' / 'iconpacks')
 install_data('iconpacks/95_neo-iconpack-round.gschema.override',
              install_dir: get_option('datadir') / 'glib-2.0' / 'schemas')
+# the Renaissance icon packs (tools/iconpack-renaissance makes them), packaged apart as neo-iconpack-renaissance;
+# Neo Settings' Home screen picks one, the default stays Round's
+foreach pack : ['renaissance-day', 'renaissance-night', 'renaissance-glyph-day', 'renaissance-glyph-night']
+  install_subdir('iconpacks' / pack, install_dir: get_option('datadir') / 'neo-launcher' / 'iconpacks')
+endforeach
 # the icon packs as freedesktop icon themes (/usr/share/icons/neo-<pack>, tools/icon-theme/make-icon-theme.py), packaged
 # apart as neo-icon-themes: org.gnome.desktop.interface icon-theme selects one, every program follows
 meson.add_install_script(find_program('python3'), files('../tools/icon-theme/make-icon-theme.py'),
