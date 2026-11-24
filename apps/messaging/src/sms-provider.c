@@ -1,4 +1,5 @@
-/* The messaging providers' registry (sms-provider.h): an INI file of addresses, read when it changes. */
+/* The messaging providers' registry (sms-provider.h): the channels' sections from the channel registry, under an INI
+ * file of addresses read when it changes. */
 
 #include "sms-provider.h"
 
@@ -7,6 +8,7 @@
 
 #include "sms-agent.h"
 #include "minerva-layers.h"
+#include "ns-mc.h"
 
 /* the sections of the file that are not providers */
 static const char *NOT_A_PROVIDER[] = { "providers", "scopes", "limits", "defaults", "events", "agents", "agent-refusals",
@@ -79,11 +81,85 @@ conf_stamp (void)
   return g_string_free (stamp, FALSE);
 }
 
-void
-sms_provider_reload (void)
+/* the channels' sections: each channel's "messaging" object of `minerva-config channels --json`, asked once per process
+ * (a reload asks again); empty when minerva-config is not installed or fails */
+static GKeyFile *channels = NULL;
+
+/* a scalar member as the INI would hold it; NULL for an object, an array or null, which a section cannot hold */
+static char *
+scalar_text (JsonNode *node)
+{
+  GType type;
+
+  if (!JSON_NODE_HOLDS_VALUE (node))
+    return NULL;
+  type = json_node_get_value_type (node);
+  if (type == G_TYPE_BOOLEAN)
+    return g_strdup (json_node_get_boolean (node) ? "true" : "false");
+  if (type == G_TYPE_INT64)
+    return g_strdup_printf ("%" G_GINT64_FORMAT, json_node_get_int (node));
+  if (type == G_TYPE_DOUBLE)
+    {
+      char buf[G_ASCII_DTOSTR_BUF_SIZE];
+
+      return g_strdup (g_ascii_dtostr (buf, sizeof buf, json_node_get_double (node)));
+    }
+  return g_strdup (json_node_get_string (node));
+}
+
+static GKeyFile *
+channels_conf (void)
+{
+  const char *args[] = { "channels", "--json", NULL };
+  g_autofree char *err = NULL;
+  g_autoptr(JsonNode) root = NULL;
+  JsonObject *all;
+  GList *names;
+
+  if (channels)
+    return channels;
+  channels = g_key_file_new ();
+  if (!ns_minerva_available ())
+    return channels;
+  root = ns_mc_run_sync ("minerva-config", args, &err);
+  if (!root || !JSON_NODE_HOLDS_OBJECT (root))
+    {
+      g_message ("the channel registry: %s", err ? err : "not an object");
+      return channels;
+    }
+  all = json_node_get_object (root);
+  names = json_object_get_members (all);
+  for (GList *l = names; l; l = l->next)
+    {
+      JsonObject *section = ns_json_obj (ns_json_obj (all, l->data), "messaging");
+      GList *keys = section ? json_object_get_members (section) : NULL;
+
+      for (GList *k = keys; k; k = k->next)
+        {
+          g_autofree char *value = scalar_text (json_object_get_member (section, k->data));
+
+          if (value)
+            g_key_file_set_value (channels, l->data, k->data, value);
+        }
+      g_list_free (keys);
+    }
+  g_list_free (names);
+  return channels;
+}
+
+/* the merged sections forgotten: rebuilt at the next call, the channels' kept */
+static void
+registry_forget (void)
 {
   g_clear_pointer (&registry, g_key_file_free);
   g_clear_pointer (&registry_stamp, g_free);
+}
+
+void
+sms_provider_reload (void)
+{
+  g_clear_pointer (&channels, g_key_file_free);
+  registry_forget ();
 }
 
 static gboolean
@@ -139,15 +215,13 @@ sms_provider_load_ini (const char *path)
   return g_steal_pointer (&file);
 }
 
-/* one layer's keys over the ones already in into */
+/* @file's keys over the ones already in @into */
 static gboolean
-layer_over (GKeyFile *into, const char *path)
+keys_over (GKeyFile *into, GKeyFile *file)
 {
-  g_autoptr(GKeyFile) file = sms_provider_load_ini (path);
   g_auto(GStrv) groups = NULL;
+  gboolean any = FALSE;
 
-  if (!file)
-    return FALSE;
   groups = g_key_file_get_groups (file, NULL);
   for (guint g = 0; groups[g]; g++)
     {
@@ -158,8 +232,21 @@ layer_over (GKeyFile *into, const char *path)
           g_autofree char *value = g_key_file_get_value (file, groups[g], keys[k], NULL);
 
           g_key_file_set_value (into, groups[g], keys[k], value);
+          any = TRUE;
         }
     }
+  return any;
+}
+
+/* one layer's keys over the ones already in into */
+static gboolean
+layer_over (GKeyFile *into, const char *path)
+{
+  g_autoptr(GKeyFile) file = sms_provider_load_ini (path);
+
+  if (!file)
+    return FALSE;
+  keys_over (into, file);
   return TRUE;
 }
 
@@ -174,10 +261,12 @@ conf (void)
       g_autoptr(GKeyFile) merged = g_key_file_new ();
       gboolean any = FALSE;
 
-      sms_provider_reload ();
+      registry_forget ();
+      /* the channels' sections first, as the packages ship them; the layers' keys over them (an owner's change) */
+      any = keys_over (merged, channels_conf ());
       for (guint i = 0; files[i]; i++)
         any |= layer_over (merged, files[i]);
-      /* no layer: the registry is empty, and the agent's prefix stays the only one known */
+      /* no channel and no layer: the registry is empty, and the agent's prefix stays the only one known */
       if (!any)
         return NULL;
       registry = g_steal_pointer (&merged);

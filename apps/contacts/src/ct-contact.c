@@ -996,23 +996,56 @@ static const struct { const char *property; const char *protocol; } im_propertie
   { "X-GADUGADU", N_("Gadu-Gadu") },
   { "X-GROUPWISE", N_("GroupWise") },
   { "X-MATRIX", N_("Matrix") },
-  { "X-WHATSAPP", N_("WhatsApp") },
-  { "X-TELEGRAM", N_("Telegram") },
 };
 
-/* the protocol's name for an IMPP scheme: the known ones by name, the others as the scheme with a capital */
+/* Minerva's chat channels, which the channel registry describes (ct_contact_register_channel): their IMPP scheme and
+ * their X- property, each to the channel's title. Keys are lower case. */
+static GHashTable *channel_schemes, *channel_properties;
+
+void
+ct_contact_register_channel (const char *scheme, const char *property, const char *title)
+{
+  if (!title || !*title)
+    return;
+  if (!channel_schemes)
+    {
+      channel_schemes = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+      channel_properties = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+    }
+  if (scheme && *scheme)
+    g_hash_table_replace (channel_schemes, g_ascii_strdown (scheme, -1), g_strdup (title));
+  if (property && *property)
+    g_hash_table_replace (channel_properties, g_ascii_strdown (property, -1), g_strdup (title));
+}
+
+/* a registered channel's title for @key in @table, NULL when it is none */
+static const char *
+channel_title (GHashTable *table, const char *key)
+{
+  g_autofree char *lower = NULL;
+
+  if (!table)
+    return NULL;
+  lower = g_ascii_strdown (key, -1);
+  return g_hash_table_lookup (table, lower);
+}
+
+/* the protocol's name for an IMPP scheme: a registered channel's title, the generic vCard ones by name, the others
+ * as the scheme with a capital (translated, except a channel's title, which is already the owner's text) */
 static const char *
 impp_protocol (const char *scheme)
 {
   static const struct { const char *scheme; const char *protocol; } known[] = {
-    { "whatsapp", N_("WhatsApp") }, { "telegram", N_("Telegram") }, { "xmpp", N_("Jabber") },
-    { "matrix", N_("Matrix") }, { "skype", N_("Skype") },
+    { "xmpp", N_("Jabber") }, { "matrix", N_("Matrix") }, { "skype", N_("Skype") },
   };
   static char other[64];
+  const char *channel = channel_title (channel_schemes, scheme);
 
+  if (channel)
+    return channel;
   for (guint i = 0; i < G_N_ELEMENTS (known); i++)
     if (g_ascii_strcasecmp (scheme, known[i].scheme) == 0)
-      return known[i].protocol;
+      return _(known[i].protocol);
   g_snprintf (other, sizeof other, "%s", scheme);
   if (other[0])
     other[0] = g_ascii_toupper (other[0]);
@@ -1108,24 +1141,26 @@ item_from_attribute (CtKind kind, EVCardAttribute *attr)
             {
               g_autofree char *scheme = g_strndup (whole, colon - whole);
 
-              replace (&item->value2, g_strdup (_(impp_protocol (scheme))));
+              replace (&item->value2, g_strdup (impp_protocol (scheme)));
             }
           tokens = type_tokens (attr);
           item->type = simple_type_of (tokens, FALSE, &custom, &item->primary);
           break;
         }
-      for (guint i = 0; i < G_N_ELEMENTS (im_properties); i++)
-        if (g_ascii_strcasecmp (name, im_properties[i].property) == 0)
-          {
-            item = ct_item_new (kind, 0, NULL);
-            replace (&item->value, nth_value (attr, 0));
-            replace (&item->value2, g_strdup (_(im_properties[i].protocol)));
-            tokens = type_tokens (attr);
-            item->type = simple_type_of (tokens, FALSE, &custom, &item->primary);
-            break;
-          }
-      if (!item)
-        return NULL;
+      {
+        const char *protocol = channel_title (channel_properties, name);
+
+        for (guint i = 0; !protocol && i < G_N_ELEMENTS (im_properties); i++)
+          if (g_ascii_strcasecmp (name, im_properties[i].property) == 0)
+            protocol = _(im_properties[i].protocol);
+        if (!protocol)
+          return NULL;
+        item = ct_item_new (kind, 0, NULL);
+        replace (&item->value, nth_value (attr, 0));
+        replace (&item->value2, g_strdup (protocol));
+        tokens = type_tokens (attr);
+        item->type = simple_type_of (tokens, FALSE, &custom, &item->primary);
+      }
       break;
 
     case CT_KIND_SIP:
@@ -1457,8 +1492,8 @@ ct_contact_set_items (EContact *contact, CtKind kind, GPtrArray *items)
 
 /* --- channel identities */
 
-/* the first property of the contact that holds @scheme's id in @field ("IMPP:whatsapp:39333…", with or without an
- * X-SERVICE-TYPE parameter, or "X-WHATSAPP:39333…"); the id in @id */
+/* the first property of the contact that holds @scheme's id in @field ("IMPP:<scheme>:<id>", with or without an
+ * X-SERVICE-TYPE parameter, or "X-<SCHEME>:<id>"); the id in @id */
 static EVCardAttribute *
 find_in_field (EContact *contact, const char *field, const char *scheme, char **id)
 {
@@ -1515,7 +1550,7 @@ ct_contact_set_channel (EContact *contact, const char *scheme, const char *legac
   if (keep && (!*text || g_ascii_strcasecmp (e_vcard_attribute_get_name (keep), property) != 0))
     keep = NULL;
   /* the old id goes in every form it is read in (an address book may hold it twice); another id of the channel
-   * stays. An id an older Contacts wrote as X-WHATSAPP / X-TELEGRAM moves to the written form. */
+   * stays. An id an older Contacts wrote in the channel's legacy property moves to the written form. */
   for (GList *l = e_vcard_get_attributes (vcard); l; l = l->next)
     {
       EVCardAttribute *attr = l->data;

@@ -18,9 +18,12 @@ store = static_library('store', 'src/sms-store.c', dependencies: [gio, sqlite])
 # owner's changed keys; the reader is Minerva's own (common/minerva-layers.c, vendored)
 layers = static_library('layers', '../../common/minerva-layers.c', dependencies: [gio],
                         c_args: ['-DMINERVA_LAYERS_FILE="@0@"'.format(get_option('layers-file'))])
-provider = static_library('provider', 'src/sms-provider.c', link_with: layers,
-                          include_directories: include_directories('../../common'), dependencies: [gio])
 json = dependency('json-glib-1.0')
+# the channel registry comes through minerva-config (`channels --json`), by Neo Settings' door to it (ns-mc.c)
+provider = static_library('provider', 'src/sms-provider.c', '../settings/src/ns-mc.c', link_with: layers,
+                          include_directories: include_directories('../../common', '../settings/src'),
+                          dependencies: [gio, json],
+                          c_args: ['-DMINERVA_BIN_DIR="@0@"'.format(get_option('minerva-bin-dir'))])
 phone = static_library('phone', '../dialer/src/phone-number.c', '../dialer/src/contacts.c', '../dialer/src/im-form.c',
                        '../dialer/src/phone.c',
                        '../dialer/src/notifier.c', '../dialer/src/blocked-numbers.c', include_directories: dialer,
@@ -70,8 +73,8 @@ test('sms-segments', executable('test-sms-segments', 'tests/test-sms-segments.c'
                                 dependencies: [gio]))
 test('msg-markdown', executable('test-msg-markdown', 'tests/test-msg-markdown.c', 'src/msg-markdown.c',
                                  include_directories: 'src', dependencies: [gio, md4c]))
-test('sms-group', executable('test-sms-group', 'tests/test-sms-group.c', link_with: provider, dependencies: [gio]))
-test('sms-layers', executable('test-sms-layers', 'tests/test-sms-layers.c', link_with: provider, dependencies: [gio]))
+test('sms-group', executable('test-sms-group', 'tests/test-sms-group.c', link_with: provider, dependencies: [gio, json]))
+test('sms-layers', executable('test-sms-layers', 'tests/test-sms-layers.c', link_with: provider, dependencies: [gio, json]))
 # the message flows end to end, against a mock modem and notification server on buses of their own
 test('sms-flow', find_program('python3'), timeout: 120,
      args: [files('tests/test-sms.py'), meson.current_build_dir(), meson.current_source_dir()])

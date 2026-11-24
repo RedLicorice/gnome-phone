@@ -84,7 +84,7 @@ run (Agents *ag, const char *const *args)
   ns_mc_run (ag->owner, args, NULL, run_done, ag);
 }
 
-/* "agent/pc-x · Mamma · WhatsApp" */
+/* "agent/pc-x · Mamma · <channel label>" */
 static char *
 title_of (Agents *ag, JsonObject *r)
 {

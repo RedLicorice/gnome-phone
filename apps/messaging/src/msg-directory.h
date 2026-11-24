@@ -23,7 +23,7 @@ G_DECLARE_FINAL_TYPE (MsgDirectory, msg_directory, MSG, DIRECTORY, GObject)
 /* the process's one directory; the first call starts reading */
 MsgDirectory *msg_directory_get_default (void);
 
-/* the provider's name for @destination (``whatsapp:+39...``), or NULL; @push says the sender chose it */
+/* the provider's name for @destination (``<channel>:<id>``), or NULL; @push says the sender chose it */
 const char *msg_directory_name (MsgDirectory *self, const char *destination, gboolean *push);
 
 G_END_DECLS

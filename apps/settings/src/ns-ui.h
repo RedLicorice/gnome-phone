@@ -95,7 +95,7 @@ void       ns_group_set_visible (GtkWidget *group, gboolean visible);
 typedef struct _NsBusy NsBusy;
 typedef void (*NsBusyFn) (gpointer data);
 typedef struct {
-  const char *what;           /* "Asking WhatsApp for a code…" */
+  const char *what;           /* "Asking the channel for a code…" */
   const char *slow;           /* printf format with one %u, the seconds: "Still going… %u s" */
   const char *cancel;         /* label of the Cancel row, or NULL for none */
   const char *retry;          /* label of the Retry row, or NULL for none */

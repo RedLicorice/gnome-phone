@@ -36,6 +36,23 @@ ns_minerva_available (void)
   return there;
 }
 
+/* the program's answer: its JSON in @parser when it exited 0 and printed one; else why not, in the return value */
+static char *
+answer_parse (GSubprocess *p, const char *out, const char *err, const GError *e, JsonParser *parser)
+{
+  gboolean ok = !e && g_subprocess_get_if_exited (p) && g_subprocess_get_exit_status (p) == 0;
+  if (ok) {
+    if (out && *out)
+      json_parser_load_from_data (parser, out, -1, NULL);
+    return NULL;
+  }
+  if (err && *err) {
+    g_autofree char *copy = g_strdup (err);
+    return g_strdup (g_strstrip (copy));
+  }
+  return g_strdup (e ? e->message : "minerva-config failed");
+}
+
 typedef struct {
   GObject      *owner;
   NsMcDone      done;        /* one of these two */
@@ -50,23 +67,11 @@ job_done (GObject *src, GAsyncResult *res, gpointer data)
   g_autofree char *out = NULL, *err = NULL;
   g_autoptr (GError) e = NULL;
   g_subprocess_communicate_utf8_finish (G_SUBPROCESS (src), res, &out, &err, &e);
-  gboolean ok = !e && g_subprocess_get_if_exited (G_SUBPROCESS (src)) &&
-                g_subprocess_get_exit_status (G_SUBPROCESS (src)) == 0;
   g_autoptr (JsonParser) parser = json_parser_new ();
-  JsonObject *root = NULL;
-  JsonArray *list = NULL;
-  if (ok && out && *out && json_parser_load_from_data (parser, out, -1, NULL)) {
-    JsonNode *n = json_parser_get_root (parser);
-    root = n && JSON_NODE_HOLDS_OBJECT (n) ? json_node_get_object (n) : NULL;
-    list = n && JSON_NODE_HOLDS_ARRAY (n) ? json_node_get_array (n) : NULL;
-  }
-  g_autofree char *why = NULL;
-  if (!ok) {
-    if (err && *err)
-      why = g_strdup (g_strstrip (err));
-    else
-      why = g_strdup (e ? e->message : "minerva-config failed");
-  }
+  g_autofree char *why = answer_parse (G_SUBPROCESS (src), out, err, e, parser);
+  JsonNode *n = json_parser_get_root (parser);
+  JsonObject *root = n && JSON_NODE_HOLDS_OBJECT (n) ? json_node_get_object (n) : NULL;
+  JsonArray *list = n && JSON_NODE_HOLDS_ARRAY (n) ? json_node_get_array (n) : NULL;
   if (j->done)
     j->done (root, why, j->data);
   else
@@ -75,8 +80,9 @@ job_done (GObject *src, GAsyncResult *res, gpointer data)
   g_free (j);
 }
 
-static void
-job_start (GObject *owner, const char *prog, const char *const *args, const char *stdin_text, Job *j)
+/* `prog ARGS`, its output piped (and its input, with @stdin_text) */
+static GSubprocess *
+spawn (const char *prog, const char *const *args, gboolean with_stdin, GError **err)
 {
   g_autofree char *bin = prog_bin (prog);
   g_autoptr (GPtrArray) argv = g_ptr_array_new ();
@@ -84,10 +90,16 @@ job_start (GObject *owner, const char *prog, const char *const *args, const char
   for (guint i = 0; args[i]; i++)
     g_ptr_array_add (argv, (char *) args[i]);
   g_ptr_array_add (argv, NULL);
+  return g_subprocess_newv ((const char *const *) argv->pdata,
+                            G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE |
+                            (with_stdin ? G_SUBPROCESS_FLAGS_STDIN_PIPE : G_SUBPROCESS_FLAGS_NONE), err);
+}
+
+static void
+job_start (GObject *owner, const char *prog, const char *const *args, const char *stdin_text, Job *j)
+{
   g_autoptr (GError) err = NULL;
-  GSubprocess *p = g_subprocess_newv ((const char *const *) argv->pdata,
-                                      G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE |
-                                      (stdin_text ? G_SUBPROCESS_FLAGS_STDIN_PIPE : G_SUBPROCESS_FLAGS_NONE), &err);
+  GSubprocess *p = spawn (prog, args, stdin_text != NULL, &err);
   if (!p) {
     if (j->done)
       j->done (NULL, err->message, j->data);
@@ -124,6 +136,25 @@ ns_mc_run_list (GObject *owner, const char *prog, const char *const *args, NsMcL
   j->list_done = done;
   j->data = data;
   job_start (owner, prog, args, NULL, j);
+}
+
+JsonNode *
+ns_mc_run_sync (const char *prog, const char *const *args, char **err)
+{
+  g_autoptr (GError) e = NULL;
+  g_autoptr (GSubprocess) p = spawn (prog, args, FALSE, &e);
+  g_autofree char *out = NULL, *errs = NULL;
+  g_autoptr (JsonParser) parser = json_parser_new ();
+  if (p)
+    g_subprocess_communicate_utf8 (p, NULL, NULL, &out, &errs, &e);
+  g_autofree char *why = p ? answer_parse (p, out, errs, e, parser) : g_strdup (e->message);
+  JsonNode *n = json_parser_get_root (parser);
+  if (why || !n) {
+    if (err)
+      *err = why ? g_steal_pointer (&why) : g_strdup ("no answer");
+    return NULL;
+  }
+  return json_node_copy (n);
 }
 
 const char *

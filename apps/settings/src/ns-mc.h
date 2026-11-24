@@ -1,6 +1,7 @@
 /* `minerva-config` (Minerva's repository, config/) as Neo Settings' one door to the phone agent's configuration: the
  * Minerva page, Accounts > API keys and Battery > Max charge all run it through here. Needs only GIO and json-glib,
- * so Neo Contacts builds this file too (its Minerva parts, apps/contacts/src/ct-mnv.c). */
+ * so Neo Contacts builds this file too (its Minerva parts, apps/contacts/src/ct-mnv.c), and Messages (the channels
+ * of its provider registry, apps/messaging/src/sms-provider.c). */
 #pragma once
 
 #include <gio/gio.h>
@@ -23,6 +24,11 @@ void ns_mc_run (GObject *owner, const char *const *args, const char *stdin_text,
 /* The same for another program of that directory, such as `minerva-perm` (MINERVA_PERM_BIN overrides its path) */
 void ns_mc_run_bin (GObject *owner, const char *prog, const char *const *args, const char *stdin_text,
                     NsMcDone done, gpointer data);
+
+/* The same, waited for, for a library that needs the answer before it can answer its own caller (Messages'
+ * provider registry reads `minerva-config channels --json` once): the printed JSON (free it), or NULL with why in
+ * @err (free it) when the program failed or printed none */
+JsonNode *ns_mc_run_sync (const char *prog, const char *const *args, char **err);
 
 /* A program that prints a JSON array (`minerva-perm history --json`, `minerva-config models --json`) */
 typedef void (*NsMcListDone) (JsonArray *list, const char *err, gpointer data);

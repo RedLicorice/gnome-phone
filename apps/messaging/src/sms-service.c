@@ -108,7 +108,7 @@ static const char introspection[] =
   "    <method name='SendAs'><arg name='conversation' type='x' direction='in'/>"
   "      <arg name='text' type='s' direction='in'/><arg name='origin' type='s' direction='in'/>"
   "      <arg name='message' type='x' direction='out'/></method>"
-  /* a message from a provider ('whatsapp:<number>', ...): kept as one that came into its conversation (made if new).
+  /* a message from a provider ('<channel>:<number>', ...): kept as one that came into its conversation (made if new).
    * @sent the network's time in Unix ms (0: now), @ext the provider's message id (a repeat is kept once), @name its
    * name for the chat (not stored) */
   /* what the owner wrote to a provider's chat elsewhere (its own app on his phone), as the provider saw it: kept as sent

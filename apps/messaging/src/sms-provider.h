@@ -1,14 +1,12 @@
 /* Who a destination belongs to. A conversation is addressed by a destination string, and a destination that
- * starts with a provider's address (``whatsapp:+39333...``, ``telegram:8675309``, ``agent:Minerva``) is that
- * provider's, not the modem's: it never touches SMS and its messages arrive and leave through the provider's
- * process.
+ * starts with a provider's address (``echo:+39333...``, ``agent:Minerva``) is that provider's, not the modem's: it
+ * never touches SMS and its messages arrive and leave through the provider's process.
  *
- * The addresses are data: ``~/.config/minerva/messaging.conf`` (``[agent]``, ``[whatsapp]``, ... each with an
- * ``address``), written at install from the shipped file. Nothing here names a provider. When the file is
- * missing the registry is empty and only the agent's built-in prefix keeps working, which is what a phone
- * without the providers does today.
- *
- * The file is read once and read again when it changes, so adding a provider needs no restart. */
+ * The addresses are data. Each messaging channel's section (address, label, flags) is its manifest's "messaging"
+ * object in the channel registry, which ``minerva-config channels --json`` prints (Minerva's docs/channels.md); it is
+ * asked once per process. ``messaging.conf``'s layers (``[agent]``, and any key an owner changed in a channel's
+ * section) go over them, read again when a layer changes. Nothing here names a channel. With neither, the registry
+ * is empty and only the agent's built-in prefix keeps working, which is what a phone without the providers does. */
 #pragma once
 
 #include <glib.h>
@@ -37,13 +35,13 @@ char *sms_provider_address (const char *provider_id);
 /* a key of any section without the quotes that keep its spaces ([agents] bubble_label, say), or NULL */
 char *sms_provider_text (const char *section, const char *key);
 
-/* every section of the file that declares an address, as provider ids (the caller frees) */
+/* every section that declares an address, as provider ids (the caller frees) */
 GStrv sms_provider_ids (void);
 
 /* the file being read (``MINERVA_MESSAGING_CONF``, else the phone's config dir) */
 const char *sms_provider_conf_path (void);
 
-/* forget what was read: the next call reads the file again */
+/* forget what was read: the next call asks for the channels and reads the file again */
 void sms_provider_reload (void);
 /* another of the phone's INI files (``key = value  ; comment``) as a GKeyFile, or NULL */
 GKeyFile *sms_provider_load_ini (const char *path);

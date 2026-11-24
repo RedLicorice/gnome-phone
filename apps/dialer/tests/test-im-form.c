@@ -7,14 +7,14 @@ test_handles (void)
 {
   /* as Minerva's memory service reads them ([eds] im_read_fields, [contacts] channels) */
   const char *const reads[] = { "IMPP", "X-", NULL };
-  const char *const channels[] = { "whatsapp", "telegram", NULL };
+  const char *const channels[] = { "echo", "chan", NULL };
   g_autoptr(EVCard) card = e_vcard_new_from_string (
-    "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:u1\r\nFN:Andrea\r\nX-TELEGRAM:8675309\r\nIMPP:whatsapp:+39333\r\n"
-    "X-WHATSAPP:+39333\r\nX-EVOLUTION-FILE-AS:Andrea\r\nEND:VCARD\r\n");
+    "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:u1\r\nFN:Andrea\r\nX-CHAN:8675309\r\nIMPP:echo:+39333\r\n"
+    "X-ECHO:+39333\r\nX-EVOLUTION-FILE-AS:Andrea\r\nEND:VCARD\r\n");
   g_auto(GStrv) handles = im_form_handles (card, reads, channels);
   g_auto(GStrv) fields = im_form_fields (reads, channels);
-  const char *const want[] = { "whatsapp:+39333", "telegram:8675309", NULL };
-  const char *const want_fields[] = { "IMPP", "X-WHATSAPP", "X-TELEGRAM", NULL };
+  const char *const want[] = { "echo:+39333", "chan:8675309", NULL };
+  const char *const want_fields[] = { "IMPP", "X-ECHO", "X-CHAN", NULL };
 
   g_assert_true (g_strv_equal ((const char *const *) handles, want));
   g_assert_true (g_strv_equal ((const char *const *) fields, want_fields));

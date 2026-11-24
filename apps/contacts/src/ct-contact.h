@@ -160,12 +160,16 @@ GPtrArray *ct_contact_get_items (EContact *contact, CtKind kind);
 void       ct_contact_set_items (EContact *contact, CtKind kind, GPtrArray *items);
 
 /* --- channel identities
- * What Minerva's messaging providers know a contact by (a WhatsApp number, a Telegram id) is an IM row of the contact
- * in the address book, written and read as Minerva's memory service does ([eds] im_write_field, im_read_fields,
- * through minerva-config's people ui): a field ending in '-' is the prefix of X-<CHANNEL>:<id> ("X-WHATSAPP:39333…"),
- * any other holds <scheme>:<id> ("IMPP:whatsapp:39333…"). An id an older Contacts wrote as @legacy_property is read
+ * What Minerva's messaging providers know a contact by (a phone number, a channel's user id) is an IM row of the
+ * contact in the address book, written and read as Minerva's memory service does ([eds] im_write_field,
+ * im_read_fields, through minerva-config's people ui): a field ending in '-' is the prefix of X-<CHANNEL>:<id>
+ * ("X-ECHO:39333…"), any other holds <scheme>:<id> ("IMPP:echo:39333…"). An id an older Contacts wrote as @legacy_property is read
  * too, and moves to the written form the next time the channel is written. Everything else of the vCard is left as
  * it is. The form is im-form.h's (shared with Phone and Messages). */
+/* the channels the registry describes (people ui contacts.channel_list: id, legacy_property, title): an IM row whose
+ * IMPP scheme is @scheme or whose property is @property shows @title as its protocol. Until a channel is registered
+ * its IMPP rows show the scheme and its X- rows are not IM rows. */
+void  ct_contact_register_channel (const char *scheme, const char *property, const char *title);
 /* the channel's first id, "" when the contact has none */
 char *ct_contact_get_channel (EContact *contact, const char *scheme, const char *legacy_property, const ImForm *form);
 /* sets it in the written form (a property already in that form keeps its parameters), or removes it when @value is
@@ -175,7 +179,7 @@ void  ct_contact_set_channel (EContact *contact, const char *scheme, const char 
                               const char *value);
 /* the editor's channel row at saving: @value (trimmed) is written with ct_contact_set_channel when it differs from
  * @original, the id the card had when the editor opened ("" for none); an untouched id keeps its property as it was.
- * TRUE when the card was written. A chat picked to link the contact ("Collega WhatsApp") goes through here too. */
+ * TRUE when the card was written. A chat picked to link the contact ("Collega <channel>") goes through here too. */
 gboolean ct_contact_apply_channel (EContact *contact, const char *scheme, const char *legacy_property,
                                    const ImForm *form, const char *original, const char *value);
 
@@ -192,7 +196,7 @@ char *ct_contact_signed_text (EContact *contact, const char *const *unsigned_fie
 /* --- merging two contacts
  * The rule, which the app shows before it merges: @into is the contact that stays. Its name, photo, company and
  * birthday are kept; where it has none, @from's are taken. Every row that can be many (numbers, emails, addresses,
- * websites, nicknames, relations, notes, other dates, instant-messaging ids such as IMPP:whatsapp:…, labels) is added
+ * websites, nicknames, relations, notes, other dates, instant-messaging ids such as IMPP:<scheme>:…, labels) is added
  * up, without a row that is there already (a number is the same number by its last digits). What @into's own vCard
  * has besides stays as it is. The result says where both had one and they differed. */
 /* two numbers are the same number when their last digits are (the people library's and the memory service's

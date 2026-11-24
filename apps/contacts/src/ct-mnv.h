@@ -99,7 +99,7 @@ void ct_mnv_set_owner   (GObject *owner, const char *pid, const char *contact_ui
 void ct_mnv_rename      (GObject *owner, const char *pid, const char *name, CtMnvDone done, gpointer data);
 
 /* The messaging providers' chats that become contacts (`minerva-config messaging … --json`): a provider imports when
- * messaging.conf says so (`messaging list` "import"; WhatsApp does, Telegram's bot does not). Every ct_mnv_ui_load
+ * its channel says so (`messaging list` "import": contact-import of the channel's messaging section). Every ct_mnv_ui_load
  * reads the list again in the background; ct_mnv_imports_load answers with no root once there is one (at once when
  * it is here). ct_mnv_imports is then those providers ({id, label, …}, borrowed), NULL before. */
 void        ct_mnv_imports_load    (GObject *owner, CtMnvDone done, gpointer data);

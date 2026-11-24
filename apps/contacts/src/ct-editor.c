@@ -1455,7 +1455,7 @@ channel_legacy (const char *id)
   return "";
 }
 
-/* Minerva's chat channels (WhatsApp, Telegram: the messaging providers, people ui im_services), one row each, written
+/* Minerva's chat channels (the messaging providers that are enabled, people ui im_services), one row each, written
  * as the memory service writes them (ct_mnv_im_form); only where Minerva's texts are loaded and say how. On a signed
  * card a change is checked at saving. */
 static GtkWidget *
@@ -1512,7 +1512,7 @@ channels_section (Editor *editor, EContact *prefill)
   return box;
 }
 
-/* "Collega WhatsApp": the chat picked from the provider's is the channel row's id. Nothing is written before Save,
+/* "Collega <channel>": the chat picked from the provider's is the channel row's id. Nothing is written before Save,
  * whose signed-card check covers it as it covers a typed id. */
 typedef struct {
   Editor *editor;

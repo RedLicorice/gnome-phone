@@ -128,15 +128,15 @@ typedef struct {
 } PairCase;
 
 static const PairCase pair_cases[] = {
-  { "minerva-key:v1?p=telegram&c=@me&t=TOKEN1", "telegram", "telegram • pairing" },
-  { "MINERVA-KEY:V1?p=whatsapp&c=3933123&t=TOKEN1", "whatsapp", "whatsapp • pairing" },
+  { "minerva-key:v1?p=echo&c=@me&t=TOKEN1", "echo", "echo • pairing" },
+  { "MINERVA-KEY:V1?p=chan&c=3933123&t=TOKEN1", "chan", "chan • pairing" },
   { "  minerva-key:v1?t=TOKEN1&c=@me&p=my%20local\n", "my local", "my local • pairing" },
   /* a code missing its provider, its chat or its token is neither a pairing code nor a key */
   { "minerva-key:v1?c=@me&t=TOKEN1", NULL, "Not a code this app can import" },
-  { "minerva-key:v1?p=telegram&t=TOKEN1", NULL, "Not a code this app can import" },
-  { "minerva-key:v1?p=telegram&c=@me", NULL, "Not a code this app can import" },
-  { "minerva-key:v1?p=telegram&c=@me&t=", NULL, "Not a code this app can import" },
-  { "minerva-key:v2?p=telegram&c=@me&t=TOKEN1", NULL, "Not a code this app can import" },
+  { "minerva-key:v1?p=echo&t=TOKEN1", NULL, "Not a code this app can import" },
+  { "minerva-key:v1?p=echo&c=@me", NULL, "Not a code this app can import" },
+  { "minerva-key:v1?p=echo&c=@me&t=", NULL, "Not a code this app can import" },
+  { "minerva-key:v2?p=echo&c=@me&t=TOKEN1", NULL, "Not a code this app can import" },
 };
 
 static int

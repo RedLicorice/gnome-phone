@@ -450,8 +450,9 @@ token_open (GtkWidget *row, gpointer data)
 {
   Prov *p = data;
   GtkWidget *c;
-  AdwNavigationPage *page = ns_page_new (prov_text (p, "labels", "token_title"), &c);
-  ns_messaging_token_add (c, page);
+  /* the channel's own token: its page is named after the channel, its row after the secret */
+  AdwNavigationPage *page = ns_page_new (p->label, &c);
+  ns_messaging_token_add (c, page, p->id);
   ns_push (page);
 }
 
@@ -1542,42 +1543,99 @@ ns_page_provider (GtkWidget *row, gpointer data)
   ns_push (page);
 }
 
-/* ---- Accounts: the Telegram bot token ---- */
+/* ---- Accounts: the channels' tokens ----
+ * One row per channel of the registry (`minerva-config channels --json`) whose pairing has a secret the owner enters
+ * (a bot's token): its title and hint are the texts' token_title and token_hint with {name} (the secret's name),
+ * {label} (the channel's) and {docs_url} (where the token comes from) filled in; it is stored through
+ * `minerva-config key set <secret.key>`, on stdin. */
 
 typedef struct {
   GObject           *owner;
-  GtkWidget         *content, *row, *msg;
-  char              *saved, *error;
+  GtkWidget         *content;
+  char              *only;      /* one channel's row (its provider page), NULL for every channel's */
+  JsonObject        *labels;    /* `messaging ui` labels, until the channels come */
 } Token;
+
+typedef struct {
+  Token             *t;
+  GtkWidget         *row, *msg;
+  char              *key;
+} TokenRow;
 
 static void
 token_free (Token *t)
 {
-  g_free (t->saved);
-  g_free (t->error);
+  g_free (t->only);
+  if (t->labels)
+    json_object_unref (t->labels);
   g_free (t);
+}
+
+static void
+token_row_free (TokenRow *r)
+{
+  g_free (r->key);
+  g_free (r);
+}
+
+/* @template with the secret's {name}, the channel's {label} and the secret's {docs_url} */
+static char *
+token_text (const char *template, JsonObject *channel, JsonObject *secret)
+{
+  GString *s = g_string_new (template);
+  g_string_replace (s, "{name}", ns_json_str (secret, "name"), 0);
+  g_string_replace (s, "{label}", ns_json_str (channel, "label"), 0);
+  g_string_replace (s, "{docs_url}", ns_json_str (secret, "docs_url"), 0);
+  return g_string_free (s, FALSE);
 }
 
 static void
 token_saved (JsonObject *root, const char *err, gpointer data)
 {
-  Token *t = data;
+  TokenRow *r = data;
   if (err || !ok_of (root)) {
-    say (t->msg, err ? err : str_of (root, "error"), TRUE);
+    say (r->msg, err ? err : str_of (root, "error"), TRUE);
     return;
   }
-  ns_row_value_set (t->row, "");
-  say (t->msg, t->saved, FALSE);
+  ns_row_value_set (r->row, "");
+  say (r->msg, str_of (r->t->labels, "token_saved"), FALSE);
 }
 
 static void
 token_entered (const char *text, gpointer data)
 {
-  Token *t = data;
+  TokenRow *r = data;
   if (!text || !*text)
     return;
-  const char *args[] = { "key", "set", "telegram", "--json", NULL };
-  ns_mc_run (t->owner, args, text, token_saved, t);
+  const char *args[] = { "key", "set", r->key, "--json", NULL };
+  ns_mc_run (r->t->owner, args, text, token_saved, r);
+}
+
+static void
+token_channels_done (JsonObject *root, const char *err, gpointer data)
+{
+  Token *t = data;
+  if (err || !root)
+    return;
+  g_autoptr (GList) names = json_object_get_members (root);
+  names = g_list_sort (names, (GCompareFunc) g_strcmp0);
+  for (GList *l = names; l; l = l->next) {
+    JsonObject *channel = ns_json_obj (root, l->data);
+    JsonObject *secret = ns_json_obj (ns_json_obj (channel, "pairing"), "secret");
+    if (!secret || !*ns_json_str (secret, "key") || (t->only && g_strcmp0 (t->only, l->data) != 0))
+      continue;
+    TokenRow *r = g_new0 (TokenRow, 1);
+    r->t = t;
+    r->key = g_strdup (ns_json_str (secret, "key"));
+    g_autofree char *title = token_text (str_of (t->labels, "token_title"), channel, secret);
+    g_autofree char *hint = token_text (str_of (t->labels, "token_hint"), channel, secret);
+    GtkWidget *g = ns_group (t->content, NULL);
+    r->row = ns_row_value (g, title, "", TRUE, token_entered, r);
+    g_object_set_data_full (G_OBJECT (r->row), "mp-token-row", r, (GDestroyNotify) token_row_free);
+    ns_note (t->content, hint);
+    r->msg = ns_note (t->content, "");
+    gtk_widget_set_visible (r->msg, FALSE);
+  }
 }
 
 static void
@@ -1587,21 +1645,20 @@ token_ui_done (JsonObject *root, const char *err, gpointer data)
   if (err || !ok_of (root))
     return;
   JsonObject *labels = obj_of (root, "labels");
-  t->saved = g_strdup (str_of (labels, "token_saved"));
-  t->error = g_strdup (str_of (labels, "error"));
-  GtkWidget *g = ns_group (t->content, NULL);
-  t->row = ns_row_value (g, str_of (labels, "token_title"), "", TRUE, token_entered, t);
-  ns_note (t->content, str_of (labels, "token_hint"));
-  t->msg = ns_note (t->content, "");
-  gtk_widget_set_visible (t->msg, FALSE);
+  if (!labels)
+    return;
+  t->labels = json_object_ref (labels);
+  const char *args[] = { "channels", "--json", NULL };
+  ns_mc_run (t->owner, args, NULL, token_channels_done, t);
 }
 
 void
-ns_messaging_token_add (GtkWidget *content, AdwNavigationPage *page)
+ns_messaging_token_add (GtkWidget *content, AdwNavigationPage *page, const char *channel)
 {
   Token *t = g_new0 (Token, 1);
   t->owner = G_OBJECT (page);
   t->content = content;
+  t->only = channel ? g_strdup (channel) : NULL;
   g_object_set_data_full (G_OBJECT (page), "mp-token", t, (GDestroyNotify) token_free);
   const char *args[] = { "messaging", "ui", "--json", NULL };
   ns_mc_run (t->owner, args, NULL, token_ui_done, t);

@@ -7,3 +7,8 @@ option('assistant-file', type: 'string', value: '/etc/minerva/assistant.conf',
 # the configuration layers' folders (Minerva's docs/packaging.md, "Configuration"; minerva-base installs the file)
 option('layers-file', type: 'string', value: '/usr/lib/minerva/layers.conf',
        description: 'The file naming the configuration layer folders, lowest first')
+# where the Minerva packages install their programs (minerva-config...; Minerva's docs/packaging.md); a program's own
+# env var (minerva-config -> MINERVA_CONFIG_BIN) overrides its path. The provider registry asks minerva-config for the
+# messaging channels (`channels --json`)
+option('minerva-bin-dir', type: 'string', value: '/usr/lib/minerva/bin',
+       description: 'The directory of the Minerva programs')

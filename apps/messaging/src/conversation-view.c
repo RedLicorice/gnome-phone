@@ -187,7 +187,7 @@ status_words (ConversationView *self, const SmsMessage *message, gboolean last_o
     }
 }
 
-/* a live message names the way it came (its origin: the channel, as the bridge labels it, "voce", "Telegram") before
+/* a live message names the way it came (its origin: the channel, as the bridge labels it, "voce", a channel's label) before
  * its status, on every one of them: a cluster mixes channels */
 static char *
 status_text (ConversationView *self, const SmsMessage *message, gboolean last_of_cluster, gboolean *failed)
@@ -504,7 +504,7 @@ make_message (ConversationView *self, const SmsMessage *message, gboolean cluste
         gtk_box_append (GTK_BOX (content), who);
       }
   }
-  /* who reacted, as WhatsApp shows it: each emoji once, with how many when more than one */
+  /* who reacted, as chat apps show it: each emoji once, with how many when more than one */
   if (message->reactions)
     {
       g_autofree char *line = reactions_line (message->reactions);

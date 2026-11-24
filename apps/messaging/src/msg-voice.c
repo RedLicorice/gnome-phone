@@ -84,7 +84,7 @@ draw_wave (GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer da
   step = (double) width / n;
   for (gsize i = 0; i < n; i++)
     {
-      /* WhatsApp's levels are 0..100 */
+      /* a voice note's levels, as the providers send them, are 0..100 */
       double h = MAX (2, height * MIN (level[i], 100) / 100.0);
       double played = (i + 1) * step <= width * done;
 

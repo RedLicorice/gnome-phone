@@ -690,7 +690,7 @@ on_forget (GtkWidget *row, gpointer data)
                      ask_new (m, NULL, NULL));
 }
 
-/* ---- the channels: WhatsApp and Telegram, IM rows of the contact ---- */
+/* ---- the channels of the registry (people ui channel_list), IM rows of the contact ---- */
 
 static JsonObject *
 channel_at (guint index)
@@ -812,8 +812,15 @@ channel_rows (M *m)
 
       g_object_set_data (G_OBJECT (row), "ct-channel", GUINT_TO_POINTER (i));
     }
-  /* the invitation, which asks the person on Telegram to write to the bot, is a task of its own */
-  entry_row (m, ct_mnv_text ("invite_title"), ct_mnv_text ("invite_note"), NULL, FALSE);
+  /* a channel whose manifest describes an invitation (ui.contacts.invite: the person writes to the channel's bot,
+   * which links her id to this contact) shows its row; the invitation itself is a task of its own */
+  for (guint i = 0; channels && i < json_array_get_length (channels); i++)
+    {
+      JsonObject *invite = ns_json_obj (json_array_get_object_element (channels, i), "invite");
+
+      if (invite)
+        entry_row (m, ns_json_str (invite, "title"), ns_json_str (invite, "note"), NULL, FALSE);
+    }
 }
 
 /* ---- the body ---- */

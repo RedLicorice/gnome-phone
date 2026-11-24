@@ -190,7 +190,20 @@ ui_answered (JsonObject *root, const char *err, gpointer data)
   UiWait *wait = data;
 
   if (!err && root && ns_json_obj (root, "contacts") && !ui)
-    ui = json_object_ref (root);
+    {
+      JsonArray *channels;
+
+      ui = json_object_ref (root);
+      /* the registry's channels name their IM rows (ct-contact.h) */
+      channels = ct_mnv_list ("channel_list");
+      for (guint i = 0; channels && i < json_array_get_length (channels); i++)
+        {
+          JsonObject *channel = json_array_get_object_element (channels, i);
+
+          ct_contact_register_channel (ns_json_str (channel, "id"), ns_json_str (channel, "legacy_property"),
+                                       ns_json_str (channel, "title"));
+        }
+    }
   if (wait->done)
     wait->done (ui ? root : NULL, ui ? NULL : (err ? err : "?"), wait->data);
   g_free (wait);

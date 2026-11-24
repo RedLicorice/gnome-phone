@@ -85,7 +85,7 @@ typedef struct
   int raw_status;               /* ModemManager's error for a failed send, else 0 */
   char *origin;                 /* who wrote an outgoing one: NULL for the owner, else SendAs's origin ("minerva",
                                  * "agent:<identity>": docs/external-agents-channels.md); on a live one (the owner's,
-                                 * see live) the channel it came by ("voce", "Telegram") */
+                                 * see live) the channel it came by ("voce", a channel's label) */
   SmsPart *part;                /* what it carries besides text, or NULL for a text message */
   gboolean edited;              /* its sender changed it after sending */
   char *reactions;              /* the emoji people reacted with, one after the other, or NULL */

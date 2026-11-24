@@ -99,10 +99,10 @@ void ns_page_events (GtkWidget *row, gpointer data);
  * devices with their inventories), through `minerva-config federation` */
 void ns_page_federation (GtkWidget *row, gpointer data);
 
-/* ns-provider.c: Minerva > Messaggi (the messaging providers of Messages) and Accounts' Telegram bot token */
+/* ns-provider.c: Minerva > Messaggi (the messaging providers of Messages) and Accounts' channel tokens */
 void     ns_page_messaging (GtkWidget *row, gpointer data);
 void     ns_page_provider (GtkWidget *row, gpointer data);
-void     ns_messaging_token_add (GtkWidget *content, AdwNavigationPage *page);
+void     ns_messaging_token_add (GtkWidget *content, AdwNavigationPage *page, const char *channel);
 /* a page of the models `minerva-config` offers, the current one marked; `picked` gets the model id (the source the
  * Minerva page's own pickers use) */
 typedef void (*NsModelPicked) (const char *id, gpointer data);

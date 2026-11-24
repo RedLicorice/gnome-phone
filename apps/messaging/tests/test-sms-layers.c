@@ -28,6 +28,7 @@ test_layers (void)
   g_autofree char *conf = g_build_filename (root, "layers.conf", NULL);
   g_setenv ("MINERVA_LAYERS_CONF", conf, TRUE);
   g_unsetenv ("MINERVA_MESSAGING_CONF");
+  g_setenv ("MINERVA_CONFIG_BIN", "/nonexistent/minerva-config", TRUE);   /* no channel registry */
   write (shipped, "messaging.conf", "[live]\ncancelled = Annullato  ; the shipped word\nunheard = Non ho capito\n");
   write (user, "messaging.conf", "[live]\ncancelled = Lasciato stare\n");
 

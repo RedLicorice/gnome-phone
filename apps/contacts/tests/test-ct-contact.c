@@ -330,27 +330,38 @@ test_dates (void)
 static const char *const im_reads[] = { "IMPP", "X-", NULL };
 static const ImForm im_form = { "X-", im_reads };
 
-/* a telegram id saved from the editor is written as X-TELEGRAM:<id> (EDS 3.62 drops IMPP from vCard 3.0 cards); both
+/* a channel id saved from the editor is written as X-CHAN:<id> (EDS 3.62 drops IMPP from vCard 3.0 cards); both
  * forms are read, the old id goes in either form, other channels' rows stay */
 static void
 test_channels (void)
 {
   g_autoptr(EContact) contact = e_contact_new_from_vcard (
-    "BEGIN:VCARD\nVERSION:3.0\nUID:u1\nFN:Andrea\nIMPP;X-SERVICE-TYPE=Telegram:telegram:777\nX-TELEGRAM:777\n"
-    "IMPP:xmpp:andrea@example.net\nX-WHATSAPP:+39333\nEND:VCARD\n");
-  g_autofree char *wa = ct_contact_get_channel (contact, "whatsapp", "X-WHATSAPP", &im_form);
-  g_autofree char *tg = ct_contact_get_channel (contact, "telegram", "X-TELEGRAM", &im_form);
+    "BEGIN:VCARD\nVERSION:3.0\nUID:u1\nFN:Andrea\nIMPP;X-SERVICE-TYPE=Chan:chan:777\nX-CHAN:777\n"
+    "IMPP:xmpp:andrea@example.net\nX-ECHO:+39333\nEND:VCARD\n");
+  g_autofree char *echo_id = ct_contact_get_channel (contact, "echo", "X-ECHO", &im_form);
+  g_autofree char *chan_id = ct_contact_get_channel (contact, "chan", "X-CHAN", &im_form);
   g_autofree char *text = NULL;
 
-  g_assert_cmpstr (wa, ==, "+39333");
-  g_assert_cmpstr (tg, ==, "777");
-  ct_contact_set_channel (contact, "telegram", "X-TELEGRAM", &im_form, " 888 ");
+  g_assert_cmpstr (echo_id, ==, "+39333");
+  g_assert_cmpstr (chan_id, ==, "777");
+  ct_contact_set_channel (contact, "chan", "X-CHAN", &im_form, " 888 ");
   text = e_vcard_to_string (E_VCARD (contact), EVC_FORMAT_VCARD_30);
-  g_assert_nonnull (strstr (text, "X-TELEGRAM:888\r\n"));
-  g_assert_null (strstr (text, "telegram:"));
+  g_assert_nonnull (strstr (text, "X-CHAN:888\r\n"));
+  g_assert_null (strstr (text, "chan:"));
   g_assert_null (strstr (text, "777"));
   g_assert_nonnull (strstr (text, "IMPP:xmpp:andrea@example.net"));
-  g_assert_nonnull (strstr (text, "X-WHATSAPP:+39333"));
+  g_assert_nonnull (strstr (text, "X-ECHO:+39333"));
+  /* a channel the registry describes names its IM rows, in both forms; another scheme shows as written */
+  ct_contact_register_channel ("chan", "X-CHAN", "Chan Net");
+  {
+    g_autoptr(EContact) rows = card ("IMPP:chan:1\r\nX-CHAN:2\r\nIMPP:other:3\r\nX-UNKNOWN:4\r\n");
+    g_autoptr(GPtrArray) items = ct_contact_get_items (rows, CT_KIND_IM);
+
+    g_assert_cmpuint (items->len, ==, 3);
+    g_assert_cmpstr (((CtItem *) items->pdata[0])->value2, ==, "Chan Net");
+    g_assert_cmpstr (((CtItem *) items->pdata[1])->value2, ==, "Chan Net");
+    g_assert_cmpstr (((CtItem *) items->pdata[2])->value2, ==, "Other");
+  }
 }
 
 static void
@@ -358,13 +369,13 @@ test_merge (void)
 {
   g_autoptr(EContact) into = e_contact_new_from_vcard (
     "BEGIN:VCARD\nVERSION:3.0\nUID:to\nN:Rossi;Andrea;;;\nFN:Andrea Rossi\nTEL;TYPE=CELL:+39 333 111 2222\n"
-    "EMAIL;TYPE=HOME:andrea@example.org\nBDAY:1990-03-15\nORG:Acme;\nIMPP:whatsapp:393331112222\n"
+    "EMAIL;TYPE=HOME:andrea@example.org\nBDAY:1990-03-15\nORG:Acme;\nIMPP:echo:393331112222\n"
     "X-EVOLUTION-FILE-AS:Rossi\\, Andrea\nEND:VCARD\n");
   g_autoptr(EContact) from = e_contact_new_from_vcard (
     "BEGIN:VCARD\nVERSION:3.0\nUID:from\nN:Rossi;Andy;;;\nFN:Andy Rossi\nTEL;TYPE=WORK:0039 333 111 2222\n"
     "TEL;TYPE=HOME:+39 06 555 0100\nEMAIL;TYPE=WORK:ANDREA@example.org\nEMAIL;TYPE=WORK:work@example.org\n"
-    "BDAY:1991-01-01\nORG:Other;\nPHOTO;ENCODING=b;TYPE=PNG:aGVsbG8=\nIMPP:whatsapp:393331112222\n"
-    "IMPP;X-SERVICE-TYPE=Telegram:telegram:777\nNOTE:from note\nCATEGORIES:Friends\nEND:VCARD\n");
+    "BDAY:1991-01-01\nORG:Other;\nPHOTO;ENCODING=b;TYPE=PNG:aGVsbG8=\nIMPP:echo:393331112222\n"
+    "IMPP;X-SERVICE-TYPE=Chan:chan:777\nNOTE:from note\nCATEGORIES:Friends\nEND:VCARD\n");
   g_autoptr(GPtrArray) phones = NULL, emails = NULL;
   g_autofree char *text = NULL;
   guint conflicts = ct_contact_merge (into, from);
@@ -387,12 +398,12 @@ test_merge (void)
   g_assert_nonnull (strstr (text, "Friends"));
   /* the channels: the same id once, the other one added with its parameters */
   {
-    g_autofree char *wa = ct_contact_get_channel (into, "whatsapp", NULL, &im_form);
-    g_autofree char *tg = ct_contact_get_channel (into, "telegram", NULL, &im_form);
+    g_autofree char *echo_id = ct_contact_get_channel (into, "echo", NULL, &im_form);
+    g_autofree char *chan_id = ct_contact_get_channel (into, "chan", NULL, &im_form);
 
-    g_assert_cmpstr (wa, ==, "393331112222");
-    g_assert_cmpstr (tg, ==, "777");
-    g_assert_nonnull (strstr (text, "X-SERVICE-TYPE=Telegram"));
+    g_assert_cmpstr (echo_id, ==, "393331112222");
+    g_assert_cmpstr (chan_id, ==, "777");
+    g_assert_nonnull (strstr (text, "X-SERVICE-TYPE=Chan"));
   }
   /* once more changes nothing */
   g_assert_cmpuint (ct_contact_merge (into, from), ==, CT_MERGE_NAME | CT_MERGE_ORGANIZATION | CT_MERGE_BIRTHDAY);
@@ -491,13 +502,13 @@ test_signed_text (void)
   e_vcard_remove_attributes (E_VCARD (b), NULL, "X-EVOLUTION-FILE-AS");
   same = ct_contact_signed_text (b, unsigned_fields);
   g_assert_cmpstr (before, ==, same);
-  ct_contact_set_channel (b, "telegram", "X-TELEGRAM", &im_form, "25730854");
+  ct_contact_set_channel (b, "chan", "X-CHAN", &im_form, "25730854");
   changed = ct_contact_signed_text (b, unsigned_fields);
   g_assert_cmpstr (before, !=, changed);
-  g_assert_nonnull (strstr (changed, "X-TELEGRAM:25730854\n"));
+  g_assert_nonnull (strstr (changed, "X-CHAN:25730854\n"));
 }
 
-/* "Collega WhatsApp": a chat picked for an existing contact goes through the editor's channel write. It adds the id
+/* "Collega <channel>": a chat picked for an existing contact goes through the editor's channel write. It adds the id
  * in the written form and leaves every other line as it was, the signed ones (X-MINERVA-OWNER-SIG, X-MINERVA-ROLE-*)
  * included; the same id once more writes nothing. */
 static void
@@ -505,23 +516,23 @@ test_link_channel (void)
 {
   g_autoptr(EContact) contact = e_contact_new_from_vcard (
     "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:pas-7\r\nFN:Maria Rossi\r\nN:Rossi;Maria;;;\r\nTEL;TYPE=CELL:+39 333 1234567\r\n"
-    "X-TELEGRAM:25730854\r\nX-MINERVA-ROLE-FAMILY:2026-11-01\r\nX-MINERVA-OWNER-SIG:MEUCIQDx7Yz\r\n"
+    "X-CHAN:25730854\r\nX-MINERVA-ROLE-FAMILY:2026-11-01\r\nX-MINERVA-OWNER-SIG:MEUCIQDx7Yz\r\n"
     "NOTE:una nota\r\nEND:VCARD\r\n");
-  g_autofree char *original = ct_contact_get_channel (contact, "whatsapp", "X-WHATSAPP", &im_form);
+  g_autofree char *original = ct_contact_get_channel (contact, "echo", "X-ECHO", &im_form);
   g_autofree char *before = e_vcard_to_string (E_VCARD (contact), EVC_FORMAT_VCARD_30);
   g_autofree char *after = NULL, *linked = NULL, *again = NULL;
   g_autoptr(GString) without = NULL;
 
   g_assert_cmpstr (original, ==, "");
-  g_assert_true (ct_contact_apply_channel (contact, "whatsapp", "X-WHATSAPP", &im_form, original, " +393331234567 "));
-  linked = ct_contact_get_channel (contact, "whatsapp", "X-WHATSAPP", &im_form);
+  g_assert_true (ct_contact_apply_channel (contact, "echo", "X-ECHO", &im_form, original, " +393331234567 "));
+  linked = ct_contact_get_channel (contact, "echo", "X-ECHO", &im_form);
   g_assert_cmpstr (linked, ==, "+393331234567");
   after = e_vcard_to_string (E_VCARD (contact), EVC_FORMAT_VCARD_30);
   /* the card is the one it was, with the id's line and nothing else */
   without = g_string_new (after);
-  g_assert_cmpuint (g_string_replace (without, "X-WHATSAPP:+393331234567\r\n", "", 0), ==, 1);
+  g_assert_cmpuint (g_string_replace (without, "X-ECHO:+393331234567\r\n", "", 0), ==, 1);
   g_assert_cmpstr (without->str, ==, before);
-  g_assert_false (ct_contact_apply_channel (contact, "whatsapp", "X-WHATSAPP", &im_form, linked, "+393331234567"));
+  g_assert_false (ct_contact_apply_channel (contact, "echo", "X-ECHO", &im_form, linked, "+393331234567"));
   again = e_vcard_to_string (E_VCARD (contact), EVC_FORMAT_VCARD_30);
   g_assert_cmpstr (again, ==, after);
 }

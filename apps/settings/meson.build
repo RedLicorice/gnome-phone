@@ -35,7 +35,8 @@ executable('neo-settings',
   # a chat's contact opens in the Contacts app through its actions, with the Dialer's helpers (libneo: their snackbar)
   '../dialer/src/contacts-app.c', '../dialer/src/app-action.c',
   resources,
-  include_directories: include_directories('../messaging/src', '../../common', '../dialer/src'),
+  # src: ns-mc.h, which Messaging's provider registry includes too
+  include_directories: include_directories('src', '../messaging/src', '../../common', '../dialer/src'),
   c_args: ['-DASSISTANT_FILE="@0@"'.format(get_option('assistant-file')),
            '-DMINERVA_LAYERS_FILE="@0@"'.format(get_option('layers-file'))],
   dependencies: deps + [dependency('neo-1')],

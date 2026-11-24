@@ -26,20 +26,20 @@ UNKNOWN_ERROR = 'org.freedesktop.ModemManager1.Error.MessageError.Unknown'
 NO_NETWORK = 'org.freedesktop.ModemManager1.Error.MobileEquipment.NoNetwork'
 ANNA, BOB = '+491701234567', '+491709999999'
 AGENT = 'agent:Minerva'
-WHATSAPP = 'whatsapp:+491701111111'
+ECHO = 'echo:+491701111111'
 UNKNOWN = 'carrierpigeon:+491701111111'
 
 CONF = """[agent]
 address = agent:
 label = Agente
-[whatsapp]
-address = whatsapp:   ; the providers' file keeps its comments after a value
-label = WhatsApp
+[echo]
+address = echo:   ; the providers' file keeps its comments after a value
+label = Echo
 show-label = true
 ; a whole-line comment
-[telegram]
-address = telegram:
-label = Telegram
+[chan]
+address = chan:
+label = Chan
 """
 
 failures = []
@@ -533,47 +533,47 @@ def run_providers(t):
     for (conversation,) in t.query('SELECT _id FROM conversations'):
         t.service('MarkRead', (conversation,), '(x)')
     when = 1700000000000
-    message = t.service('Receive', (WHATSAPP, 'Ciao da Andrea', when, 'WA-1', ''), '(ssxss)')[0]
-    chat = t.wait('a message from a provider is kept', lambda: t.conversation_of(WHATSAPP))
+    message = t.service('Receive', (ECHO, 'Ciao da Andrea', when, 'EC-1', ''), '(ssxss)')[0]
+    chat = t.wait('a message from a provider is kept', lambda: t.conversation_of(ECHO))
     rows = t.messages(chat)
     check('as one that came, unread, with the id Receive gave', rows and rows[-1][0] == message
           and rows[-1][1:3] == (INCOMING, 0), rows)
     check('at the network\'s time', t.query('SELECT sent_timestamp FROM messages WHERE _id = ?', message)
           == [(when,)])
-    check('GetConversation keeps the address as it is', t.service('GetConversation', ([WHATSAPP],), '(as)')[0] == chat)
-    again = t.service('Receive', (WHATSAPP, 'Ciao da Andrea', when, 'WA-1', ''), '(ssxss)')[0]
+    check('GetConversation keeps the address as it is', t.service('GetConversation', ([ECHO],), '(as)')[0] == chat)
+    again = t.service('Receive', (ECHO, 'Ciao da Andrea', when, 'EC-1', ''), '(ssxss)')[0]
     check('the same network id twice is kept once', again == message
           and len(t.messages(chat)) == 1, t.messages(chat))
     check('Receive for an address no provider has: InvalidArgs',
           t.error('Receive', (UNKNOWN, 'Hello', when, 'X-1', ''), '(ssxss)') == invalid)
-    check('Receive with no text: InvalidArgs', t.error('Receive', (WHATSAPP, '', when, 'X-2', ''), '(ssxss)') == invalid)
-    check('Inject stays the agents\' alone', t.error('Inject', (WHATSAPP, 'Hello'), '(ss)') == invalid)
-    n = t.wait('notified, with the provider named', lambda: t.notification('+49 170 1111111 \u00b7 WhatsApp')
-               or t.notification('WhatsApp'))
+    check('Receive with no text: InvalidArgs', t.error('Receive', (ECHO, '', when, 'X-2', ''), '(ssxss)') == invalid)
+    check('Inject stays the agents\' alone', t.error('Inject', (ECHO, 'Hello'), '(ss)') == invalid)
+    n = t.wait('notified, with the provider named', lambda: t.notification('+49 170 1111111 \u00b7 Echo')
+               or t.notification('Echo'))
     check('a notification came', n is not None, t.report()['notifications'])
-    # what the owner wrote from WhatsApp on his phone: sent, by its origin, read, once per network id, never Outgoing
+    # what the owner wrote from Echo on his phone: sent, by its origin, read, once per network id, never Outgoing
     t.outgoing.clear()
-    mine = t.service('Sent', (WHATSAPP, 'Arrivo', when + 1, 'WA-2', 'phone-wa'), '(ssxss)')[0]
+    mine = t.service('Sent', (ECHO, 'Arrivo', when + 1, 'EC-2', 'phone-echo'), '(ssxss)')[0]
     check('Sent: kept as sent by the owner elsewhere, read', t.query(
         'SELECT message_status, sender_id IS NULL, read, seen, origin FROM messages WHERE _id = ?', mine)
-          == [(COMPLETE, 1, 1, 1, 'phone-wa')])
+          == [(COMPLETE, 1, 1, 1, 'phone-echo')])
     check('the same network id twice is kept once, and no Outgoing',
-          t.service('Sent', (WHATSAPP, 'Arrivo', when + 1, 'WA-2', 'phone-wa'), '(ssxss)')[0] == mine
+          t.service('Sent', (ECHO, 'Arrivo', when + 1, 'EC-2', 'phone-echo'), '(ssxss)')[0] == mine
           and not t.outgoing, t.outgoing)
-    check('Sent as the owner himself: InvalidArgs', t.error('Sent', (WHATSAPP, 'x', when, 'WA-3', 'owner'), '(ssxss)')
+    check('Sent as the owner himself: InvalidArgs', t.error('Sent', (ECHO, 'x', when, 'EC-3', 'owner'), '(ssxss)')
           == invalid)
     t.outgoing.clear()
     sent = t.service('Send', (chat, 'Ciao Andrea'), '(xs)')[0]
-    t.wait('Send: Outgoing, from the owner', lambda: (sent, chat, WHATSAPP, 'Ciao Andrea', 'owner') in t.outgoing)
+    t.wait('Send: Outgoing, from the owner', lambda: (sent, chat, ECHO, 'Ciao Andrea', 'owner') in t.outgoing)
     check('and not given to the modem', not t.logged('Create'), t.report()['log'])
     t.service('Delivered', (sent, True), '(xb)')
     t.wait('Delivered ok: sent', lambda: t.status(sent) == COMPLETE)
     sent = t.service('SendAs', (chat, 'Posso scriverti?', 'minerva'), '(xss)')[0]
-    t.wait('SendAs: Outgoing, from minerva', lambda: (sent, chat, WHATSAPP, 'Posso scriverti?', 'minerva') in t.outgoing)
+    t.wait('SendAs: Outgoing, from minerva', lambda: (sent, chat, ECHO, 'Posso scriverti?', 'minerva') in t.outgoing)
     t.service('Delivered', (sent, False), '(xb)')
     t.wait('Delivered not ok: failed', lambda: t.status(sent) == FAILED)
     t.service('Resend', (sent,), '(x)')
-    t.wait('Resend is the owner\'s tap', lambda: (sent, chat, WHATSAPP, 'Posso scriverti?', 'owner') in t.outgoing)
+    t.wait('Resend is the owner\'s tap', lambda: (sent, chat, ECHO, 'Posso scriverti?', 'owner') in t.outgoing)
     t.wait('no Delivered in time: failed', lambda: t.status(sent) == FAILED, timeout=5)
     t.modem('SetMessaging', (True,), '(b)')
     t.wait('the modem back, available', lambda: t.prop('Available'))
@@ -597,7 +597,9 @@ def main():
         env = dict(os.environ, DBUS_SESSION_BUS_ADDRESS=session_address, NEO_MESSAGING_SYSTEM_BUS=system_address,
                    XDG_DATA_HOME=os.path.join(tmp, 'data'), XDG_CONFIG_HOME=config_home,
                    GSETTINGS_BACKEND='keyfile', GSETTINGS_SCHEMA_DIR=tmp, LANG='C.UTF-8', LC_ALL='C.UTF-8',
-                   NEO_MESSAGING_AGENT_TIMEOUT_MS='1500')
+                   NEO_MESSAGING_AGENT_TIMEOUT_MS='1500',
+                   # no channel registry: the channels' sections are the test's file alone
+                   MINERVA_CONFIG_BIN=os.path.join(tmp, 'no-minerva-config'))
         mock = subprocess.Popen([sys.executable, os.path.join(source, 'tests', 'mock-modem.py'), system_address,
                                  '--waiting'], env=env, stdout=subprocess.PIPE, text=True)
         procs.append(mock)

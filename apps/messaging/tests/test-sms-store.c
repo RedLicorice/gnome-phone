@@ -199,7 +199,7 @@ test_origin (void)
 {
   g_autofree char *path = NULL;
   SmsStore *store = open_store (&path);
-  const char *to[] = { "whatsapp:+390001", NULL };
+  const char *to[] = { "echo:+390001", NULL };
   gint64 conversation = sms_store_get_conversation (store, to);
   gint64 id = sms_store_add_outgoing (store, conversation, "Arrivo alle 8", 1000, "agent:agent/pc-test");
   g_autoptr(GError) error = NULL;
@@ -223,11 +223,11 @@ test_find_by_uri (void)
 {
   g_autofree char *path = NULL;
   SmsStore *store = open_store (&path);
-  gint64 id = sms_store_add_incoming (store, "whatsapp:+491701111111", "Ciao", 1000, 2000, "WA-1", NULL);
+  gint64 id = sms_store_add_incoming (store, "echo:+491701111111", "Ciao", 1000, 2000, "EC-1", NULL);
 
   g_assert_cmpint (id, >, 0);
-  g_assert_cmpint (sms_store_find_by_uri (store, "WA-1"), ==, id);
-  g_assert_cmpint (sms_store_find_by_uri (store, "WA-2"), ==, 0);
+  g_assert_cmpint (sms_store_find_by_uri (store, "EC-1"), ==, id);
+  g_assert_cmpint (sms_store_find_by_uri (store, "EC-2"), ==, 0);
   g_assert_cmpint (sms_store_find_by_uri (store, ""), ==, 0);
   g_assert_cmpint (sms_store_find_by_uri (store, NULL), ==, 0);
   sms_store_free (store);
@@ -253,8 +253,8 @@ test_typed_part (void)
   g_variant_dict_insert_value (dict, "thumbnail", g_variant_new_fixed_array (G_VARIANT_TYPE_BYTE, jpeg, sizeof jpeg, 1));
   part_dict = g_variant_ref_sink (g_variant_dict_end (dict));
   part = sms_part_new_from_dict (part_dict);
-  id = sms_store_add_incoming (store, "whatsapp:+491701111111", "vocale 0:12", 1000, 2000, "WA-1", part);
-  sms_store_add_incoming (store, "whatsapp:+491701111111", "Ciao", 1000, 3000, "WA-2", NULL);
+  id = sms_store_add_incoming (store, "echo:+491701111111", "vocale 0:12", 1000, 2000, "EC-1", part);
+  sms_store_add_incoming (store, "echo:+491701111111", "Ciao", 1000, 3000, "EC-2", NULL);
   g_autoptr(SmsMessage) first = sms_store_get_message (store, id);
   messages = sms_store_list_last_messages (store, first->conversation_id, 2);
   voice = messages->pdata[0];
@@ -267,7 +267,7 @@ test_typed_part (void)
   g_assert_null (((SmsMessage *) messages->pdata[1])->part);
   /* a backlog is kept already read and seen */
   {
-    gint64 old = sms_store_add_incoming_read (store, "whatsapp:+491701111111", "ieri", 500, 4000, "WA-0", NULL);
+    gint64 old = sms_store_add_incoming_read (store, "echo:+491701111111", "ieri", 500, 4000, "EC-0", NULL);
     g_autoptr(SmsMessage) row = sms_store_get_message (store, old);
 
     g_assert_true (row->read && row->seen);
@@ -289,20 +289,20 @@ test_changes (void)
 {
   g_autofree char *path = NULL;
   SmsStore *store = open_store (&path);
-  gint64 id = sms_store_add_incoming (store, "whatsapp:+491701111111", "Ciao", 1000, 2000, "WA-1", NULL);
+  gint64 id = sms_store_add_incoming (store, "echo:+491701111111", "Ciao", 1000, 2000, "EC-1", NULL);
   g_autoptr(SmsMessage) changed = NULL, deleted = NULL;
 
-  g_assert_cmpint (sms_store_change (store, "reaction", "WA-1", "anna", "👍"), >, 0);
-  sms_store_change (store, "reaction", "WA-1", "bob", "❤️");
-  sms_store_change (store, "reaction", "WA-1", "anna", "😂");      /* anna's reaction replaced */
-  sms_store_change (store, "reaction", "WA-1", "bob", "");         /* bob's taken away */
-  sms_store_change (store, "edit", "WA-1", "", "Ciao!");
-  g_assert_cmpint (sms_store_change (store, "edit", "WA-404", "", "x"), ==, 0);
+  g_assert_cmpint (sms_store_change (store, "reaction", "EC-1", "anna", "👍"), >, 0);
+  sms_store_change (store, "reaction", "EC-1", "bob", "❤️");
+  sms_store_change (store, "reaction", "EC-1", "anna", "😂");      /* anna's reaction replaced */
+  sms_store_change (store, "reaction", "EC-1", "bob", "");         /* bob's taken away */
+  sms_store_change (store, "edit", "EC-1", "", "Ciao!");
+  g_assert_cmpint (sms_store_change (store, "edit", "EC-404", "", "x"), ==, 0);
   changed = sms_store_get_message (store, id);
   g_assert_cmpstr (changed->reactions, ==, "😂");
   g_assert_cmpstr (changed->text, ==, "Ciao!");
   g_assert_true (changed->edited);
-  sms_store_change (store, "revoke", "WA-1", "", "messaggio eliminato");
+  sms_store_change (store, "revoke", "EC-1", "", "messaggio eliminato");
   deleted = sms_store_get_message (store, id);
   g_assert_cmpstr (deleted->text, ==, "messaggio eliminato");
   g_assert_null (deleted->reactions);

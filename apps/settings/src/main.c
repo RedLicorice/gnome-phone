@@ -17,6 +17,8 @@ typedef struct {
   const char *needs_schema;    /* shown only if this settings schema is installed */
   gboolean  (*available) (void); /* shown only if this says so */
   gboolean  search_only;       /* a sub-page's row: hidden in the menu, shown while a search matches it */
+  gboolean  channels;          /* its subtitle is the messaging channels' labels, and its keywords add their names
+                                * (the channel registry, `minerva-config channels --json`) */
 } Entry;
 
 static const char *const software[] = { "gnome-software", "--mode=updates", NULL };
@@ -74,9 +76,9 @@ static const Entry entries[] = {
   { "preferences-system-notifications-symbolic", "orange", "Eventi", "App • Canali • Livelli • Sveglie",
     "eventi events app canali canale livelli livello notifiche sveglie sveglia wake", ns_page_events, NULL, NULL,
     ns_minerva_available, TRUE },
-  { "chat-message-new-symbolic", "green", "Messaggi", "WhatsApp • Telegram",
-    "messaggi messaging whatsapp telegram chat provider lettura scrittura whitelist token", ns_page_messaging, NULL, NULL,
-    ns_minerva_available, TRUE },
+  { "chat-message-new-symbolic", "green", "Messaggi", NULL,
+    "messaggi messaging chat provider lettura scrittura whitelist token", ns_page_messaging, NULL, NULL,
+    ns_minerva_available, TRUE, TRUE },
   { "x-office-spreadsheet-symbolic", "orange", "Budget", "Tetti di spesa • Eventi • Avvisi",
     "budget budgets spesa costo costi quota tetti limiti eventi events bypass", ns_page_minerva_budget, NULL, NULL,
     ns_minerva_available, TRUE },
@@ -207,6 +209,81 @@ installed (const Entry *e)
   return TRUE;
 }
 
+/* ---- the channels' row: its subtitle and words from the channel registry ---- */
+
+#define CHANNEL_SEP " • "
+
+/* the registry's labels joined by CHANNEL_SEP in @subtitle, and its names and labels as search words in @words */
+static void
+channels_texts (JsonObject *registry, char **subtitle, char **words)
+{
+  g_autoptr (GList) names = registry ? json_object_get_members (registry) : NULL;
+  g_autoptr (GString) sub = g_string_new (NULL), w = g_string_new (NULL);
+  names = g_list_sort (names, (GCompareFunc) g_strcmp0);
+  for (GList *l = names; l; l = l->next) {
+    const char *label = ns_json_str (ns_json_obj (registry, l->data), "label");
+    if (!*label)
+      label = l->data;
+    g_string_append_printf (sub, "%s%s", sub->len ? CHANNEL_SEP : "", label);
+    g_string_append_printf (w, " %s %s", (const char *) l->data, label);
+  }
+  *subtitle = g_strdup (sub->str);
+  *words = g_utf8_strdown (w->str, -1);
+}
+
+static void
+channels_answered (JsonObject *root, const char *err, gpointer data)
+{
+  g_autofree char *subtitle = NULL, *words = NULL;
+  if (err || !menu_rows)
+    return;
+  channels_texts (root, &subtitle, &words);
+  for (guint i = 0; i < menu_rows->len; i++) {
+    GObject *r = menu_rows->pdata[i];
+    const Entry *e = g_object_get_data (r, "ns-entry");
+    if (!e->channels)
+      continue;
+    ns_row_set_subtitle (GTK_WIDGET (r), subtitle);
+    g_autofree char *low = g_utf8_strdown (subtitle, -1);
+    char *text = g_strjoin (" ", g_object_get_data (r, "ns-search"), low, words, NULL);
+    g_object_set_data_full (r, "ns-search", text, g_free);
+  }
+}
+
+typedef struct {
+  GMainLoop *loop;
+  char     **subtitle, **words;
+} ChannelsWait;
+
+static void
+channels_waited (JsonObject *root, const char *err, gpointer data)
+{
+  ChannelsWait *w = data;
+  if (!err)
+    channels_texts (root, w->subtitle, w->words);
+  g_main_loop_quit (w->loop);
+}
+
+/* the same texts without a running app (--list-pages): the answer waited for; "" when there is none */
+static void
+channels_texts_now (char **subtitle, char **words)
+{
+  *subtitle = NULL;
+  *words = NULL;
+  if (ns_minerva_available ()) {
+    g_autoptr (GMainLoop) loop = g_main_loop_new (NULL, FALSE);
+    g_autoptr (GObject) owner = g_object_new (G_TYPE_OBJECT, NULL);
+    ChannelsWait w = { loop, subtitle, words };
+    const char *args[] = { "channels", "--json", NULL };
+    ns_mc_run (owner, args, NULL, channels_waited, &w);
+    g_main_loop_run (loop);
+  }
+  if (!*subtitle)
+    *subtitle = g_strdup ("");
+  if (!*words)
+    *words = g_strdup ("");
+}
+
 /* ---- search: every word somewhere in the title, subtitle or keywords ---- */
 
 static void
@@ -283,6 +360,7 @@ main_page (void)
 
   groups = g_ptr_array_new ();
   menu_rows = g_ptr_array_new ();
+  gboolean asked_channels = FALSE;
   GtkWidget *g = NULL;
   for (guint i = 0; i < G_N_ELEMENTS (entries); i++) {
     const Entry *e = &entries[i];
@@ -305,6 +383,11 @@ main_page (void)
     ns_row_on_activate (r, activate_entry, (gpointer) e);
     g_object_set_data (G_OBJECT (r), "ns-entry", (gpointer) e);
     g_ptr_array_add (menu_rows, r);
+    if (e->channels && !asked_channels) {
+      const char *args[] = { "channels", "--json", NULL };
+      ns_mc_run (G_OBJECT (r), args, NULL, channels_answered, NULL);
+      asked_channels = TRUE;
+    }
   }
 
   AdwNavigationPage *page = adw_navigation_page_new (outer, "Settings");
@@ -576,10 +659,14 @@ list_pages (void)
     g_autofree char *title = msg_assistant_fill (e->title);
     json_builder_set_member_name (b, "title");
     json_builder_add_string_value (b, title);
+    g_autofree char *subtitle = NULL, *words = NULL, *keywords = NULL;
+    if (e->channels)
+      channels_texts_now (&subtitle, &words);
+    keywords = g_strconcat (e->keywords ? e->keywords : "", words ? words : "", NULL);
     json_builder_set_member_name (b, "subtitle");
-    json_builder_add_string_value (b, e->subtitle ? e->subtitle : "");
+    json_builder_add_string_value (b, subtitle ? subtitle : e->subtitle ? e->subtitle : "");
     json_builder_set_member_name (b, "keywords");
-    json_builder_add_string_value (b, e->keywords ? e->keywords : "");
+    json_builder_add_string_value (b, keywords);
     json_builder_set_member_name (b, "icon");
     json_builder_add_string_value (b, e->icon ? e->icon : "");
     json_builder_end_object (b);

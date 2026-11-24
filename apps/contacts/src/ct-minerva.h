@@ -1,7 +1,7 @@
 /* QuickContact's Minerva section: everything Minerva keeps about the contact, on the contact's own page.
  *
- * Her notebook (view, and Modifica in Neo Prompt); the channels, WhatsApp and Telegram, as IM rows of the contact
- * (add, change, remove) and the Telegram invitation, not built yet, as a row that says so; whether her face and voice are known,
+ * Her notebook (view, and Modifica in Neo Prompt); the channels of the registry as IM rows of the contact (add,
+ * change, remove) and, for a channel that describes one, its invitation, not built yet, as a row that says so; whether her face and voice are known,
  * recording and forgetting the voice, learning it with the PIN; the kind, the numbers (samples, sightings,
  * confidence), merging a stranger's record into her, detaching and forgetting. A contact with no notebook is offered
  * "Crea il notebook", or the link to a record Minerva already has (a stranger's).

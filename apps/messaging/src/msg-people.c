@@ -118,7 +118,7 @@ msg_person_new (Contacts *contacts, const char *destination, const char *country
   MsgPerson *person = g_new0 (MsgPerson, 1);
   /* an agent is named by its name, and is no contact */
   /* a provider's chat is the contact whose IMPP is its address, or that lists the number after the address
-   * (whatsapp:+39...); a LID or a group has no number. Two contacts are not guessed between: the number shows.
+   * (echo:+39...); an id with the channel's lid-prefix or a group has no number. Two contacts are not guessed between: the number shows.
    * TODO(X-MINERVA-CHAT-<provider>): the owner's choice on an ambiguous chat, read from the chosen contact's vCard */
   g_autofree char *owner = sms_provider_owner (destination);
   g_autofree char *chat = owner ? sms_provider_chat (destination) : NULL;

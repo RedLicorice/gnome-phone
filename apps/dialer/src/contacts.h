@@ -23,7 +23,7 @@ typedef struct {
                                  * name the same as the other */
   char *sort_key_primary, *sort_key_alternative;
   GPtrArray *numbers;           /* ContactNumber */
-  GStrv handles;                /* the chat handles, a chat's address: "whatsapp:+39...", "telegram:8675309" (im-form.h) */
+  GStrv handles;                /* the chat handles, a chat's address: "<channel>:<id>", "echo:+39..." (im-form.h) */
   GBytes *photo;                /* the contact's picture as image data, or NULL */
 } Contact;
 
