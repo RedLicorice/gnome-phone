@@ -91,17 +91,19 @@ static const char *const part_columns[] = {
 /* a live message's (SmsMessage.live): columns added to bugle_db's messages */
 static const char *const live_columns[] = { "live TEXT", "live_since INT DEFAULT 0", "live_until INT DEFAULT 0" };
 
-/* a live message's state words and the statuses they stand for (sms_live_status) */
-static const struct { const char *state; MessageStatus status; } live_states[] = {
-  { "dictating", MESSAGE_STATUS_OUTGOING_DRAFT },
-  { "confirming", MESSAGE_STATUS_OUTGOING_YET_TO_SEND },
-  { "sending", MESSAGE_STATUS_OUTGOING_SENDING },
-  { "sent", MESSAGE_STATUS_OUTGOING_COMPLETE },
-  { "delivered", MESSAGE_STATUS_OUTGOING_DELIVERED },
-  { "failed", MESSAGE_STATUS_OUTGOING_FAILED },
-  { "unheard", MESSAGE_STATUS_OUTGOING_FAILED },
-  { "cancelled", MESSAGE_STATUS_OUTGOING_COMPLETE },
-  { "command", MESSAGE_STATUS_OUTGOING_COMPLETE },
+/* a live message's state words, the statuses they stand for (sms_live_status) and whether the line went to the
+ * agent (sms_live_was_sent): not while it is being said or confirmed, nor when it was cancelled, not understood or
+ * a command run on the phone */
+static const struct { const char *state; MessageStatus status; gboolean sent; } live_states[] = {
+  { "dictating", MESSAGE_STATUS_OUTGOING_DRAFT, FALSE },
+  { "confirming", MESSAGE_STATUS_OUTGOING_YET_TO_SEND, FALSE },
+  { "sending", MESSAGE_STATUS_OUTGOING_SENDING, TRUE },
+  { "sent", MESSAGE_STATUS_OUTGOING_COMPLETE, TRUE },
+  { "delivered", MESSAGE_STATUS_OUTGOING_DELIVERED, TRUE },
+  { "failed", MESSAGE_STATUS_OUTGOING_FAILED, TRUE },
+  { "unheard", MESSAGE_STATUS_OUTGOING_FAILED, FALSE },
+  { "cancelled", MESSAGE_STATUS_OUTGOING_COMPLETE, FALSE },
+  { "command", MESSAGE_STATUS_OUTGOING_COMPLETE, FALSE },
 };
 
 MessageStatus
@@ -111,6 +113,16 @@ sms_live_status (const char *state)
     if (g_str_equal (state, live_states[i].state))
       return live_states[i].status;
   return MESSAGE_STATUS_UNKNOWN;
+}
+
+/* Whether a live message in @state went to the agent (a state of no live message: it did) */
+gboolean
+sms_live_was_sent (const char *state)
+{
+  for (guint i = 0; state && i < G_N_ELEMENTS (live_states); i++)
+    if (g_str_equal (state, live_states[i].state))
+      return live_states[i].sent;
+  return TRUE;
 }
 
 void

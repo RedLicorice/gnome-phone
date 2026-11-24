@@ -136,6 +136,7 @@ void      sms_store_set_live (SmsStore *store, gint64 message_id, const char *st
                               gint64 until);
 /* the status a live message's state word stands for, or MESSAGE_STATUS_UNKNOWN for a word that is none */
 MessageStatus sms_live_status (const char *state);
+gboolean      sms_live_was_sent (const char *state);
 /* the messages are read (the conversation was shown) and seen (their notification can go); how many changed */
 guint     sms_store_mark_read (SmsStore *store, gint64 conversation_id);
 guint     sms_store_mark_seen (SmsStore *store, gint64 conversation_id);

@@ -89,7 +89,8 @@ static const char introspection[] =
   "      <arg name='transcript' type='s' direction='in'/><arg name='text' type='s' direction='in'/></method>"
   /* a conversation's newest @limit messages, oldest first: (id, written by the owner, text, Unix ms when it came or
    * was written), for a view that opens on it (the chat overlay); only the programs of the callers file's group
-   * de.yesman.Messaging.Sms.GetMessages may ask (msg-callers.h) */
+   * de.yesman.Messaging.Sms.GetMessages may ask (msg-callers.h); an owner's line never sent (being said, confirmed,
+   * cancelled, not understood, a command: sms_live_was_sent) is not in it */
   "    <method name='GetMessages'><arg name='conversation' type='x' direction='in'/>"
   "      <arg name='limit' type='u' direction='in'/><arg name='messages' type='a(xbsx)' direction='out'/></method>"
   "    <method name='GetUnread'><arg name='conversation' type='x' direction='in'/>"
@@ -1242,6 +1243,9 @@ on_method_call (GDBusConnection *bus, const char *sender, const char *path, cons
         {
           SmsMessage *m = messages->pdata[i];
 
+          /* the conversation as the agent had it: an owner's line never sent (being said, cancelled...) is not in it */
+          if (m->live && !sms_live_was_sent (m->live))
+            continue;
           g_variant_builder_add (&out, "(xbsx)", m->id, sms_message_is_owners (m),
                                  m->text ? m->text : "", m->received);
         }
