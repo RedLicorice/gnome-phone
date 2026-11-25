@@ -84,6 +84,9 @@ GtkWidget  *ns_row_value (GtkWidget *group, const char *title, const char *value
                           NsEntered changed, gpointer data);
 const char *ns_row_value_get (GtkWidget *row);
 void        ns_row_value_set (GtkWidget *row, const char *value);
+/* the texts of the value rows ("Not set", the dialog's "Save") and of every dialog's "Cancel" inside `scope` (a page's
+ * column, or a part of one): pages in another language set theirs; NULL or "" keeps the English one */
+void        ns_texts_set (GtkWidget *scope, const char *not_set, const char *save, const char *cancel);
 
 /* a dim line of text below the cards so far */
 GtkWidget *ns_note (GtkWidget *content, const char *text);

@@ -993,6 +993,33 @@ ns_row_entry (GtkWidget *group, const char *title, GSettings *s, const char *key
   return e->row;
 }
 
+/* ---- texts of the rows and dialogs below: English, unless a caller set its own on an ancestor (ns_texts_set) ---- */
+
+#define NS_TEXT_NOT_SET "ns-text-not-set"
+#define NS_TEXT_SAVE    "ns-text-save"
+#define NS_TEXT_CANCEL  "ns-text-cancel"
+
+void
+ns_texts_set (GtkWidget *scope, const char *not_set, const char *save, const char *cancel)
+{
+  const char *names[] = { NS_TEXT_NOT_SET, NS_TEXT_SAVE, NS_TEXT_CANCEL };
+  const char *texts[] = { not_set, save, cancel };
+  for (guint i = 0; i < G_N_ELEMENTS (names); i++)
+    g_object_set_data_full (G_OBJECT (scope), names[i], texts[i] && *texts[i] ? g_strdup (texts[i]) : NULL, g_free);
+}
+
+/* the text `name` of the nearest ancestor of `w` (itself included) that has one, else `fallback` */
+static const char *
+ns_text (GtkWidget *w, const char *name, const char *fallback)
+{
+  for (; w; w = gtk_widget_get_parent (w)) {
+    const char *t = g_object_get_data (G_OBJECT (w), name);
+    if (t)
+      return t;
+  }
+  return fallback;
+}
+
 /* a value of the caller's own (a form field): the row shows it, a tap asks for a new one */
 typedef struct {
   GtkWidget *row;
@@ -1005,7 +1032,8 @@ typedef struct {
 static void
 value_show (Value *v)
 {
-  ns_row_set_subtitle (v->row, !v->value || !*v->value ? "Not set" : v->secret ? "••••••••" : v->value);
+  ns_row_set_subtitle (v->row, !v->value || !*v->value ? ns_text (v->row, NS_TEXT_NOT_SET, "Not set")
+                               : v->secret ? "••••••••" : v->value);
 }
 
 static void
@@ -1025,7 +1053,7 @@ static void
 value_open (GtkWidget *row, gpointer data)
 {
   Value *v = data;
-  ns_ask (row, v->title, NULL, v->value, v->secret, "Save", value_done, v);
+  ns_ask (row, v->title, NULL, v->value, v->secret, ns_text (row, NS_TEXT_SAVE, "Save"), value_done, v);
 }
 
 static void
@@ -1292,10 +1320,11 @@ ask_response (AdwAlertDialog *d, const char *response, Ask *a)
 }
 
 static AdwDialog *
-alert (const char *heading, const char *body, const char *ok, gboolean destructive, Ask *a)
+alert (GtkWidget *parent, const char *heading, const char *body, const char *ok, gboolean destructive, Ask *a)
 {
   AdwDialog *d = adw_alert_dialog_new (heading, body);
-  adw_alert_dialog_add_responses (ADW_ALERT_DIALOG (d), "cancel", "Cancel", "ok", ok, NULL);
+  adw_alert_dialog_add_responses (ADW_ALERT_DIALOG (d), "cancel", ns_text (parent, NS_TEXT_CANCEL, "Cancel"), "ok", ok,
+                                  NULL);
   adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (d), "ok",
                                             destructive ? ADW_RESPONSE_DESTRUCTIVE : ADW_RESPONSE_SUGGESTED);
   adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (d), "ok");
@@ -1316,7 +1345,7 @@ ns_ask (GtkWidget *parent, const char *heading, const char *body, const char *in
     gtk_password_entry_set_show_peek_icon (GTK_PASSWORD_ENTRY (a->entry), TRUE);
   g_object_set (a->entry, "activates-default", TRUE, NULL);
   gtk_editable_set_text (GTK_EDITABLE (a->entry), initial ? initial : "");
-  AdwDialog *d = alert (heading, body, ok, FALSE, a);
+  AdwDialog *d = alert (parent, heading, body, ok, FALSE, a);
   adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (d), a->entry);
   adw_dialog_present (d, parent);
   gtk_widget_grab_focus (a->entry);
@@ -1329,7 +1358,7 @@ ns_confirm (GtkWidget *parent, const char *heading, const char *body, const char
   Ask *a = g_new0 (Ask, 1);
   a->answered = done;
   a->data = data;
-  AdwDialog *d = alert (heading, body, yes, destructive, a);
+  AdwDialog *d = alert (parent, heading, body, yes, destructive, a);
   adw_dialog_present (d, parent);
   return d;
 }

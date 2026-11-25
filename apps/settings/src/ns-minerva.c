@@ -122,6 +122,59 @@ mn_ui (Mn *m)
   return obj_of (m->st, "minerva_ui");
 }
 
+static JsonObject *
+mn_ui_page (Mn *m, const char *id)
+{
+  JsonObject *p = obj_of (obj_of (mn_ui (m), "pages"), id);
+  return p ? p : obj_of (obj_of (mn_ui (m), "subpages"), id);   /* a page of its own that is no index entry */
+}
+
+/* a text of minerva_ui.json's "labels": the ones every page shares (`page` NULL), or a page's own. Like every text of
+ * these pages it is data only: an older minerva-config without it shows nothing, nothing is guessed */
+static const char *
+mn_label (Mn *m, const char *page, const char *key)
+{
+  return str_of (obj_of (page ? mn_ui_page (m, page) : mn_ui (m), "labels"), key);
+}
+
+/* `tmpl` with each "{name}" of the NULL-terminated name, value pairs replaced by its value */
+static char *
+mn_fill (const char *tmpl, ...)
+{
+  GString *t = g_string_new (tmpl);
+  va_list ap;
+  va_start (ap, tmpl);
+  for (const char *name; (name = va_arg (ap, const char *));) {
+    const char *value = va_arg (ap, const char *);
+    g_string_replace (t, name, value ? value : "", 0);
+  }
+  va_end (ap);
+  return g_string_free (t, FALSE);
+}
+
+/* the tags after a model's name: Minerva's pages take theirs from the data (mn_tags), the model picker of
+ * Permissions (an English page, ns-perm.c) has its own */
+typedef struct {
+  const char *sees, *free, *not_listed;
+} ModelTags;
+
+static const ModelTags PICK_TAGS = { "sees images", "free", "not listed" };
+
+static ModelTags
+mn_tags (Mn *m)
+{
+  return (ModelTags) { mn_label (m, NULL, "sees_images"), mn_label (m, NULL, "free"),
+                       mn_label (m, NULL, "not_listed") };
+}
+
+/* " • tag" after `s`, when the tag is wanted and has a text */
+static void
+tag_append (GString *s, gboolean on, const char *tag)
+{
+  if (on && tag && *tag)
+    g_string_append_printf (s, " • %s", tag);
+}
+
 /* the catalog entry of a model id, or NULL */
 static JsonObject *
 model_of (Mn *m, const char *id)
@@ -136,16 +189,17 @@ model_of (Mn *m, const char *id)
 }
 
 static char *
-model_label (JsonObject *o)
+model_label (JsonObject *o, const ModelTags *tags)
 {
   const char *name = str_of (o, "name");
-  g_autofree char *base = *name ? g_strdup (name) : g_strdup (str_of (o, "id"));
+  GString *s = g_string_new (*name ? name : str_of (o, "id"));
   gboolean vision = json_object_has_member (o, "vision") && json_object_get_boolean_member (o, "vision");
   gboolean free = json_object_has_member (o, "free") && json_object_get_boolean_member (o, "free");
   if (g_strcmp0 (str_of (o, "provider"), "opencode"))   /* the provider tells equal names apart */
-    return g_strdup_printf ("%s (%s)%s%s", base, str_of (o, "provider"), vision ? " • sees images" : "",
-                            free ? " • free" : "");
-  return g_strdup_printf ("%s%s%s", base, vision ? " • sees images" : "", free ? " • free" : "");
+    g_string_append_printf (s, " (%s)", str_of (o, "provider"));
+  tag_append (s, vision, tags->sees);
+  tag_append (s, free, tags->free);
+  return g_string_free (s, FALSE);
 }
 
 /* a label for an id that may be missing from the catalog */
@@ -153,7 +207,12 @@ static char *
 id_label (Mn *m, const char *id)
 {
   JsonObject *o = model_of (m, id);
-  return o ? model_label (o) : g_strdup_printf ("%s • not listed", id);
+  ModelTags tags = mn_tags (m);
+  if (o)
+    return model_label (o, &tags);
+  GString *s = g_string_new (id);
+  tag_append (s, TRUE, tags.not_listed);
+  return g_string_free (s, FALSE);
 }
 
 /* ---- writing ---- */
@@ -168,13 +227,18 @@ set_done (Mn *m, JsonObject *root, const char *err, gpointer data)
 {
   m->busy = FALSE;
   if (err) {
-    g_autofree char *t = g_strdup_printf ("Not saved: %s", err);
+    g_autofree char *t = mn_fill (mn_label (m, NULL, "not_saved"), "{error}", err, NULL);
     say (m, t, TRUE);
   } else {
     JsonArray *restarted = arr_of (root, "restarted");
-    g_autoptr (GString) s = g_string_new (data ? "Saved." : "Saved and applied.");
+    g_autoptr (GString) s = g_string_new (mn_label (m, NULL, data ? "saved" : "saved_applied"));
+    g_autoptr (GString) names = g_string_new (NULL);
     for (guint i = 0; restarted && i < json_array_get_length (restarted); i++)
-      g_string_append_printf (s, "%s%s", i ? ", " : " Restarted: ", json_array_get_string_element (restarted, i));
+      g_string_append_printf (names, "%s%s", i ? ", " : "", json_array_get_string_element (restarted, i));
+    if (names->len) {
+      g_autofree char *r = mn_fill (mn_label (m, NULL, "restarted"), "{services}", names->str, NULL);
+      g_string_append (s, r);
+    }
     say (m, s->str, FALSE);
   }
   mn_refresh (m);
@@ -184,11 +248,11 @@ static void
 mn_set_ex (Mn *m, const char *key, const char *value, gboolean apply)
 {
   if (m->busy) {
-    say (m, "Still applying the last change…", FALSE);
+    say (m, mn_label (m, NULL, "busy"), FALSE);
     return;
   }
   m->busy = TRUE;
-  say (m, "Applying…", FALSE);
+  say (m, mn_label (m, NULL, "applying"), FALSE);
   g_autofree char *pair = g_strdup_printf ("%s=%s", key, value);
   const char *const with[] = { "set", "--apply", "--json", "--quiet", pair, NULL };
   const char *const without[] = { "set", "--json", "--quiet", pair, NULL };
@@ -238,13 +302,14 @@ choice_row (Mn *m, GtkWidget *group, const char *title, const char *key, const c
     g_ptr_array_add (labels, g_strdup (default_label));
   }
   JsonArray *a = arr_of (m->st, "models");
+  ModelTags tags = mn_tags (m);
   gboolean seen = FALSE;
   for (guint i = 0; a && i < json_array_get_length (a); i++) {
     JsonObject *o = json_array_get_object_element (a, i);
     if (vision && !(json_object_has_member (o, "vision") && json_object_get_boolean_member (o, "vision")))
       continue;
     g_ptr_array_add (ids, g_strdup (str_of (o, "id")));
-    g_ptr_array_add (labels, model_label (o));
+    g_ptr_array_add (labels, model_label (o, &tags));
     seen = seen || !g_strcmp0 (str_of (o, "id"), current);
   }
   if (*current && !seen) {
@@ -313,7 +378,7 @@ bypass_done (Mn *m, JsonObject *root, const char *err, gpointer data)
 {
   m->busy = FALSE;
   if (err) {
-    g_autofree char *t = g_strdup_printf ("Not saved: %s", err);
+    g_autofree char *t = mn_fill (mn_label (m, NULL, "not_saved"), "{error}", err, NULL);
     say (m, t, TRUE);
   }
   mn_refresh (m);
@@ -326,7 +391,7 @@ bypass_toggled (GtkWidget *sw, GParamSpec *pspec, gpointer data)
   if (ns_switch_syncing (sw) || m->busy)
     return;
   m->busy = TRUE;
-  say (m, "Applying…", FALSE);
+  say (m, mn_label (m, NULL, "applying"), FALSE);
   const char *const args[] = { "events-bypass", gtk_switch_get_active (GTK_SWITCH (sw)) ? "on" : "off",
                               "--json", NULL };
   mn_run (m, args, bypass_done, NULL);
@@ -428,23 +493,24 @@ chain_add (GtkWidget *row, gpointer data)
 {
   Mn *m = data;
   GtkWidget *c;
-  AdwNavigationPage *page = ns_page_new ("Add a fallback", &c);
+  AdwNavigationPage *page = ns_page_new (mn_label (m, "brain", "add_fallback_title"), &c);
   GtkWidget *g = ns_group (c, NULL);
   JsonArray *a = arr_of (m->st, "models");
+  ModelTags tags = mn_tags (m);
   guint shown = 0;
   for (guint i = 0; a && i < json_array_get_length (a); i++) {
     JsonObject *o = json_array_get_object_element (a, i);
     const char *id = str_of (o, "id");
     if (!g_strcmp0 (id, setting (m, "brain.main")) || g_strv_contains ((const char *const *) m->chain_ids, id))
       continue;
-    g_autofree char *label = model_label (o);
+    g_autofree char *label = model_label (o, &tags);
     GtkWidget *r = ns_row (g, NULL, NULL, label, id);
     g_object_set_data_full (G_OBJECT (r), "mn-id", g_strdup (id), g_free);
     ns_row_on_activate (r, add_picked, m);
     shown++;
   }
   if (!shown)
-    ns_note (c, "Every model opencode offers is already the main model or in the chain.");
+    ns_note (c, mn_label (m, "brain", "none_to_add"));
   ns_push (page);
 }
 
@@ -461,14 +527,18 @@ chain_fill (Mn *m)
   g_strfreev (m->chain_ids);
   m->chain_ids = split_ids (setting (m, "fallback.chain"), NULL);
   guint n = g_strv_length (m->chain_ids);
+  ModelTags tags = mn_tags (m);
+  const char *up = mn_label (m, NULL, "earlier"), *down = mn_label (m, NULL, "later");
+  const char *rm = mn_label (m, NULL, "remove");
   for (guint i = 0; i < n; i++) {
     JsonObject *o = model_of (m, m->chain_ids[i]);
     const char *name = o ? str_of (o, "name") : "";
     g_autofree char *title = g_strdup (*name ? name : m->chain_ids[i]);
     gboolean vision = o && json_object_has_member (o, "vision") && json_object_get_boolean_member (o, "vision");
-    g_autofree char *sub = g_strdup_printf ("%s%s%s", m->chain_ids[i], vision ? " • sees images" : "",
-                                            o ? "" : " • not listed");
-    GtkWidget *row = ns_row (m->chain, NULL, NULL, title, sub);
+    g_autoptr (GString) sub = g_string_new (m->chain_ids[i]);
+    tag_append (sub, vision, tags.sees);
+    tag_append (sub, !o, tags.not_listed);
+    GtkWidget *row = ns_row (m->chain, NULL, NULL, title, sub->str);
     ChainOp *op = g_new0 (ChainOp, 1);
     op->m = m;
     op->index = i;
@@ -476,12 +546,12 @@ chain_fill (Mn *m)
     op->ids = &m->chain_ids;
     g_object_set_data_full (G_OBJECT (row), "mn-op", op, (GDestroyNotify) chain_free_op);
     GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_box_append (GTK_BOX (box), icon_button ("go-up-symbolic", "Earlier", G_CALLBACK (chain_move), op, -1, i > 0));
-    gtk_box_append (GTK_BOX (box), icon_button ("go-down-symbolic", "Later", G_CALLBACK (chain_move), op, 1, i + 1 < n));
-    gtk_box_append (GTK_BOX (box), icon_button ("list-remove-symbolic", "Remove", G_CALLBACK (chain_remove), op, 0, TRUE));
+    gtk_box_append (GTK_BOX (box), icon_button ("go-up-symbolic", up, G_CALLBACK (chain_move), op, -1, i > 0));
+    gtk_box_append (GTK_BOX (box), icon_button ("go-down-symbolic", down, G_CALLBACK (chain_move), op, 1, i + 1 < n));
+    gtk_box_append (GTK_BOX (box), icon_button ("list-remove-symbolic", rm, G_CALLBACK (chain_remove), op, 0, TRUE));
     ns_row_suffix (row, box);
   }
-  GtkWidget *add = ns_row_button (m->chain, "Add a model…", FALSE, chain_add, m);
+  GtkWidget *add = ns_row_button (m->chain, mn_label (m, "brain", "add_fallback"), FALSE, chain_add, m);
   (void) add;
 }
 
@@ -508,7 +578,8 @@ selectable (JsonObject *o)
   return json_object_get_boolean_member_with_default (o, "selectable", TRUE);
 }
 
-/* the recognizers the chain could still take: selectable and not in it yet */
+/* the recognizers the chain could still take: selectable and not in it yet (the fixed last one is never listed:
+ * minerva-config leaves it out of stt_engines) */
 static guint
 stt_addable_count (Mn *m)
 {
@@ -534,9 +605,9 @@ static const char *
 stt_hint (Mn *m, const char *id)
 {
   if (!g_strcmp0 (id, "claude"))
-    return m->claude_hint ? m->claude_hint : "checking…";
+    return m->claude_hint ? m->claude_hint : mn_label (m, "voice", "checking");
   const char *h = str_of (obj_of (m->st, "stt_hints"), id);
-  return *h ? h : "unknown";
+  return *h ? h : mn_label (m, "voice", "unknown");
 }
 
 static void
@@ -558,7 +629,7 @@ stt_add (GtkWidget *row, gpointer data)
 {
   Mn *m = data;
   GtkWidget *c;
-  AdwNavigationPage *page = ns_page_new ("Add a recognizer", &c);
+  AdwNavigationPage *page = ns_page_new (mn_label (m, "voice", "add_recognizer_title"), &c);
   GtkWidget *g = ns_group (c, NULL);
   JsonArray *a = arr_of (m->st, "stt_engines");
   guint shown = 0;
@@ -578,7 +649,7 @@ stt_add (GtkWidget *row, gpointer data)
     ns_row_on_activate (r, stt_add_picked, m);
   }
   if (!shown)
-    ns_note (c, "Every recognizer is already in the list.");
+    ns_note (c, mn_label (m, "voice", "none_to_add"));
   ns_push (page);
 }
 
@@ -590,6 +661,8 @@ stt_fill (Mn *m)
   JsonObject *fixed = obj_of (m->st, "stt_fixed");   /* the local one, always last */
   m->stt_ids = split_ids (setting (m, "voice.stt_chain"), str_of (fixed, "id"));
   guint n = g_strv_length (m->stt_ids);
+  const char *up = mn_label (m, NULL, "earlier"), *down = mn_label (m, NULL, "later");
+  const char *rm = mn_label (m, NULL, "remove");
   for (guint i = 0; i < n; i++) {
     GtkWidget *row = ns_row (m->stt, NULL, NULL, stt_label (m, m->stt_ids[i]), stt_hint (m, m->stt_ids[i]));
     ChainOp *op = g_new0 (ChainOp, 1);
@@ -599,22 +672,22 @@ stt_fill (Mn *m)
     op->ids = &m->stt_ids;
     g_object_set_data_full (G_OBJECT (row), "mn-op", op, (GDestroyNotify) chain_free_op);
     GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_box_append (GTK_BOX (box), icon_button ("go-up-symbolic", "Earlier", G_CALLBACK (chain_move), op, -1, i > 0));
-    gtk_box_append (GTK_BOX (box), icon_button ("go-down-symbolic", "Later", G_CALLBACK (chain_move), op, 1, i + 1 < n));
-    gtk_box_append (GTK_BOX (box), icon_button ("list-remove-symbolic", "Remove", G_CALLBACK (chain_remove), op, 0, TRUE));
+    gtk_box_append (GTK_BOX (box), icon_button ("go-up-symbolic", up, G_CALLBACK (chain_move), op, -1, i > 0));
+    gtk_box_append (GTK_BOX (box), icon_button ("go-down-symbolic", down, G_CALLBACK (chain_move), op, 1, i + 1 < n));
+    gtk_box_append (GTK_BOX (box), icon_button ("list-remove-symbolic", rm, G_CALLBACK (chain_remove), op, 0, TRUE));
     ns_row_suffix (row, box);
   }
-  g_autofree char *last = g_strdup_printf ("%s • always the last one", str_of (fixed, "hint"));
+  g_autofree char *last = mn_fill (mn_label (m, "voice", "last_resort"), "{hint}", str_of (fixed, "hint"), NULL);
   ns_row (m->stt, NULL, NULL, str_of (fixed, "name"), last);
   if (stt_addable_count (m))
-    ns_row_button (m->stt, "Add a recognizer…", FALSE, stt_add, m);
+    ns_row_button (m->stt, mn_label (m, "voice", "add_recognizer"), FALSE, stt_add, m);
 }
 
 static void
 stt_status_done (Mn *m, JsonObject *root, const char *err, gpointer data)
 {
   g_free (m->claude_hint);
-  m->claude_hint = g_strdup (!err && root ? str_of (root, "claude") : "unknown");
+  m->claude_hint = g_strdup (!err && root ? str_of (root, "claude") : mn_label (m, "voice", "unknown"));
   if (m->st && m->stt)
     stt_fill (m);
 }
@@ -636,7 +709,7 @@ notes_fill (Mn *m)
   JsonObject *eff = obj_of (m->st, "effective");
   const char *in_use = str_of (eff, "main");
   if (*in_use && g_strcmp0 (in_use, setting (m, "brain.main"))) {
-    g_autofree char *t = g_strdup_printf ("In use now: %s", in_use);
+    g_autofree char *t = mn_fill (mn_label (m, "brain", "in_use"), "{model}", in_use, NULL);
     note (m, t);
   }
   JsonArray *notes = arr_of (m->st, "notes");
@@ -644,7 +717,7 @@ notes_fill (Mn *m)
     note (m, json_array_get_string_element (notes, i));
   JsonObject *oc = obj_of (m->st, "opencode");
   if (oc && json_object_has_member (oc, "reachable") && !json_object_get_boolean_member (oc, "reachable"))
-    note (m, "The agent server did not answer: the model list is empty.");
+    note (m, mn_label (m, "brain", "unreachable"));
 }
 
 static void
@@ -988,7 +1061,7 @@ static void
 nm_save (Mn *m, guint index, const char *value)
 {
   if (m->busy) {
-    say (m, "Still applying the last change…", FALSE);
+    say (m, mn_label (m, NULL, "busy"), FALSE);
     return;
   }
   JsonArray *nicks = arr_of (obj_of (m->st, "names"), "nicknames"), *args = arr_of (m->nm, "args");
@@ -1218,8 +1291,12 @@ spend_text (Mn *m)
   const char *cap = cap_key ? setting (m, cap_key) : "";
   if (b && json_object_has_member (b, "usage_usd") && !json_node_is_null (json_object_get_member (b, "usage_usd"))) {
     gboolean over = json_object_get_boolean_member (b, "over");
-    return g_strdup_printf ("$%.2f%s%s%s%s", json_object_get_double_member (b, "usage_usd"),
-                            *cap ? " of €" : "", cap, over ? " • " : "", over ? str_of (labels, "over_cap") : "");
+    g_autofree char *usage = g_strdup_printf ("%.2f", json_object_get_double_member (b, "usage_usd"));
+    g_autofree char *line = mn_fill (str_of (labels, *cap ? "spend_of_cap" : "spend_used"), "{usage}", usage,
+                                     "{cap}", cap, NULL);
+    GString *s = g_string_new (line);
+    tag_append (s, over, str_of (labels, "over_cap"));
+    return g_string_free (s, FALSE);
   }
   return g_strdup (*cap && g_ascii_strtod (cap, NULL) > 0 ? str_of (labels, "not_checked")
                                                           : str_of (labels, "no_cap"));
@@ -1252,10 +1329,14 @@ update_fields (Mn *m)
     int budget = (int) json_object_get_int_member (ev, "budget");
     int online = (int) json_object_get_int_member (ev, "online_daily");
     int online_used = (int) json_object_get_int_member (ev, "online_used");
-    g_autofree char *t = g_strdup_printf ("%d of %d tokens%s • face online %d/%d • %s", used, budget,
-                                         json_object_get_boolean_member (ev, "bypass") ? " • bypassed" : "",
-                                         online_used, online,
-        json_object_get_boolean_member (ev, "running") ? "service running" : "service not running");
+    g_autofree char *s_used = g_strdup_printf ("%d", used), *s_budget = g_strdup_printf ("%d", budget);
+    g_autofree char *s_online = g_strdup_printf ("%d", online), *s_online_used = g_strdup_printf ("%d", online_used);
+    gboolean bypassed = json_object_get_boolean_member (ev, "bypass");
+    gboolean running = json_object_get_boolean_member (ev, "running");
+    g_autofree char *t = mn_fill (mn_label (m, "budget", "events_line"), "{used}", s_used, "{budget}", s_budget,
+                                  "{bypassed}", bypassed ? mn_label (m, "budget", "bypassed") : "",
+                                  "{online_used}", s_online_used, "{online}", s_online,
+                                  "{service}", mn_label (m, "budget", running ? "running" : "not_running"), NULL);
     ns_row_set_subtitle (m->events, t);
     if (m->bypass)
       ns_switch_quiet (ns_row_get_switch (m->bypass), json_object_get_boolean_member (ev, "bypass"));
@@ -1270,13 +1351,17 @@ static void
 status_done (Mn *m, JsonObject *root, const char *err, gpointer data)
 {
   if (err || !root) {
-    g_autofree char *t = g_strdup_printf ("Could not read the settings: %s", err ? err : "no answer");
-    say (m, t, TRUE);
+    /* the texts come with the status: the last one's, when one came before */
+    g_autofree char *t = mn_fill (mn_label (m, NULL, "read_failed"), "{error}",
+                                  err ? err : mn_label (m, NULL, "no_answer"), NULL);
+    say (m, *t ? t : err ? err : "", TRUE);
     return;
   }
   if (m->st)
     json_object_unref (m->st);
   m->st = json_object_ref (root);
+  /* Settings' own rows and dialogs inside this page's column speak the page's language */
+  ns_texts_set (m->content, mn_label (m, NULL, "not_set"), mn_label (m, NULL, "save"), mn_label (m, NULL, "cancel"));
   if (m->kind == MN_INDEX) {
     index_fill (m);
     return;
@@ -1401,13 +1486,6 @@ page_opener (const char *id)
   return NULL;
 }
 
-static JsonObject *
-mn_ui_page (Mn *m, const char *id)
-{
-  JsonObject *p = obj_of (obj_of (mn_ui (m), "pages"), id);
-  return p ? p : obj_of (obj_of (mn_ui (m), "subpages"), id);   /* a page of its own that is no index entry */
-}
-
 /* a sub-page's title, from the data (it arrives with the status: the page opens with a blank one) */
 static void
 page_title (Mn *m, const char *id)
@@ -1497,7 +1575,7 @@ voice_build (Mn *m)
   m->voice_g = ns_group (m->content, ui_title (s, "engine"));   /* the engines */
   m->stt = ns_group (m->content, ui_title (s, "stt"));
   GtkWidget *sg = ns_group (m->content, NULL);
-  m->stt_timeout = field_row (m, sg, "Cloud time limit (seconds)", "voice.stt_timeout_s");
+  m->stt_timeout = field_row (m, sg, mn_label (m, "voice", "stt_timeout"), "voice.stt_timeout_s");
   note_if (n, "stt", m->content);
   m->sg_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);   /* the commands, the advanced groups */
   gtk_box_append (GTK_BOX (m->content), m->sg_box);
@@ -1693,11 +1771,12 @@ build_rows (Mn *m)
 {
   m->picks_built = TRUE;
   if (m->brain_g)
-    choice_row (m, m->brain_g, "Main model", "brain.main", NULL, FALSE);
+    choice_row (m, m->brain_g, mn_label (m, "brain", "main_model"), "brain.main", NULL, FALSE);
   if (m->roles_g) {
-    choice_row (m, m->roles_g, "Messages", "roles.chat", "Same as main", FALSE);
-      choice_row (m, m->roles_g, "Eyes (looks at pictures)", "roles.eyes", "Same as main", TRUE);
-    choice_row (m, m->roles_g, "Mailbox (other agents)", "roles.mailbox", "Same as main", FALSE);
+    const char *same = mn_label (m, "brain", "same_as_main");
+    choice_row (m, m->roles_g, mn_label (m, "brain", "chat"), "roles.chat", same, FALSE);
+    choice_row (m, m->roles_g, mn_label (m, "brain", "eyes"), "roles.eyes", same, TRUE);
+    choice_row (m, m->roles_g, mn_label (m, "brain", "mailbox"), "roles.mailbox", same, FALSE);
   }
   if (m->voice_g) {
     /* the phone's own (id ""), then every cloud voice; the stored value may be the id or one of its aliases */
@@ -1716,9 +1795,10 @@ build_rows (Mn *m)
         sel = i;
     }
     g_ptr_array_add (labels, NULL);
-    ns_row_pick (m->voice_g, "Speech engine", (const char *const *) labels->pdata, sel, engine_picked, m);
-    m->voice_id = field_row (m, m->voice_g, "Cloud voice name", "voice.voice");
-    m->voice_cap = field_row (m, m->voice_g, "Characters per day", "voice.daily_chars");
+    ns_row_pick (m->voice_g, mn_label (m, "voice", "engine"), (const char *const *) labels->pdata, sel,
+                 engine_picked, m);
+    m->voice_id = field_row (m, m->voice_g, mn_label (m, "voice", "cloud_voice"), "voice.voice");
+    m->voice_cap = field_row (m, m->voice_g, mn_label (m, "voice", "daily_chars"), "voice.daily_chars");
   }
   if (m->budget_g) {
     m->caps = g_ptr_array_new ();
@@ -1731,11 +1811,11 @@ build_rows (Mn *m)
       if (!m->cap_key && json_object_get_boolean_member (o, "money"))
         m->cap_key = g_strdup (str_of (o, "key"));
     }
-    m->events = ns_row_info (m->budget_g, "Events today", "");
-    m->bypass = ns_row_switch (m->budget_g, "Bypass the events limit today",
-                               "The events keep reaching her until tomorrow, whatever the quota says", NULL, NULL);
+    m->events = ns_row_info (m->budget_g, mn_label (m, "budget", "events_today"), "");
+    m->bypass = ns_row_switch (m->budget_g, mn_label (m, "budget", "bypass"), mn_label (m, "budget", "bypass_help"),
+                               NULL, NULL);
     g_signal_connect (ns_row_get_switch (m->bypass), "notify::active", G_CALLBACK (bypass_toggled), m);
-    m->spent = ns_row_info (m->budget_g, "Spent this month", "");
+    m->spent = ns_row_info (m->budget_g, mn_label (m, "budget", "spent"), "");
   }
 }
 
@@ -1783,7 +1863,7 @@ model_pick_done (JsonArray *list, const char *err, gpointer data)
   for (guint i = 0; list && i < json_array_get_length (list); i++) {
     JsonObject *o = json_array_get_object_element (list, i);
     const char *id = str_of (o, "id");
-    g_autofree char *label = model_label (o);
+    g_autofree char *label = model_label (o, &PICK_TAGS);
     gboolean cur = !g_strcmp0 (id, p->current);
     GtkWidget *r = ns_row (g, NULL, NULL, label, cur ? "In use now" : NULL);
     g_object_set_data_full (G_OBJECT (r), "mp-id", g_strdup (id), g_free);
