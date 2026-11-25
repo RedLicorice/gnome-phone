@@ -75,15 +75,6 @@
       <description>Shown when an enrolment ends before the sensor saw a finger.</description>
     </key>
 
-    <!-- Software update (with Minerva): the page asks again while an update runs -->
-    <key name="updates-poll-s" type="i">
-      <range min="1" max="3600"/>
-      <default>3</default>
-      <summary>How often Software update refreshes while an update runs (s)</summary>
-      <description>While the scheduled updates service runs an update, the Software update page asks for its state
-        this often.</description>
-    </key>
-
     <key name="last-page" type="s">
       <default>''</default>
       <summary>The menu page opened last</summary>

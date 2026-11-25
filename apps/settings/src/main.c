@@ -21,12 +21,7 @@ typedef struct {
                                 * (`minerva-config messaging ui --json` "subtitle", from the channel registry) */
 } Entry;
 
-/* the entries shown only where Minerva is not installed */
-static gboolean
-no_minerva (void)
-{
-  return !ns_minerva_available ();
-}
+static const char *const software[] = { "gnome-software", "--mode=updates", NULL };
 
 /* NULL title: the next card */
 static const Entry entries[] = {
@@ -104,11 +99,8 @@ static const Entry entries[] = {
   { "preferences-desktop-accessibility-symbolic", "green", "Accessibility", "Vision • Interaction",
     "zoom contrast screen reader animations", ns_page_accessibility },
   { NULL },
-  /* with Minerva its own page (scheduled updates, ns-updates.c), without it GNOME Software */
   { "software-update-available-symbolic", "blue", "Software update", "Download and install",
-    "upgrade packages aggiornamenti aggiorna update schedule", ns_page_updates, NULL, NULL, ns_minerva_available },
-  { "software-update-available-symbolic", "blue", "Software update", "Download and install",
-    "upgrade packages", NULL, ns_software_updates_argv, NULL, no_minerva },
+    "upgrade packages", NULL, software },
   { "help-about-symbolic", "grey", "About phone", "Status • Legal information • Phone name",
     "model kernel version memory storage", ns_page_about },
 };
@@ -614,7 +606,6 @@ static const struct {
   { "federation", ns_page_federation }, { "federazione", ns_page_federation },
   { "chat", ns_page_messaging }, { "chats", ns_page_messaging },
   { "permissions", ns_page_permissions }, { "agent-permissions", ns_page_permissions },
-  { "updates", ns_page_updates }, { "software-update", ns_page_updates }, { "aggiornamenti", ns_page_updates },
 };
 
 /* an entry's id: the primary --page name of its page, NULL when it has none */
