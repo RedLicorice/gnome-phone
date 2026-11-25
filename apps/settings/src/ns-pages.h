@@ -117,3 +117,8 @@ void ns_perm_add_row (GtkWidget *group);
 void ns_page_permissions (GtkWidget *row, gpointer data);
 /* Permissions > Agenti nei canali: agents of other machines in the chats (ns-agents.c) */
 void ns_agents_card (AdwNavigationPage *page, GtkWidget *content);
+
+/* ns-updates.c: Software update with Minerva (its scheduled updates, through `minerva-config updates`); the argv of
+ * GNOME Software's updates, which the page offers and the menu opens without Minerva */
+void ns_page_updates (GtkWidget *row, gpointer data);
+extern const char *const ns_software_updates_argv[];
