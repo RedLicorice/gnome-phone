@@ -738,7 +738,10 @@ main (int argc, char **argv)
   for (int i = 1; i < argc; i++)
     if (g_str_equal (argv[i], "--list-pages"))
       return list_pages ();
-  g_autoptr (AdwApplication) app = adw_application_new ("de.yesman.NeoSettings", G_APPLICATION_HANDLES_COMMAND_LINE);
+  /* CAN_OVERRIDE_APP_ID: a second instance under another id (GLib's --gapplication-app-id), e.g. the web control's
+   * Settings on its Broadway display, so the phone's own Settings is never routed to it */
+  g_autoptr (AdwApplication) app = adw_application_new ("de.yesman.NeoSettings",
+                                                        G_APPLICATION_HANDLES_COMMAND_LINE | G_APPLICATION_CAN_OVERRIDE_APP_ID);
   const GOptionEntry options[] = {
     { "page", 0, 0, G_OPTION_ARG_STRING, NULL, "Open a page: home, wallpaper, wifi, hotspot, bluetooth, power…", "PAGE" },
     { "app", 0, 0, G_OPTION_ARG_STRING, NULL, "Open an app's page (its desktop file id)", "ID" },
