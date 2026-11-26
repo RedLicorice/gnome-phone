@@ -4,6 +4,7 @@
 #include <gst/gst.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/utsname.h>
 
 /* the candidates, best first: the stateful V4L2 hardware encoders (Qualcomm Venus, Samsung MFC, …), VA-API, then
@@ -132,7 +133,10 @@ probe_finish (void)
       answer.hd = TRUE;
     }
   answered = TRUE;
-  save_cache (probe->measures->str);
+  /* only an encoder that works is kept: a run where every candidate failed (a busy boot, a package being
+   * installed) is measured again at the next start instead of leaving the phone without video for good */
+  if (answer.element)
+    save_cache (probe->measures->str);
   g_message ("camera: video encoder %s (720p %s, 1080p %s; %s)", answer.element ? answer.element : "none",
              answer.hd ? "yes" : "no", answer.fhd ? "yes" : "no", probe->measures->str);
   for (guint i = 0; i + 1 < probe->waiters->len; i += 2)
@@ -149,6 +153,7 @@ on_child_done (GObject *object, GAsyncResult *result, gpointer data)
   const char *element = data;
   g_autoptr(GSubprocess) child = G_SUBPROCESS (object);
   g_autofree char *out = NULL;
+  g_autofree char *err = NULL;
   double fhd = 0, hd = 0;
   gboolean ok;
 
@@ -156,11 +161,24 @@ on_child_done (GObject *object, GAsyncResult *result, gpointer data)
     g_source_remove (probe->timeout);
   probe->timeout = 0;
   probe->child = NULL;
-  ok = g_subprocess_communicate_utf8_finish (child, result, &out, NULL, NULL)
+  ok = g_subprocess_communicate_utf8_finish (child, result, &out, &err, NULL)
        && g_subprocess_get_if_exited (child) && g_subprocess_get_exit_status (child) == 0 && out
        && sscanf (out, "%lf %lf", &fhd, &hd) == 2;
   if (out)
     g_strstrip (out);
+  if (!ok)
+    {
+      /* why it failed: how the child ended and the last line it wrote to stderr */
+      const char *last = err ? strrchr (g_strstrip (err), '\n') : NULL;
+
+      if (g_subprocess_get_if_signaled (child))
+        g_message ("camera: the %s probe failed: signal %d: %s", element, g_subprocess_get_term_sig (child),
+                   last ? last + 1 : err && *err ? err : "no output");
+      else
+        g_message ("camera: the %s probe failed: exit status %d: %s", element,
+                   g_subprocess_get_if_exited (child) ? g_subprocess_get_exit_status (child) : -1,
+                   last ? last + 1 : err && *err ? err : "no output");
+    }
   g_string_append_printf (probe->measures, "%s%s %s", probe->measures->len ? ", " : "", element,
                           ok ? out : "failed");
   if (ok && fhd >= CAM_ENCODER_MIN_FPS)
@@ -198,7 +216,7 @@ probe_next (void)
 
       if (!factory)
         continue;
-      child = g_subprocess_new (G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_SILENCE, &error,
+      child = g_subprocess_new (G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE, &error,
                                 "/proc/self/exe", "--probe-encoder", element, NULL);
       if (!child)
         {

@@ -7,8 +7,8 @@
  * child process (`neo-camera --probe-encoder`, so a driver that crashes takes only the child with it), a size that
  * falls short once is measured again (a hardware encoder's first session is slow), and a size counts when it encodes
  * at least CAM_ENCODER_MIN_FPS within twice the bitrate asked for (an encoder that ignores its rate control fills a
- * phone at 150 Mbit/s). The result is kept in the user's cache, keyed by the kernel and GStreamer versions, so it runs
- * once. */
+ * phone at 150 Mbit/s). A result with an encoder is kept in the user's cache, keyed by the kernel and GStreamer
+ * versions, so it runs once; a run where every candidate failed is not kept (measured again at the next start). */
 #pragma once
 
 #include <gio/gio.h>
