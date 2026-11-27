@@ -28,7 +28,7 @@ resources = gnome.compile_resources('ns-resources', 'src/neo-settings.gresource.
 
 executable('neo-settings',
   'src/main.c', 'src/ns-ui.c', 'src/ns-pages.c', 'src/ns-parallax.c', 'src/ns-net.c', 'src/ns-bt.c',
-  'src/ns-sound.c', 'src/ns-apps.c', 'src/ns-shell.c', 'src/ns-fprint.c', 'src/ns-pattern.c', 'src/ns-privacy.c', 'src/ns-system.c', 'src/ns-look.c',
+  'src/ns-sound.c', 'src/ns-apps.c', 'src/ns-shell.c', 'src/ns-fprint.c', 'src/ns-pattern.c', 'src/ns-pattern-pad.c', 'src/ns-privacy.c', 'src/ns-system.c', 'src/ns-look.c',
   'src/ns-minerva.c', 'src/ns-avatar.c', 'src/ns-avatar-preview.c', 'src/ns-voice-enroll.c', 'src/ns-backup.c', 'src/ns-developer.c', 'src/ns-prompt.c', 'src/ns-events.c', 'src/ns-federation.c', 'src/ns-provider.c', 'src/ns-mc.c', 'src/ns-charge.c', 'src/ns-apikeys.c', 'src/ns-account.c', 'src/ns-ssh.c', 'src/ns-perm.c', 'src/ns-agents.c',
   # the node's assistant ({assistant} in a text), read the way Messaging reads it: its sources, not a copy
   '../messaging/src/msg-assistant.c', '../messaging/src/sms-provider.c', '../../common/minerva-layers.c',

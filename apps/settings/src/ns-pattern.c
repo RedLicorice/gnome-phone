@@ -19,6 +19,7 @@
 
 
 #include "ns-pattern.h"
+#include "ns-pattern-pad.h"
 
 #include <adwaita.h>
 #include <math.h>
@@ -28,7 +29,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#define MIN_DOTS 4
 #define MIN_PIN 4
 
 /* the lock screen's PIN pad (extension/bouncer.js), in dp: 3 x 4 squircle keys (|x|^4 + |y|^4, squarer pressed) */
@@ -85,9 +85,6 @@ typedef struct {
   char            seq[10];
   guint           len;
   char            first[128];
-  double          x, y;
-  gboolean        drawing;
-  gboolean        error;
   gboolean        done;
   NsPatternDone   callback;
   gpointer        user_data;
@@ -108,120 +105,6 @@ typedef struct {
   gboolean        checking;
 } PatternDialog;
 
-
-static void
-geometry (GtkWidget *w, double *x0, double *y0, double *cell)
-{
-  double width = gtk_widget_get_width (w), height = gtk_widget_get_height (w);
-  double side = MIN (width, height);
-
-  *cell = side / 3.0;
-  *x0 = (width - side) / 2.0;
-  *y0 = (height - side) / 2.0;
-}
-
-
-static void
-dot_center (GtkWidget *w, guint dot, double *cx, double *cy)
-{
-  double x0, y0, cell;
-
-  geometry (w, &x0, &y0, &cell);
-  *cx = x0 + cell * (dot % 3) + cell / 2.0;
-  *cy = y0 + cell * (dot / 3) + cell / 2.0;
-}
-
-
-static gboolean
-has_dot (PatternDialog *pd, guint dot)
-{
-  for (guint i = 0; i < pd->len; i++) {
-    if (pd->seq[i] == '1' + dot)
-      return TRUE;
-  }
-  return FALSE;
-}
-
-
-static void
-append_dot (PatternDialog *pd, guint dot)
-{
-  if (pd->len >= 9 || has_dot (pd, dot))
-    return;
-  pd->seq[pd->len++] = '1' + dot;
-  pd->seq[pd->len] = '\0';
-}
-
-
-/* as on the lock screen (and Android): a dot passed over on the way joins the pattern first */
-static void
-hit (PatternDialog *pd, double x, double y)
-{
-  double x0, y0, cell;
-
-  geometry (pd->area, &x0, &y0, &cell);
-  for (guint dot = 0; dot < 9; dot++) {
-    double cx, cy;
-
-    dot_center (pd->area, dot, &cx, &cy);
-    if (hypot (x - cx, y - cy) > cell * 0.3 || has_dot (pd, dot))
-      continue;
-    if (pd->len > 0) {
-      guint last = pd->seq[pd->len - 1] - '1';
-      int dr = (int)(dot / 3) - (int)(last / 3), dc = (int)(dot % 3) - (int)(last % 3);
-
-      if (dr % 2 == 0 && dc % 2 == 0)
-        append_dot (pd, last + (dr / 2) * 3 + dc / 2);
-    }
-    append_dot (pd, dot);
-    return;
-  }
-}
-
-
-static void
-draw_func (GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer data)
-{
-  PatternDialog *pd = data;
-  GtkWidget *w = GTK_WIDGET (area);
-  double x0, y0, cell, cx, cy;
-  GdkRGBA fg;
-
-  geometry (w, &x0, &y0, &cell);
-  gtk_widget_get_color (w, &fg);
-  if (pd->len > 0) {
-    if (pd->error)
-      cairo_set_source_rgba (cr, 0.88, 0.11, 0.14, 0.9);
-    else
-      cairo_set_source_rgba (cr, 0.21, 0.52, 0.89, 0.9);
-    cairo_set_line_width (cr, cell * 0.05);
-    cairo_set_line_cap (cr, CAIRO_LINE_CAP_ROUND);
-    cairo_set_line_join (cr, CAIRO_LINE_JOIN_ROUND);
-    for (guint i = 0; i < pd->len; i++) {
-      dot_center (w, pd->seq[i] - '1', &cx, &cy);
-      if (i == 0)
-        cairo_move_to (cr, cx, cy);
-      else
-        cairo_line_to (cr, cx, cy);
-    }
-    if (pd->drawing)
-      cairo_line_to (cr, pd->x, pd->y);
-    cairo_stroke (cr);
-  }
-  for (guint dot = 0; dot < 9; dot++) {
-    gboolean on = has_dot (pd, dot);
-
-    dot_center (w, dot, &cx, &cy);
-    if (on && pd->error)
-      cairo_set_source_rgba (cr, 0.88, 0.11, 0.14, 1.0);
-    else if (on)
-      cairo_set_source_rgba (cr, 0.21, 0.52, 0.89, 1.0);
-    else
-      cairo_set_source_rgba (cr, fg.red, fg.green, fg.blue, 0.85);
-    cairo_arc (cr, cx, cy, cell * (on ? 0.08 : 0.055), 0, 2 * G_PI);
-    cairo_fill (cr);
-  }
-}
 
 
 static gboolean
@@ -276,7 +159,8 @@ set_stage (PatternDialog *pd, Stage stage)
   pd->stage = stage;
   pd->len = 0;
   pd->seq[0] = '\0';
-  pd->error = FALSE;
+  if (NS_IS_PATTERN_PAD (pd->area))
+    ns_pattern_pad_clear (NS_PATTERN_PAD (pd->area));
   gboolean draw = stage == STAGE_CURRENT ? pd->current_is_pattern : !pd->pin;
   gboolean pad = pad_shown (pd);
   gtk_widget_set_visible (pd->area, draw);
@@ -307,57 +191,45 @@ set_stage (PatternDialog *pd, Stage stage)
 }
 
 
+/* the pattern pad, when the pattern library is there (else a note in its place) */
+static NsPatternPad *
+pattern_pad (PatternDialog *pd)
+{
+  return NS_IS_PATTERN_PAD (pd->area) ? NS_PATTERN_PAD (pd->area) : NULL;
+}
+
+
+/* a finger went down on the pad: a new pattern */
 static void
-on_drag_begin (GtkGestureDrag *drag, double x, double y, PatternDialog *pd)
+on_pattern_started (PatternDialog *pd)
 {
   pd->len = 0;
   pd->seq[0] = '\0';
-  pd->error = FALSE;
-  pd->drawing = TRUE;
-  pd->x = x;
-  pd->y = y;
-  /* the touch is the pattern's: the dialog's own drag (a bottom sheet swipes down to close) took it after the
-   * first dot and the pattern ended there */
-  gtk_gesture_set_state (GTK_GESTURE (drag), GTK_EVENT_SEQUENCE_CLAIMED);
   gtk_widget_set_sensitive (pd->next, FALSE);
-  hit (pd, x, y);
-  gtk_widget_queue_draw (pd->area);
 }
 
 
+/* the finger was lifted: the pattern is the pad's digits; a short one (libminerva-pattern's min_dots) is none */
 static void
-on_drag_update (GtkGestureDrag *drag, double dx, double dy, PatternDialog *pd)
+on_pattern_finished (PatternDialog *pd)
 {
-  double sx, sy;
+  NsPatternPad *pad = pattern_pad (pd);
 
-  gtk_gesture_drag_get_start_point (drag, &sx, &sy);
-  pd->x = sx + dx;
-  pd->y = sy + dy;
-  hit (pd, pd->x, pd->y);
-  gtk_widget_queue_draw (pd->area);
-}
-
-
-static void
-on_drag_end (GtkGestureDrag *drag, double dx, double dy, PatternDialog *pd)
-{
-  pd->drawing = FALSE;
-  if (pd->len == 0)
-    return;
+  g_strlcpy (pd->seq, ns_pattern_pad_get_digits (pad), sizeof pd->seq);
+  pd->len = strlen (pd->seq);
   if (pd->stage == STAGE_CURRENT) {
     gtk_widget_set_sensitive (pd->next, TRUE);
-  } else if (pd->len < MIN_DOTS) {
-    pd->error = TRUE;
+  } else if (!ns_pattern_pad_complete (pad)) {
+    ns_pattern_pad_set_error (pad, TRUE);
     gtk_label_set_text (GTK_LABEL (pd->message), "Connect at least 4 dots. Try again.");
   } else if (pd->stage == STAGE_CONFIRM && g_strcmp0 (pd->seq, pd->first) != 0) {
-    pd->error = TRUE;
+    ns_pattern_pad_set_error (pad, TRUE);
     gtk_label_set_text (GTK_LABEL (pd->message), "That was a different pattern. Try again.");
   } else {
     gtk_label_set_text (GTK_LABEL (pd->message),
                         pd->stage == STAGE_DRAW ? "Pattern recorded." : "Pattern confirmed.");
     gtk_widget_set_sensitive (pd->next, TRUE);
   }
-  gtk_widget_queue_draw (pd->area);
 }
 
 
@@ -695,7 +567,8 @@ on_checked (GObject *source, GAsyncResult *res, gpointer data)
     return;
   }
   memset (pd->current, 0, sizeof pd->current);
-  pd->error = TRUE;
+  if (NS_IS_PATTERN_PAD (pd->area))
+    ns_pattern_pad_set_error (NS_PATTERN_PAD (pd->area), TRUE);
   gtk_label_set_text (GTK_LABEL (pd->message), pd->current_is_pattern ? "That is not your current pattern. Try again."
                                                : pd->text_mode         ? "That is not your current password."
                                                                        : "That is not your current PIN.");
@@ -925,7 +798,6 @@ pad_key (PatternDialog *pd, int k)
     pd->typed[pd->typed_len++] = pad_keys[k][0];
     pd->typed[pd->typed_len] = '\0';
   }
-  pd->error = FALSE;
   gtk_widget_queue_draw (pd->dots);
   update_next (pd);
 }
@@ -1024,7 +896,6 @@ present (GtkWidget *parent, gboolean pin, gboolean verify, const char *title, co
 {
   PatternDialog *pd = g_new0 (PatternDialog, 1);
   GtkWidget *box, *buttons, *toolbar, *header;
-  GtkGesture *drag;
 
   pd->refs = 1;
   pd->callback = callback;
@@ -1064,15 +935,17 @@ present (GtkWidget *parent, gboolean pin, gboolean verify, const char *title, co
   gtk_label_set_justify (GTK_LABEL (pd->message), GTK_JUSTIFY_CENTER);
   gtk_box_append (GTK_BOX (box), pd->message);
 
-  pd->area = gtk_drawing_area_new ();
+  /* the pattern: libminerva-pattern's pad (the lock screen's own); without the library a note, no pattern */
+  if (ns_pattern_pad_available ()) {
+    pd->area = ns_pattern_pad_new ();
+    g_signal_connect_swapped (pd->area, "started", G_CALLBACK (on_pattern_started), pd);
+    g_signal_connect_swapped (pd->area, "finished", G_CALLBACK (on_pattern_finished), pd);
+  } else {
+    pd->area = gtk_label_new ("The unlock pattern is not installed (minerva-pattern).");
+    gtk_label_set_wrap (GTK_LABEL (pd->area), TRUE);
+  }
   gtk_widget_set_size_request (pd->area, 260, 260);
   gtk_widget_set_vexpand (pd->area, TRUE);
-  gtk_drawing_area_set_draw_func (GTK_DRAWING_AREA (pd->area), draw_func, pd, NULL);
-  drag = gtk_gesture_drag_new ();
-  g_signal_connect (drag, "drag-begin", G_CALLBACK (on_drag_begin), pd);
-  g_signal_connect (drag, "drag-update", G_CALLBACK (on_drag_update), pd);
-  g_signal_connect (drag, "drag-end", G_CALLBACK (on_drag_end), pd);
-  gtk_widget_add_controller (pd->area, GTK_EVENT_CONTROLLER (drag));
   gtk_box_append (GTK_BOX (box), pd->area);
 
   pd->entry = gtk_password_entry_new ();

@@ -380,6 +380,7 @@ Recommends: accountsservice,
             network-manager,
             gnome-keyring,
             pkexec,
+            minerva-pattern,
 Description: settings app for GNOME Phone
  Neo Settings is One UI's Settings for GNOME Phone: connections (Wi-Fi,
  Bluetooth, mobile network, hotspot), sounds, notifications, display, battery,
