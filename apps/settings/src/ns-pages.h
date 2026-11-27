@@ -95,6 +95,8 @@ void     ns_page_prompt (GtkWidget *row, gpointer data);
 void     ns_prompt_build (GtkWidget *content, GObject *owner, JsonObject *ui);
 /* ns-events.c: Minerva > Eventi (the apps that send events, their channels' levels, the scheduled wake-ups) */
 void ns_page_events (GtkWidget *row, gpointer data);
+/* ns-developer.c: Developer options (Log: Events, Retention; Retries: Services) */
+void ns_page_developer (GtkWidget *row, gpointer data);
 
 /* ns-federation.c: Minerva > Federazione (this phone in the federation, its offers and limits, the Minervas and the
  * devices with their inventories), through `minerva-config federation` */

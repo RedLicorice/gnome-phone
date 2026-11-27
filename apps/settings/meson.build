@@ -11,7 +11,7 @@ gnome = import('gnome')
 cc = meson.get_compiler('c')
 deps = [dependency('gtk4', version: '>= 4.14'), dependency('libadwaita-1', version: '>= 1.5'),
         dependency('json-glib-1.0'), dependency('goa-backend-1.0'), dependency('gio-unix-2.0'), dependency('gmodule-2.0'),
-        dependency('libnm'), dependency('libdrm'), dependency('libpulse-mainloop-glib'),
+        dependency('libnm'), dependency('libsystemd'), dependency('libdrm'), dependency('libpulse-mainloop-glib'),
         # the pattern dialog checks the current password the way the lock screen does
         cc.find_library('pam'), cc.find_library('m', required: false)]
 # the lists scroll the way the launcher's drawer does (gnome-phone's libspongy), where it is installed
@@ -29,7 +29,7 @@ resources = gnome.compile_resources('ns-resources', 'src/neo-settings.gresource.
 executable('neo-settings',
   'src/main.c', 'src/ns-ui.c', 'src/ns-pages.c', 'src/ns-parallax.c', 'src/ns-net.c', 'src/ns-bt.c',
   'src/ns-sound.c', 'src/ns-apps.c', 'src/ns-shell.c', 'src/ns-fprint.c', 'src/ns-pattern.c', 'src/ns-privacy.c', 'src/ns-system.c', 'src/ns-look.c',
-  'src/ns-minerva.c', 'src/ns-avatar.c', 'src/ns-avatar-preview.c', 'src/ns-voice-enroll.c', 'src/ns-backup.c', 'src/ns-prompt.c', 'src/ns-events.c', 'src/ns-federation.c', 'src/ns-provider.c', 'src/ns-mc.c', 'src/ns-charge.c', 'src/ns-apikeys.c', 'src/ns-account.c', 'src/ns-ssh.c', 'src/ns-perm.c', 'src/ns-agents.c',
+  'src/ns-minerva.c', 'src/ns-avatar.c', 'src/ns-avatar-preview.c', 'src/ns-voice-enroll.c', 'src/ns-backup.c', 'src/ns-developer.c', 'src/ns-prompt.c', 'src/ns-events.c', 'src/ns-federation.c', 'src/ns-provider.c', 'src/ns-mc.c', 'src/ns-charge.c', 'src/ns-apikeys.c', 'src/ns-account.c', 'src/ns-ssh.c', 'src/ns-perm.c', 'src/ns-agents.c',
   # the node's assistant ({assistant} in a text), read the way Messaging reads it: its sources, not a copy
   '../messaging/src/msg-assistant.c', '../messaging/src/sms-provider.c', '../../common/minerva-layers.c',
   # a chat's contact opens in the Contacts app through its actions, with the Dialer's helpers (libneo: their snackbar)

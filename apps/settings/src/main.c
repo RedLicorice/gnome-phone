@@ -106,6 +106,10 @@ static const Entry entries[] = {
     "upgrade packages", NULL, software },
   { "help-about-symbolic", "grey", "About phone", "Status • Legal information • Phone name",
     "model kernel version memory storage", ns_page_about },
+  { NULL },
+  { "applications-engineering-symbolic", "orange", "Opzioni sviluppatore", "Registro • Tentativi",
+    "developer options sviluppatore registro log journal eventi events conservazione retention tentativi retries "
+    "riavvii backoff crash", ns_page_developer, NULL, NULL, ns_minerva_available },
 };
 
 static GPtrArray *groups;        /* the cards, to hide the ones a search empties */
@@ -609,6 +613,7 @@ static const struct {
   { "federation", ns_page_federation }, { "federazione", ns_page_federation },
   { "chat", ns_page_messaging }, { "chats", ns_page_messaging },
   { "permissions", ns_page_permissions }, { "agent-permissions", ns_page_permissions },
+  { "developer", ns_page_developer }, { "sviluppatore", ns_page_developer },
 };
 
 /* an entry's id: the primary --page name of its page, NULL when it has none */
