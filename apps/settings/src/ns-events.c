@@ -42,7 +42,7 @@ typedef struct {
   GtkWidget *msg;
 } Decide;
 
-/* one app of the list: the row's own data */
+/* one app of the list: its row (the App is ev->apps', which frees it) */
 typedef struct {
   Ev   *ev;
   App  *app;
@@ -103,10 +103,10 @@ pick_free (Pick *p)
   g_free (p);
 }
 
+/* The row only points at its app: ev->apps owns the apps (and frees them) */
 static void
 app_row_free (AppRow *r)
 {
-  app_free (r->app);
   g_free (r);
 }
 
