@@ -41,6 +41,14 @@ status_text (Bk *b, const char *key)
   return ns_json_str (ns_json_obj (ns_json_obj (b->st, "texts"), "status"), key);
 }
 
+/* a reason in the owner's language when the texts know its id, else as the backup said it */
+static const char *
+reason (Bk *b, const char *id, const char *said)
+{
+  const char *t = ns_json_str (ns_json_obj (ns_json_obj (b->st, "texts"), "reasons"), id ? id : "");
+  return *t ? t : said;
+}
+
 /* a text with {when} (a Unix time in the texts' time_format), {mb}, {n} and {why} filled in */
 static char *
 fill (Bk *b, const char *t, gint64 when, gint64 mb, const char *why)
@@ -116,7 +124,7 @@ show (Bk *b)
                                 : g_strdup (status_text (b, "none_picked"));
   if (!g_strcmp0 (key, "skipped") && picked) {
     g_free (sub);
-    sub = g_strdup (ns_json_str (last, "skipped"));
+    sub = g_strdup (reason (b, ns_json_str (last, "skipped_id"), ns_json_str (last, "skipped")));
   }
   ns_row_set_subtitle (b->state, sub);
   gtk_label_set_text (GTK_LABEL (g_object_get_data (G_OBJECT (b->state), "ns-title-label")), title);
@@ -135,7 +143,7 @@ show (Bk *b)
     JsonObject *r = last_of (b, id);
     g_autofree char *line = NULL;
     if (!avail)
-      line = fill (b, text (b, "unavailable"), 0, 0, ns_json_str (d, "why"));
+      line = fill (b, text (b, "unavailable"), 0, 0, reason (b, ns_json_str (d, "why_id"), ns_json_str (d, "why")));
     else if (r && json_object_get_boolean_member_with_default (r, "ok", FALSE))
       line = fill (b, text (b, "last_ok"), json_object_get_int_member_with_default (r, "at", 0),
                    json_object_get_int_member_with_default (r, "repo_mb", 0), NULL);
