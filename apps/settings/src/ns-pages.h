@@ -48,6 +48,7 @@ void ns_fprint_lock_group (AdwNavigationPage *page, GtkWidget *content);
 void ns_page_privacy (GtkWidget *row, gpointer data);
 void ns_page_location (GtkWidget *row, gpointer data);
 void ns_page_accounts (GtkWidget *row, gpointer data);
+void ns_page_backup (GtkWidget *row, gpointer data);
 void ns_page_accessibility (GtkWidget *row, gpointer data);
 
 /* ns-ssh.c: who may log in over SSH (authorized_keys), the user's own key pairs */

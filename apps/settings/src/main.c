@@ -58,6 +58,9 @@ static const Entry entries[] = {
   { NULL },
   { "avatar-default-symbolic", "blue", "Accounts", "Online accounts • API keys",
     "google nextcloud email api key token provider endpoint llm secret", ns_page_accounts },
+  { "document-save-symbolic", "green", "Backup", "Destinazioni • Ultimo backup",
+    "backup copia restic drive onedrive nextcloud cloud destinazioni federazione", ns_page_backup, NULL, NULL,
+    ns_minerva_available },
   { NULL },
   { "face-smile-symbolic", "purple", "Minerva", "Modello • Voce • Prompt • Budget",   /* the platform's page */
     "ai agent brain cervello llm opencode piper voice voce wakeword prompt budget cost", ns_page_minerva, NULL,
@@ -579,7 +582,7 @@ static const struct {
   { "mouse", ns_page_mouse },
   { "security", ns_page_privacy }, { "privacy", ns_page_privacy },
   { "location", ns_page_location },
-  { "accounts", ns_page_accounts }, { "online-accounts", ns_page_accounts },
+  { "accounts", ns_page_accounts }, { "online-accounts", ns_page_accounts }, { "backup", ns_page_backup },
   { "account", ns_page_account },
   { "applications", ns_page_apps }, { "apps", ns_page_apps }, { "overview", ns_page_apps },
   { "default-apps", ns_page_default_apps },
