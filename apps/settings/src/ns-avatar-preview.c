@@ -66,7 +66,8 @@ typedef struct {
   JsonObject      *conf;       /* the schema's "preview" with the kiosk's "engine" options */
   FaceEngine      *engine;
   FacePainter     *painter;
-  char            *pose;       /* the pose the buttons last chose */
+  char            *pose;       /* the pose the buttons (or the host) last chose */
+  char            *effect;     /* the host's last effect call, replayed on a new Skin */
   double           zoom;
   char            *zoom_key;   /* the owner's widget value of the zoom ("section.key") */
   GCancellable    *cancel;
@@ -106,6 +107,7 @@ preview_free (Preview *p)
   g_clear_object (&p->bus);
   g_clear_pointer (&p->conf, json_object_unref);
   g_free (p->pose);
+  g_free (p->effect);
   g_free (p->zoom_key);
   g_free (p);
 }
@@ -114,13 +116,28 @@ static void on_flushed (gpointer data) { gtk_widget_queue_draw (((Preview *) dat
 static void on_broken (gpointer data) { g_message ("the avatar preview's engine stopped"); }
 
 static void
-call_pose (Preview *p)
+call_json (Preview *p, const char *call)
 {
   if (p->engine == NULL)
     return;
-  g_autofree char *call = g_strdup_printf ("[\"setPose\", \"%s\", \"\"]", p->pose);
   const char *args[] = { call };
   face.host_call (p->engine, "call", 1, args);
+}
+
+static void
+call_pose (Preview *p)
+{
+  g_autoptr (JsonBuilder) b = json_builder_new ();
+  json_builder_begin_array (b);
+  json_builder_add_string_value (b, "setPose");
+  json_builder_add_string_value (b, p->pose);
+  json_builder_add_string_value (b, "");
+  json_builder_end_array (b);
+  g_autoptr (JsonNode) node = json_builder_get_root (b);
+  g_autofree char *call = json_to_string (node, FALSE);
+  call_json (p, call);
+  if (p->effect != NULL)   /* the effect a host asked for outlives a new Skin, as the pose does */
+    call_json (p, p->effect);
 }
 
 /* A new Skin: the engine made again from it, in the schema's profile, in the pose last chosen */
@@ -294,13 +311,14 @@ pose_clicked (GtkButton *b, Preview *p)
   call_pose (p);
 }
 
-GtkWidget *
-ns_avatar_preview_new (JsonObject *conf, const char *lang)
+static GtkWidget *
+preview_new (JsonObject *conf, const char *lang, gboolean poses_strip)
 {
   if (conf == NULL || !face_load ())
     return NULL;
   Preview *p = g_new0 (Preview, 1);
   JsonArray *poses = json_object_has_member (conf, "poses") ? json_object_get_array_member (conf, "poses") : NULL;
+  GtkWidget *strip = NULL;
 
   p->conf = json_object_ref (conf);
   p->cancel = g_cancellable_new ();
@@ -313,28 +331,29 @@ ns_avatar_preview_new (JsonObject *conf, const char *lang)
   gtk_drawing_area_set_draw_func (GTK_DRAWING_AREA (p->area), draw, p, NULL);
   gtk_box_append (GTK_BOX (p->box), p->area);
 
-  /* the poses: a strip that scrolls sideways on a narrow phone */
-  GtkWidget *strip = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
-  for (guint i = 0; poses && i < json_array_get_length (poses); i++) {
+  /* the poses: a strip that scrolls sideways on a narrow phone (none when a host drives the face) */
+  for (guint i = 0; poses_strip && poses && i < json_array_get_length (poses); i++) {
     JsonObject *o = json_array_get_object_element (poses, i);
     JsonObject *label = json_object_get_object_member (o, "label");
     const char *text = label && json_object_has_member (label, lang) ? json_object_get_string_member (label, lang)
                        : str_of (label, "en", str_of (o, "pose", ""));
+    if (i == 0) {
+      GtkWidget *scroll = gtk_scrolled_window_new ();
+      strip = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+      gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll), GTK_POLICY_AUTOMATIC, GTK_POLICY_NEVER);
+      gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scroll), strip);
+      gtk_widget_set_margin_start (scroll, 12);
+      gtk_widget_set_margin_end (scroll, 12);
+      gtk_widget_set_margin_bottom (scroll, 6);
+      gtk_box_append (GTK_BOX (p->box), scroll);
+      p->pose = g_strdup (str_of (o, "pose", ""));
+    }
     GtkWidget *b = gtk_button_new_with_label (text);
     gtk_widget_add_css_class (b, "pill");
     g_object_set_data_full (G_OBJECT (b), "pose", g_strdup (str_of (o, "pose", "")), g_free);
     g_signal_connect (b, "clicked", G_CALLBACK (pose_clicked), p);
     gtk_box_append (GTK_BOX (strip), b);
-    if (i == 0)
-      p->pose = g_strdup (str_of (o, "pose", ""));
   }
-  GtkWidget *scroll = gtk_scrolled_window_new ();
-  gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll), GTK_POLICY_AUTOMATIC, GTK_POLICY_NEVER);
-  gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scroll), strip);
-  gtk_widget_set_margin_start (scroll, 12);
-  gtk_widget_set_margin_end (scroll, 12);
-  gtk_widget_set_margin_bottom (scroll, 6);
-  gtk_box_append (GTK_BOX (p->box), scroll);
   if (p->pose == NULL)
     p->pose = g_strdup ("");
 
@@ -353,6 +372,51 @@ ns_avatar_preview_new (JsonObject *conf, const char *lang)
   return p->box;
 }
 
+GtkWidget *
+ns_avatar_preview_new (JsonObject *conf, const char *lang)
+{
+  return preview_new (conf, lang, TRUE);
+}
+
+GtkWidget *
+ns_avatar_preview_new_bare (JsonObject *conf)
+{
+  return preview_new (conf, "en", FALSE);
+}
+
+void
+ns_avatar_preview_set_pose (GtkWidget *preview, const char *pose, const char *effect)
+{
+  Preview *p = preview ? g_object_get_data (G_OBJECT (preview), "ns-preview") : NULL;
+  if (p == NULL)
+    return;
+  g_free (p->pose);
+  p->pose = g_strdup (pose ? pose : "");
+  g_clear_pointer (&p->effect, g_free);
+  g_autoptr (JsonBuilder) b = json_builder_new ();
+  json_builder_begin_array (b);
+  json_builder_add_string_value (b, "effect");
+  if (effect && *effect)
+    json_builder_add_string_value (b, effect);
+  else
+    json_builder_add_null_value (b);
+  json_builder_end_array (b);
+  g_autoptr (JsonNode) node = json_builder_get_root (b);
+  p->effect = json_to_string (node, FALSE);
+  call_pose (p);
+}
+
+void
+ns_avatar_preview_level (GtkWidget *preview, double level)
+{
+  Preview *p = preview ? g_object_get_data (G_OBJECT (preview), "ns-preview") : NULL;
+  if (p == NULL)
+    return;
+  char num[G_ASCII_DTOSTR_BUF_SIZE];
+  g_autofree char *call = g_strdup_printf ("[\"level\", %s]", g_ascii_dtostr (num, sizeof num, CLAMP (level, 0, 1)));
+  call_json (p, call);
+}
+
 #else
 
 GtkWidget *
@@ -360,5 +424,14 @@ ns_avatar_preview_new (JsonObject *conf, const char *lang)
 {
   return NULL;   /* built without libminerva-face's headers: no preview */
 }
+
+GtkWidget *
+ns_avatar_preview_new_bare (JsonObject *conf)
+{
+  return NULL;
+}
+
+void ns_avatar_preview_set_pose (GtkWidget *preview, const char *pose, const char *effect) {}
+void ns_avatar_preview_level (GtkWidget *preview, double level) {}
 
 #endif

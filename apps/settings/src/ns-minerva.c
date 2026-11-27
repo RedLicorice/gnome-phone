@@ -7,6 +7,7 @@
 #include "ns-pages.h"
 #include "ns-mc.h"
 #include "ns-ui.h"
+#include "ns-voice-enroll.h"
 
 #include <json-glib/json-glib.h>
 
@@ -743,8 +744,9 @@ sw_toggled (GtkWidget *sw, GParamSpec *pspec, gpointer data)
 /* ---- the owner's voiceprint (speaker check of the wake word): a state row and its buttons, all texts from the data ---- */
 
 typedef struct {
-  Mn    *m;
-  GStrv  args;
+  Mn         *m;
+  GStrv       args;
+  JsonObject *dialog;   /* the enrollment dialog's data, for an action that opens it ("dialog": true) */
 } VpAction;
 
 static void
@@ -759,10 +761,27 @@ vp_action_done (Mn *m, JsonObject *root, const char *err, gpointer data)
   mn_refresh (m);
 }
 
+/* the dialog closed: the voiceprint's row says the new state (the page is kept alive while the dialog is open) */
+static void
+vp_dialog_done (gpointer data)
+{
+  AdwNavigationPage *page = data;
+  Mn *m = g_object_get_data (G_OBJECT (page), "mn");
+  if (m == NULL)
+    m = g_object_get_data (G_OBJECT (page), "mn-embed");
+  if (m != NULL)
+    mn_refresh (m);
+  g_object_unref (page);
+}
+
 static void
 vp_action_run (GtkWidget *row, gpointer data)
 {
   VpAction *a = data;
+  if (a->dialog) {
+    ns_voice_enroll_open (GTK_WIDGET (a->m->page), a->dialog, vp_dialog_done, g_object_ref (a->m->page));
+    return;
+  }
   mn_run (a->m, (const char *const *) a->args, vp_action_done, NULL);
 }
 
@@ -770,6 +789,7 @@ static void
 vp_action_free (VpAction *a)
 {
   g_strfreev (a->args);
+  g_clear_pointer (&a->dialog, json_object_unref);
   g_free (a);
 }
 
@@ -794,6 +814,8 @@ build_voiceprint (Mn *m, GtkWidget *grp, JsonObject *vp)
     VpAction *a = g_new0 (VpAction, 1);
     a->m = m;
     a->args = g_strdupv ((char **) v->pdata);
+    if (json_object_get_boolean_member_with_default (o, "dialog", FALSE) && obj_of (vp, "dialog"))
+      a->dialog = json_object_ref (obj_of (vp, "dialog"));
     GtkWidget *row = ns_row_button (grp, str_of (o, "label"), json_object_get_boolean_member_with_default (o, "destructive", FALSE),
                                     vp_action_run, a);
     g_object_set_data_full (G_OBJECT (row), "mn-vp-action", a, (GDestroyNotify) vp_action_free);
