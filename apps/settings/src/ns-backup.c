@@ -1,6 +1,6 @@
-/* Settings > Backup: where this node's backup goes. The destinations are the federation phone that keeps backups
- * and every account linked in Accounts whose provider Minerva's backup knows; the owner picks one or more, and every
- * run goes to all the picked ones. Everything comes from `minerva-config backup status --json` (Minerva's
+/* Settings > Backup: where this node's backup goes. The destinations are the accounts linked in Accounts whose
+ * provider Minerva's backup knows (phones never keep backups); the owner picks one or more, and every run goes to all
+ * the picked ones. Everything comes from `minerva-config backup status --json` (Minerva's
  * config/minerva_config/backup.py: texts, destinations, the last run); a pick is `backup choose ID...`, "run now"
  * is `backup now`. The page keeps no state of its own. */
 #include "ns-pages.h"
@@ -136,9 +136,8 @@ show (Bk *b)
   for (guint i = 0; ds && i < json_array_get_length (ds); i++) {
     JsonObject *d = json_array_get_object_element (ds, i);
     const char *id = ns_json_str (d, "id"), *label = ns_json_str (d, "label");
-    gboolean peer = g_str_equal (id, "peer"), avail = json_object_get_boolean_member_with_default (d, "available", FALSE);
-    g_autofree char *name = peer && *label ? g_strdup_printf ("%s • %s", label, text (b, "peer"))
-                            : g_strdup (*label ? label : peer ? text (b, "peer") : id);
+    gboolean avail = json_object_get_boolean_member_with_default (d, "available", FALSE);
+    const char *name = *label ? label : id;
     g_autoptr (GString) s = g_string_new (ns_json_str (d, "account"));
     JsonObject *r = last_of (b, id);
     g_autofree char *line = NULL;
@@ -152,8 +151,7 @@ show (Bk *b)
                    ns_json_str (r, "error"));
     if (line)
       g_string_append_printf (s, "%s%s", s->len ? " • " : "", line);
-    GtkWidget *row = ns_row (b->dests, peer ? "phone-symbolic" : "folder-remote-symbolic", peer ? "purple" : "blue",
-                             name, s->str);
+    GtkWidget *row = ns_row (b->dests, "folder-remote-symbolic", "blue", name, s->str);
     GtkWidget *c = gtk_check_button_new ();
     gtk_check_button_set_active (GTK_CHECK_BUTTON (c), json_object_get_boolean_member_with_default (d, "picked", FALSE));
     gtk_widget_set_valign (c, GTK_ALIGN_CENTER);
@@ -164,6 +162,8 @@ show (Bk *b)
     g_ptr_array_add (b->checks, c);
   }
   b->syncing = FALSE;
+  if (!ds || json_array_get_length (ds) == 0)   /* nothing to pick yet: where the destinations come from */
+    ns_row (b->dests, NULL, NULL, text (b, "empty"), NULL);
 }
 
 static void open_accounts (GtkWidget *row, gpointer data) { ns_page_accounts (row, NULL); }
