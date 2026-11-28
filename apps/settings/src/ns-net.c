@@ -1726,3 +1726,33 @@ ns_page_printers (GtkWidget *row, gpointer data)
   printers_fill (page);
   ns_push (page);
 }
+
+/* ---- For the first run setup (ns-setup.c): the phone's address, and a page that follows it ---- */
+
+char *
+ns_net_primary_ipv4 (void)
+{
+  if (!client)
+    return NULL;
+  NMActiveConnection *ac = nm_client_get_primary_connection (client);
+  NMIPConfig *ip = ac ? nm_active_connection_get_ip4_config (ac) : NULL;
+  GPtrArray *addrs = ip ? nm_ip_config_get_addresses (ip) : NULL;
+  if (!addrs || addrs->len == 0)
+    return NULL;
+  return g_strdup (nm_ip_address_get_address (g_ptr_array_index (addrs, 0)));
+}
+
+static void
+follow_fill (AdwNavigationPage *page)
+{
+  g_signal_connect_object (client, "notify::" NM_CLIENT_PRIMARY_CONNECTION, G_CALLBACK (ns_later), page,
+                           G_CONNECT_SWAPPED);
+  g_signal_connect_object (client, "notify::" NM_CLIENT_CONNECTIVITY, G_CALLBACK (ns_later), page, G_CONNECT_SWAPPED);
+  ns_later (page);
+}
+
+void
+ns_net_follow (AdwNavigationPage *page)
+{
+  with_client (page, follow_fill);
+}

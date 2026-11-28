@@ -5,6 +5,7 @@
 #include "ns-bt.h"
 #include "ns-look.h"
 #include "ns-net.h"
+#include "ns-setup.h"
 #include "ns-pages.h"
 #include "ns-mc.h"
 #include "ns-sound.h"
@@ -716,6 +717,10 @@ command_line (GApplication *app, GApplicationCommandLine *cl, gpointer data)
   GVariantDict *opts = g_application_command_line_get_options_dict (cl);
   g_variant_dict_lookup (opts, "page", "&s", &name);
   g_variant_dict_lookup (opts, "app", "&s", &id);
+  if (g_variant_dict_contains (opts, "setup")) {
+    ns_setup_open (GTK_APPLICATION (app));
+    return 0;
+  }
   if (id && !name)
     name = "applications";
   if (name)
@@ -745,6 +750,7 @@ main (int argc, char **argv)
     { "page", 0, 0, G_OPTION_ARG_STRING, NULL, "Open a page: home, wallpaper, wifi, hotspot, bluetooth, power…", "PAGE" },
     { "app", 0, 0, G_OPTION_ARG_STRING, NULL, "Open an app's page (its desktop file id)", "ID" },
     { "list-pages", 0, 0, G_OPTION_ARG_NONE, NULL, "Print the pages as JSON and exit (handled before the app)", NULL },
+    { "setup", 0, 0, G_OPTION_ARG_NONE, NULL, "The first run setup: the owner's contact, the PIN, the Wi-Fi, the address to open on the PC", NULL },
     { NULL }
   };
   g_application_add_main_option_entries (G_APPLICATION (app), options);
